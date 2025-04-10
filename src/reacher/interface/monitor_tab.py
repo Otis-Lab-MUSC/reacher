@@ -1,3 +1,7 @@
+from __future__ import annotations 
+import matplotlib
+from matplotlib import pyplot as plt
+matplotlib.use('QtAgg') 
 import panel as pn
 import os
 import sys
@@ -7,15 +11,14 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 from typing import Optional, Any
-from .dashboard import Dashboard
-from .program_tab import ProgramTab
-from .hardware_tab import HardwareTab
 from reacher.kernel import REACHER
+from reacher.interface import Dashboard
 
 class MonitorTab(Dashboard):
     """A class to manage the Monitor tab UI for real-time experiment monitoring, inheriting from Dashboard."""
 
-    def __init__(self, reacher: REACHER) -> None:
+    def __init__(self, reacher: REACHER, program_tab: Any, hardware_tab: Any) -> None:
+        from reacher.interface import ProgramTab, HardwareTab
         """Initialize the MonitorTab with inherited Dashboard components and tab-specific UI.
 
         **Description:**
@@ -44,8 +47,8 @@ class MonitorTab(Dashboard):
         self.download_button: pn.widgets.Button = pn.widgets.Button(name="Export data", icon="download")
         self.download_button.on_click(self.download)
         self.periodic_callback: Optional[Any] = None
-        self.program_tab: ProgramTab = None
-        self.hardware_tab: HardwareTab = None
+        self.program_tab: ProgramTab = program_tab
+        self.hardware_tab: HardwareTab = hardware_tab
 
     def fetch_data(self) -> pd.DataFrame:
         """Fetch behavioral data from the REACHER instance.

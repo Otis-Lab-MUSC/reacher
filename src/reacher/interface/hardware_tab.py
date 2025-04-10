@@ -1,7 +1,7 @@
 import panel as pn
 import matplotlib
 from matplotlib import pyplot as plt
-matplotlib.use("Agg")
+matplotlib.use('QtAgg') 
 import numpy as np
 from typing import List, Any, Dict
 from .dashboard import Dashboard

@@ -1,6 +1,6 @@
 import panel as pn
 from typing import Any, Optional
-from reacher.kernel.reacher import REACHER
+from reacher.kernel import REACHER
 import time
 
 class Dashboard:

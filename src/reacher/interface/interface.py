@@ -22,7 +22,7 @@ class Interface(Dashboard):
         self.home_tab = HomeTab(self.reacher)
         self.program_tab = ProgramTab(self.reacher)
         self.hardware_tab = HardwareTab(self.reacher)
-        self.monitor_tab = MonitorTab(self.reacher)
+        self.monitor_tab = MonitorTab(reacher=self.reacher, program_tab=self.program_tab, hardware_tab=self.hardware_tab)
         self.schedule_tab = ScheduleTab(self.reacher)
         self.dashboard = pn.Tabs(
             ("Home", self.home_tab.layout()),
