@@ -6,7 +6,7 @@ from reacher.kernel import REACHER
 class ProgramTab(Dashboard):
     """A class to manage the Program tab UI for configuring REACHER experiments, inheriting from Dashboard."""
 
-    def __init__(self, reacher: REACHER) -> None:
+    def __init__(self, reacher: REACHER, response_textarea: pn.pane.HTML) -> None:
         """Initialize the ProgramTab with inherited Dashboard components and tab-specific UI.
 
         **Description:**
@@ -15,6 +15,7 @@ class ProgramTab(Dashboard):
         """
         super().__init__()
         self.reacher = reacher
+        self.response_textarea = response_textarea
         self.hardware_checkbuttongroup: pn.widgets.CheckButtonGroup = pn.widgets.CheckButtonGroup(
             name="Select hardware to use:",
             options=["LH Lever", "RH Lever", "Cue", "Pump", "Lick Circuit", "Laser", "Imaging Microscope"],

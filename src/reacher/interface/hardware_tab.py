@@ -10,7 +10,7 @@ from reacher.kernel import REACHER
 class HardwareTab(Dashboard):
     """A class to manage the Hardware tab UI for controlling REACHER hardware, inheriting from Dashboard."""
 
-    def __init__(self, reacher: REACHER) -> None:
+    def __init__(self, reacher: REACHER, response_textarea: pn.pane.HTML) -> None:
         """Initialize the HardwareTab with inherited Dashboard components and tab-specific UI.
 
         **Description:**
@@ -19,6 +19,7 @@ class HardwareTab(Dashboard):
         """
         super().__init__()
         self.reacher = reacher
+        self.response_textarea = response_textarea 
         self.hardware_components: Dict[str, callable] = {
             "LH Lever": self.arm_lh_lever,
             "RH Lever": self.arm_rh_lever,

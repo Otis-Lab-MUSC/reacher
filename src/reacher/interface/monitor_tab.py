@@ -17,7 +17,7 @@ from reacher.interface import Dashboard
 class MonitorTab(Dashboard):
     """A class to manage the Monitor tab UI for real-time experiment monitoring, inheriting from Dashboard."""
 
-    def __init__(self, reacher: REACHER, program_tab: Any, hardware_tab: Any) -> None:
+    def __init__(self, reacher: REACHER, program_tab: Any, hardware_tab: Any, response_textarea: pn.pane.HTML, header: pn.pane.Alert) -> None:
         from reacher.interface import ProgramTab, HardwareTab
         """Initialize the MonitorTab with inherited Dashboard components and tab-specific UI.
 
@@ -30,6 +30,8 @@ class MonitorTab(Dashboard):
         """
         super().__init__()
         self.reacher = reacher
+        self.response_textarea = response_textarea
+        self.header = header
         assets_dir = os.path.join(sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.dirname(__file__), '../assets')
         self.img_path: str = os.path.join(assets_dir, 'mouse_still.jpg')
         self.gif_path: str = os.path.join(assets_dir, 'mouse.gif')

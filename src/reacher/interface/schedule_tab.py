@@ -6,7 +6,7 @@ from reacher.kernel import REACHER
 class ScheduleTab(Dashboard):
     """A class to manage the Schedule tab UI for configuring REACHER schedules, inheriting from Dashboard."""
 
-    def __init__(self, reacher: REACHER) -> None:
+    def __init__(self, reacher: REACHER, response_textarea: pn.pane.HTML) -> None:
         """Initialize the ScheduleTab with inherited Dashboard components and tab-specific UI.
 
         **Description:**
@@ -15,6 +15,7 @@ class ScheduleTab(Dashboard):
         """
         super().__init__()
         self.reacher = reacher
+        self.response_textarea = response_textarea
         self.timeout_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(name="Timeout Duration(s)", value=20, start=0, end=600, step=5)
         self.send_timeout_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
         self.send_timeout_button.on_click(self.send_timeout)

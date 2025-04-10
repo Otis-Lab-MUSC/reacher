@@ -4,34 +4,31 @@ from .dashboard import Dashboard
 from reacher.kernel import REACHER
 
 class HomeTab(Dashboard):
-    """A class to manage the Home tab UI for REACHER experiments, inheriting from Dashboard."""
+    """A class to manage the Home tab UI for REACHER experiments."""
 
-    def __init__(self, reacher: REACHER) -> None:
-        """Initialize the HomeTab with inherited Dashboard components and tab-specific UI.
+    def __init__(self, reacher: REACHER, response_textarea: pn.pane.HTML) -> None:
+        """Initialize the HomeTab with REACHER and shared response_textarea.
 
         **Description:**
-        - Extends Dashboard to provide controls for microcontroller connections.
-        - Sets up buttons and a menu for COM port management.
+        - Provides controls for microcontroller connections.
+        - Uses the shared response_textarea for output.
+
+        **Args:**
+        - `reacher (REACHER)`: The REACHER instance.
+        - `response_textarea (pn.pane.HTML)`: The shared response terminal pane.
         """
-        super().__init__()
-        self.reacher = reacher
-        self.search_microcontrollers_button: pn.widgets.Button = pn.widgets.Button(name="Search Microcontrollers", icon="search")
+        super().__init__(reacher=reacher)
+        self.response_textarea = response_textarea
+        self.search_microcontrollers_button = pn.widgets.Button(name="Search Microcontrollers", icon="search")
         self.search_microcontrollers_button.on_click(self.search_for_microcontrollers)
-        self.microcontroller_menu: pn.widgets.Select = pn.widgets.Select(name="Microcontroller", options=[])
-        self.serial_connect_button: pn.widgets.Button = pn.widgets.Button(name="Connect", icon="plug")
+        self.microcontroller_menu = pn.widgets.Select(name="Microcontroller", options=[])
+        self.serial_connect_button = pn.widgets.Button(name="Connect", icon="plug")
         self.serial_connect_button.on_click(self.connect_to_microcontroller)
-        self.serial_disconnect_button: pn.widgets.Button = pn.widgets.Button(name="Disconnect")
+        self.serial_disconnect_button = pn.widgets.Button(name="Disconnect")
         self.serial_disconnect_button.on_click(self.disconnect_from_microcontroller)
 
     def search_for_microcontrollers(self, _: Any) -> None:
-        """Search for available microcontrollers and update the menu.
-
-        **Description:**
-        - Scans for available COM ports and populates the microcontroller menu.
-
-        **Args:**
-        - `_ (Any)`: Unused event argument.
-        """
+        """Search for available microcontrollers and update the menu."""
         self.add_response("Searching for microcontrollers...")
         available_ports = self.reacher.get_COM_ports()
         if available_ports and "No available ports" not in available_ports:
@@ -41,11 +38,7 @@ class HomeTab(Dashboard):
             self.add_response("No valid COM ports found. Please connect a device and try again.")
 
     def set_COM(self) -> None:
-        """Set the selected COM port for the REACHER instance.
-
-        **Description:**
-        - Configures the REACHER instance to use the selected COM port.
-        """
+        """Set the selected COM port for the REACHER instance."""
         try:
             self.reacher.set_COM_port(self.microcontroller_menu.value)
             self.add_response(f"Set COM port to {self.microcontroller_menu.value}")
@@ -53,14 +46,7 @@ class HomeTab(Dashboard):
             self.add_error("Exception caught while setting COM port", str(e))
 
     def connect_to_microcontroller(self, _: Any) -> None:
-        """Connect to the selected microcontroller.
-
-        **Description:**
-        - Opens a serial connection to the selected COM port.
-
-        **Args:**
-        - `_ (Any)`: Unused event argument.
-        """
+        """Connect to the selected microcontroller."""
         try:
             self.set_COM()
             self.reacher.open_serial()
@@ -69,14 +55,7 @@ class HomeTab(Dashboard):
             self.add_error(f"Failed to connect to {self.microcontroller_menu.value}", str(e))
 
     def disconnect_from_microcontroller(self, _: Any) -> None:
-        """Disconnect from the microcontroller.
-
-        **Description:**
-        - Closes the serial connection to the microcontroller.
-
-        **Args:**
-        - `_ (Any)`: Unused event argument.
-        """
+        """Disconnect from the microcontroller."""
         try:
             self.reacher.close_serial()
             self.add_response("Closed serial connection")
@@ -84,23 +63,12 @@ class HomeTab(Dashboard):
             self.add_error(f"Failed to disconnect from {self.microcontroller_menu.value}", str(e))
 
     def reset(self) -> None:
-        """Reset the HomeTab to its initial state.
-
-        **Description:**
-        - Clears the microcontroller menu options.
-        """
+        """Reset the HomeTab to its initial state."""
         self.add_response("Resetting home tab")
         self.microcontroller_menu.options = []
 
     def layout(self) -> pn.Column:
-        """Construct the layout for the HomeTab.
-
-        **Description:**
-        - Builds the tab-specific UI with COM port selection and connection controls.
-
-        **Returns:**
-        - `pn.Column`: The HomeTab layout.
-        """
+        """Construct the layout for the HomeTab."""
         microcontroller_layout = pn.Column(
             pn.pane.Markdown("### COM Connection"),
             self.microcontroller_menu,
