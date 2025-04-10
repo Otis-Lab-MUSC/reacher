@@ -1,5 +1,5 @@
 <div align="center">
-    <img src="build/lib/reacher/assets/reacher-icon-banner.png" alt="REACHER logo">
+    <img src="src/reacher/assets/reacher-icon-banner.png" alt="REACHER logo">
 </div>
 <br>
 <br>
