@@ -5,7 +5,7 @@ matplotlib.use("Agg")
 import numpy as np
 from typing import List, Any, Dict
 from .dashboard import Dashboard
-from reacher.core import REACHER
+from reacher.kernel import REACHER
 
 class HardwareTab(Dashboard):
     """A class to manage the Hardware tab UI for controlling REACHER hardware, inheriting from Dashboard."""

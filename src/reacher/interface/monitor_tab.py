@@ -10,7 +10,7 @@ from typing import Optional, Any
 from .dashboard import Dashboard
 from .program_tab import ProgramTab
 from .hardware_tab import HardwareTab
-from reacher.core import REACHER
+from reacher.kernel import REACHER
 
 class MonitorTab(Dashboard):
     """A class to manage the Monitor tab UI for real-time experiment monitoring, inheriting from Dashboard."""

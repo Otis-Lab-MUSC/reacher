@@ -1,7 +1,7 @@
 import panel as pn
 from typing import List, Any, Dict
 from .dashboard import Dashboard
-from reacher.core import REACHER
+from reacher.kernel import REACHER
 
 class ProgramTab(Dashboard):
     """A class to manage the Program tab UI for configuring REACHER experiments, inheriting from Dashboard."""

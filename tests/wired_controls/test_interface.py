@@ -1,12 +1,12 @@
 import pytest
 import panel as pn
-from reacher.wired_controls.interface import Interface
-from reacher.wired_controls.home_tab import HomeTab
-from reacher.wired_controls.program_tab import ProgramTab
-from reacher.wired_controls.hardware_tab import HardwareTab
-from reacher.wired_controls.monitor_tab import MonitorTab
-from reacher.wired_controls.schedule_tab import ScheduleTab
-from reacher.core import REACHER
+from reacher.interface.interface import Interface
+from reacher.interface.home_tab import HomeTab
+from reacher.interface.program_tab import ProgramTab
+from reacher.interface.hardware_tab import HardwareTab
+from reacher.interface.monitor_tab import MonitorTab
+from reacher.interface.schedule_tab import ScheduleTab
+from reacher.kernel import REACHER
 from unittest.mock import Mock, patch
 
 # Fixture to mock REACHER

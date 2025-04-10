@@ -6,7 +6,7 @@ import time
 import csv
 import json
 import os
-from src.reacher.core.reacher import REACHER, logger
+from src.reacher.kernel.reacher import REACHER, logger
 from unittest.mock import Mock, patch, call
 
 @pytest.fixture

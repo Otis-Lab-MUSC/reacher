@@ -1,7 +1,7 @@
 import panel as pn
 from typing import Any
 from .dashboard import Dashboard
-from reacher.core import REACHER
+from reacher.kernel import REACHER
 
 class ScheduleTab(Dashboard):
     """A class to manage the Schedule tab UI for configuring REACHER schedules, inheriting from Dashboard."""

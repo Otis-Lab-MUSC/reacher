@@ -1,7 +1,7 @@
 import pytest
 import panel as pn
 import time
-from reacher.wired_controls.dashboard import Dashboard  # Adjust if path differs
+from reacher.interface.dashboard import Dashboard  # Adjust if path differs
 from unittest.mock import Mock, patch
 
 # Fixture to mock REACHER

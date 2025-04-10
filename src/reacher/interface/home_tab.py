@@ -1,7 +1,7 @@
 import panel as pn
 from typing import Any
 from .dashboard import Dashboard
-from reacher.core import REACHER
+from reacher.kernel import REACHER
 
 class HomeTab(Dashboard):
     """A class to manage the Home tab UI for REACHER experiments, inheriting from Dashboard."""

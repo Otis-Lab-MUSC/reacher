@@ -1,6 +1,6 @@
 import pytest
 import panel as pn
-from reacher.wired_controls.home_tab import HomeTab
+from reacher.interface.home_tab import HomeTab
 from unittest.mock import Mock, patch
 
 # Fixture to mock REACHER

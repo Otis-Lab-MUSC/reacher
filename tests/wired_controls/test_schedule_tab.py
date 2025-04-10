@@ -1,6 +1,6 @@
 import pytest
 import panel as pn
-from reacher.wired_controls.schedule_tab import ScheduleTab
+from reacher.interface.schedule_tab import ScheduleTab
 from unittest.mock import Mock, patch
 
 # Fixture to mock REACHER

@@ -5,7 +5,7 @@ from .program_tab import ProgramTab
 from .hardware_tab import HardwareTab
 from .monitor_tab import MonitorTab
 from .schedule_tab import ScheduleTab
-from reacher.core import REACHER
+from reacher.kernel import REACHER
 
 class Interface(Dashboard):
     """A class to instantiate and manage all REACHER dashboard tabs."""

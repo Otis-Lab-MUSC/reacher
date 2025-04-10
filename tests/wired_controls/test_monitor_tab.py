@@ -2,7 +2,7 @@ import pytest
 import panel as pn
 import pandas as pd
 import plotly.graph_objects as go
-from reacher.wired_controls.monitor_tab import MonitorTab
+from reacher.interface.monitor_tab import MonitorTab
 from unittest.mock import Mock, patch
 
 @pytest.fixture

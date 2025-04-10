@@ -2,7 +2,7 @@ import pytest
 import panel as pn
 import matplotlib.pyplot as plt
 import numpy as np
-from reacher.wired_controls.hardware_tab import HardwareTab
+from reacher.interface.hardware_tab import HardwareTab
 from unittest.mock import Mock, patch
 
 @pytest.fixture
