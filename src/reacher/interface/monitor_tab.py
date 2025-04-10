@@ -32,7 +32,7 @@ class MonitorTab(Dashboard):
         self.reacher = reacher
         self.response_textarea = response_textarea
         self.header = header
-        assets_dir = os.path.join(sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.dirname(__file__), '../assets')
+        assets_dir = os.path.join(sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.dirname(__file__), 'assets')
         self.img_path: str = os.path.join(assets_dir, 'mouse_still.jpg')
         self.gif_path: str = os.path.join(assets_dir, 'mouse.gif')
         self.animation_image: pn.pane.Image = pn.pane.Image(self.img_path, width=200)
