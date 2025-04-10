@@ -24,7 +24,7 @@ setup(
     description="A package necessary to run the REACHER Suite protocols.",
     long_description=open("README.md", encoding="utf-8").read() if os.path.exists("README.md") else "",
     long_description_content_type="text/markdown",
-    url="https://github.com/Otis-Lab-MUSC/REACHER-Suite",  # Update to your repo URL
+    url="https://github.com/Otis-Lab-MUSC/REACHER",
     license="MIT",
     classifiers=[
         "Development Status :: 3 - Alpha",
