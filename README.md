@@ -1,12 +1,16 @@
 <div align="center">
     <img src="src/reacher/assets/reacher-icon-banner.png" alt="REACHER logo">
 </div>
-<br>
+
 <br>
 
-[![Download REACHER](https://img.shields.io/badge/Download-REACHER-cyan?style=for-the-badge)](#download-options)
+*Written by*: Joshua Boquiren
 
-*Written by*: Joshua Boquiren ([*@thejoshbq*](https://github.com/thejoshbq/thejoshbq/))
+[![](https://img.shields.io/badge/@thejoshbq-grey?style=for-the-badge&logo=github)](https://github.com/thejoshbq) [![](https://img.shields.io/badge/@thejoshbq-grey?style=for-the-badge&logo=X)](https://x.com/thejoshbq)
+
+<br>
+
+---
 
 ## Overview
 
@@ -14,9 +18,40 @@ The **REACHER** (Rodent Experiment Application Controls and Handling Ecosystem f
 
 ---
 
-#### **Key Features:**
+## Installation
+
+To install the latest version of REACHER, download the wheel file and install it using `pip`. Choose one of the following methods:
+
+### Using `curl`
+```python
+curl -L -o reacher-1.0.1-py3-none-any.whl https://github.com/Otis-Lab-MUSC/REACHER/releases/download/v1.0.1-beta/reacher-1.0.1-py3-none-any.whl
+python -m pip install reacher-1.0.1-py3-none-any.whl
+```
+### Using `wget`
+```python
+wget https://github.com/Otis-Lab-MUSC/REACHER/releases/download/v1.0.1-beta/reacher-1.0.1-py3-none-any.whl
+python -m pip install reacher-1.0.1-py3-none-any.whl
+```
+
+### Notes
+
+- Ensure you have Python 3 installed.
+- Run the commands in a terminal or command prompt.
+- Install to a virtual environment (optional).
+- Delete the .whl file after installation to clean up (optional).
+
+---
+
+## **Technical Highlights**
+
+### **Data Visualization and Monitoring**
+- Real-time event tracking using `Plotly` for clear and interactive visualizations.
+- Tabular summaries of behavioral data for detailed analysis.
+
+### **Key Features**
+
 1. **Serial Data Handling**:
-   - Two-threaded system for serial communication:
+   - Multi-threaded system for serial communication:
      - One thread reads data from the microcontroller and queues it.
      - Another processes the queued data, ensuring no data loss.
    - String-based communication for easy debugging and logging.
@@ -32,14 +67,6 @@ The **REACHER** (Rodent Experiment Application Controls and Handling Ecosystem f
 
 ---
 
-## **Technical Highlights**
-
-### **Data Visualization and Monitoring**
-- Real-time event tracking using `Plotly` for clear and interactive visualizations.
-- Tabular summaries of behavioral data for detailed analysis.
-
-<br>
-
 ## **Recommended Specifications**
 
 | **Component** | **Minimum Specs** | **Recommended Specs** | **High-Performance Specs** |
@@ -51,14 +78,12 @@ The **REACHER** (Rodent Experiment Application Controls and Handling Ecosystem f
 | **Cooling**           | Basic air cooling                       | Efficient air cooling or entry-level liquid cooling | High-end liquid cooling                 |
 | **GPU (Optional)**    | Integrated graphics                     | Mid-range GPU (e.g., NVIDIA GTX 1660)   | High-end GPU (e.g., NVIDIA RTX 3080)    |
 
----
-
 <br><br>
 <div align="center">
   <h2>Copyright & License</h2>
-  <p>© 2025 Otis Lab. All rights reserved.</p>
+  <p>© 2025 <a href="http://www.otis-lab.org">Otis Lab</a>. All rights reserved.</p>
   <p>This project is licensed under the <a href=""><strong>LICENSE</strong></a>.</p>
-  <p>For more information, please visit the official <a href=""><strong>documentation repository</strong></a>, or contact the author at <a href="mailto:thejoshbq@proton.me"><i>thejoshbq@proton.me</i></a>
+  <p>For more information, please contact the author at <a href="mailto:thejoshbq@proton.me"><i>thejoshbq@proton.me</i></a>
 </div>
 
 <div align="center", style="padding: 10px; background-color: #333; color: white;">
