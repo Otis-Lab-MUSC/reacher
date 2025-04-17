@@ -48,6 +48,7 @@ class REACHER:
         self.thread_lock: threading.Lock = threading.Lock()
         self.serial_flag: threading.Event = threading.Event()
         self.program_flag: threading.Event = threading.Event()
+        self.program_running: bool = False
         self.time_check_flag: threading.Event = threading.Event()
         self.serial_flag.set()
         self.program_flag.set()
@@ -435,6 +436,7 @@ class REACHER:
         """
         if self.program_flag.is_set():
             self.program_flag.clear()
+        self.program_running = True
         self.send_serial_command("START-PROGRAM")
         self.program_start_time = time.time()
         logger.info(f"Program started at {self.get_time()}")
@@ -449,6 +451,7 @@ class REACHER:
         logger.info("Ending program...")
         self.send_serial_command("END-PROGRAM")
         self.program_flag.set()
+        self.program_running = False
         self.clear_queue()
         self.close_serial()
         self.program_end_time = time.time()
@@ -482,7 +485,7 @@ class REACHER:
         **Returns:**
         - `bool`: True if running, False if paused or stopped.
         """
-        return not self.program_flag.is_set()
+        return self.program_running
 
     def check_limit_met(self) -> None:
         """Check if program limits have been met and stop if necessary.
