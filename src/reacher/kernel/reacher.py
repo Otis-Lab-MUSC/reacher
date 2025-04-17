@@ -487,14 +487,9 @@ class REACHER:
     def check_limit_met(self) -> None:
         """Check if program limits have been met and stop if necessary.
 
-<<<<<<< HEAD
-        This method evaluates time and/or infusion limits based on limit_type,
-        logging debug information for verification.
-=======
         **Description:**
         - Evaluates time and/or infusion limits based on `limit_type`.
         - Automatically stops the program if limits are exceeded.
->>>>>>> 64d4292c (REACHER library updates: redesigned library architecture supporting a more scalable design; enhanced typing and annotations)
         """
         current_time = time.time()
         if self.program_start_time is None or self.limit_type is None:

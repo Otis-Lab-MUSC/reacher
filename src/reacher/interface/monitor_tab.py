@@ -41,11 +41,11 @@ class MonitorTab(Dashboard):
         self.plotly_pane: pn.pane.Plotly = pn.pane.Plotly(sizing_mode="stretch_width", height=600)
         self.summary_pane: pn.pane.DataFrame = pn.pane.DataFrame(index=False, max_rows=10, styles={"background-color": "#1e1e1e", "color": "white"})
         self.start_program_button: pn.widgets.Button = pn.widgets.Button(icon="player-play")
-        self.start_program_button.on_click(self.start_program)
+        self.start_program_button.on_click(self.start)
         self.pause_program_button: pn.widgets.Button = pn.widgets.Button(icon="player-pause")
-        self.pause_program_button.on_click(self.pause_program)
+        self.pause_program_button.on_click(self.pause)
         self.stop_program_button: pn.widgets.Button = pn.widgets.Button(icon="player-stop")
-        self.stop_program_button.on_click(self.stop_program)
+        self.stop_program_button.on_click(self.stop)
         self.download_button: pn.widgets.Button = pn.widgets.Button(name="Export data", icon="download")
         self.download_button.on_click(self.download)
         self.periodic_callback: Optional[Any] = None
@@ -182,7 +182,7 @@ class MonitorTab(Dashboard):
         if preset_action:
             preset_action()
 
-    def start_program(self, _: Any) -> None:
+    def start(self, _: Any) -> None:
         """Start the experimental program.
 
         **Description:**
@@ -224,7 +224,7 @@ class MonitorTab(Dashboard):
         except Exception as e:
             self.add_error("Failed to start program", str(e))
 
-    def pause_program(self, _: Any) -> None:
+    def pause(self, _: Any) -> None:
         """Pause or resume the experimental program.
 
         **Description:**
@@ -247,7 +247,7 @@ class MonitorTab(Dashboard):
         except Exception as e:
             self.add_error("Failed to pause program", str(e))
 
-    def stop_program(self, _: Any) -> None:
+    def stop(self, _: Any) -> None:
         """Stop the experimental program.
 
         **Description:**
