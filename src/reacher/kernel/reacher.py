@@ -73,6 +73,7 @@ class REACHER:
         self.last_infusion_time: Optional[float] = None
 
         # Configuration variables
+        self.box_name: Optional[str] = None
         self.arduino_configuration: Dict = {}
         self.logging_stream_file: str = f"log-{self.get_time()}.csv"
         self.data_destination: Optional[str] = None
@@ -568,6 +569,17 @@ class REACHER:
         os.makedirs(data_folder_path, exist_ok=True)
         return data_folder_path         
 
+    def set_box_name(self, box_name: str) -> None:
+        """Set the name of the box for data organization.
+
+        **Description:**
+        - Specifies the name of the box for data storage and organization.
+
+        **Args:**
+        - `box_name (str)`: The name of the box.
+        """
+        self.box_name = box_name
+
     def get_data_destination(self) -> Optional[str]:
         """Get the current data destination folder.
 
@@ -635,6 +647,17 @@ class REACHER:
         """
         with self.thread_lock:
             return self.arduino_configuration
+    
+    def get_box_name(self) -> Optional[str]:
+        """Get the name of the box.
+
+        **Description:**
+        - Retrieves the name of the box for data organization.
+
+        **Returns:**
+        - `Optional[str]`: The box name or None if not set.
+        """
+        return self.box_name
     
     def get_start_time(self) -> Optional[float]:
         """Get the program start time.
