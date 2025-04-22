@@ -313,10 +313,10 @@ class MonitorTab(Dashboard):
             }
             summary = pd.Series(summary_dict)
             destination = self.reacher.make_destination_folder()
-            df.to_csv(os.path.join(destination, self.reacher.get_filename()))
-            series.to_csv(os.path.join(destination, "frame-timestamps.csv"))
-            summary.to_csv(os.path.join(destination, 'summary.csv'))
-            arduino_configuration_summary.to_csv(os.path.join(destination, 'arduino-configuration.csv'))
+            df.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_behavior-data"))
+            series.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_frame-timestamps.csv"))
+            summary.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_session-summary.csv"))
+            arduino_configuration_summary.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_arduino-configuration.csv"))
             self.add_response(f"Data saved successfully at '{destination}'")
         except Exception as e:
             self.add_error("Failed to save data", str(e))
