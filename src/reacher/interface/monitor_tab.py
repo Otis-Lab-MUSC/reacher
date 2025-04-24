@@ -86,7 +86,7 @@ class MonitorTab(Dashboard):
             self.add_response("No data available to summarize.")
             return pd.DataFrame(columns=["Action", "Component", "Count"])
         try:
-            summary = df.groupby(["Action", "Component"]).size().reset_index(name="Count")
+            summary = df[df["Action"] != "ORIGIN"].groupby(["Action", "Component"]).size().reset_index(name="Count")
             return summary
         except KeyError as e:
             self.add_error("KeyError: Missing column(s) in DataFrame.", str(e))
@@ -113,7 +113,8 @@ class MonitorTab(Dashboard):
             'INACTIVE_PRESS': 'black',
             'LICK': 'pink',
             'INFUSION': 'red',
-            'STIM': 'green'
+            'STIM': 'green',
+            'ORIGIN': 'red'
         }
         fig = go.Figure(layout=dict(height=600))
         for _, row in self.df.iterrows():
@@ -122,14 +123,31 @@ class MonitorTab(Dashboard):
             start = row['Start Timestamp']
             end = row['End Timestamp']
             y_pos = y_positions[component]
-            fig.add_trace(go.Scatter(
-                x=[start, end],
-                y=[y_pos, y_pos],
-                mode='lines+markers',
-                line=dict(color=colors.get(action, 'blue'), width=2),
-                marker=dict(symbol='line-ew-open', size=10),
-                name=component
-            ))
+
+            if action == 'ORIGIN':
+                fig.add_vline(
+                    x=start,
+                    line=dict(color=colors.get(action, 'grey'), width=2, dash='dash'),
+                    name=component
+                )
+            elif action == 'STIM':
+                fig.add_vrect(
+                    x0=start,
+                    x1=end,
+                    fillcolor='rgba(0,128,0,0.15)',
+                    line_width=0,
+                    layer='below',
+                    name=component
+                )
+            else:
+                fig.add_trace(go.Scatter(
+                    x=[start, end],
+                    y=[y_pos, y_pos],
+                    mode='lines+markers',
+                    line=dict(color=colors.get(action, 'blue'), width=2),
+                    marker=dict(symbol='line-ew-open', size=10),
+                    name=component
+                ))
         fig.update_layout(
             title="Event Timeline",
             xaxis_title="Timestamp",
@@ -345,6 +363,7 @@ class MonitorTab(Dashboard):
         self.plotly_pane.object = None
         self.animation_image.object = self.img_path
         self.animation_markdown.object = """`Waiting...`"""
+        self.start_program_button.disabled = False
 
     def layout(self) -> pn.Column:
         """Construct the layout for the MonitorTab.

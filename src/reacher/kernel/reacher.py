@@ -645,8 +645,7 @@ class REACHER:
         **Returns:**
         - `Dict`: The configuration dictionary.
         """
-        with self.thread_lock:
-            return self.arduino_configuration
+        return self.arduino_configuration
     
     def get_box_name(self) -> Optional[str]:
         """Get the name of the box.
