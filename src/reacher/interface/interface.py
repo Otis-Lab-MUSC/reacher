@@ -10,7 +10,7 @@ from reacher.kernel import REACHER
 class Interface(Dashboard):
     """A class to instantiate and manage all REACHER dashboard tabs with UI components."""
 
-    def __init__(self) -> None:
+    def __init__(self, behavior_chamber: str) -> None:
         """Initialize the Interface with all tab instances and UI components.
 
         **Description:**
@@ -32,6 +32,7 @@ class Interface(Dashboard):
         self.reset_button.on_click(self.reset)
 
         self.reacher = REACHER()
+        self.reacher.set_box_name(behavior_chamber)
         self.home_tab = HomeTab(self.reacher, self.response_textarea)
         self.program_tab = ProgramTab(self.reacher, self.response_textarea)
         self.hardware_tab = HardwareTab(self.reacher, self.response_textarea)

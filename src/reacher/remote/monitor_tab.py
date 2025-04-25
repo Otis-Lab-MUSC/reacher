@@ -12,7 +12,7 @@ from .hardware_tab import HardwareTab
 class MonitorTab(Dashboard):
     """A class to manage the Monitor tab UI for real-time wireless experiment monitoring, inheriting from Dashboard."""
 
-    def __init__(self) -> None:
+    def __init__(self, behavior_chamber: str) -> None:
         """Initialize the MonitorTab with inherited Dashboard components and tab-specific UI.
 
         **Description:**
@@ -42,6 +42,7 @@ class MonitorTab(Dashboard):
         self.periodic_callback: Optional[Any] = None
         self.program_tab: ProgramTab = None
         self.hardware_tab: HardwareTab = None
+        self.behavior_chamber: str = behavior_chamber
 
     def fetch_data(self) -> pd.DataFrame:
         """Fetch behavioral data from the API.
@@ -294,6 +295,7 @@ class MonitorTab(Dashboard):
             summary_dict = {
                 'Start Time': start_time,
                 'End Time': end_time,
+                'Behavior Chamber': self.behavior_chamber,
                 'RH Active Presses': len(rh_active_data) if not rh_active_data.empty else 0,
                 'RH Timeout Presses': len(rh_timeout_data) if not rh_timeout_data.empty else 0,
                 'RH Inactive Presses': len(rh_inactive_data) if not rh_inactive_data.empty else 0,
@@ -305,7 +307,7 @@ class MonitorTab(Dashboard):
                 'Stims': len(laser_data[laser_data['Action'] == 'STIM']) if not laser_data.empty else 0,
                 'Frames Collected': len(frame_data)
             }
-            summary_filepath = os.path.join(downloads_dir, "summary.csv")
+            summary_filepath = os.path.join(downloads_dir, f"summary.csv")
             pd.Series(summary_dict).to_csv(summary_filepath)
 
             config = pd.Series(responses['arduino_configuration'].json()['arduino_configuration'])

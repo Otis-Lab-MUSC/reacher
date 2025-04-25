@@ -10,7 +10,7 @@ from .schedule_tab import ScheduleTab
 class Interface(Dashboard):
     """A class to instantiate and manage all wireless REACHER dashboard tabs, inheriting from Dashboard."""
 
-    def __init__(self) -> None:
+    def __init__(self, behavior_chamber: str) -> None:
         """Initialize the WirelessDashboard with all tab instances.
 
         **Description:**
@@ -22,7 +22,7 @@ class Interface(Dashboard):
         self.home_tab: HomeTab = HomeTab()
         self.program_tab: ProgramTab = ProgramTab()
         self.hardware_tab: HardwareTab = HardwareTab()
-        self.monitor_tab: MonitorTab = MonitorTab()
+        self.monitor_tab: MonitorTab = MonitorTab(behavior_chamber)
         self.schedule_tab: ScheduleTab = ScheduleTab()
         self.monitor_tab.program_tab = self.program_tab
         self.monitor_tab.hardware_tab = self.hardware_tab

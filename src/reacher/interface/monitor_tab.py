@@ -318,6 +318,7 @@ class MonitorTab(Dashboard):
             summary_dict = {
                 'Start Time': start_time,
                 'End Time': end_time,
+                'Behavior Chamber': self.reacher.get_box_name(),
                 'RH Active Presses': len(rh_active_data) if not rh_active_data.empty else 0,
                 'RH Timeout Presses': len(rh_timeout_data) if not rh_timeout_data.empty else 0,
                 'RH Inactive Presses': len(rh_inactive_data) if not rh_inactive_data.empty else 0,
