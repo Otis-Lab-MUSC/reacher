@@ -1,0 +1,22 @@
+Source: reacher
+Maintainer: Joshua Boquiren <thejoshbq@proton.me>
+Section: python
+Priority: optional
+Build-Depends: debhelper (>= 10), dh-python, python3-all (>= 3.8), python3-setuptools
+Standards-Version: 4.5.0
+
+Package: python3-reacher
+Architecture: all
+Depends: ${python3:Depends}, 
+         python3 (>= 3.8), 
+         python3-pyserial (>= 3.5), 
+         python3-panel (>= 1.0.0), 
+         python3-pandas (>= 2.0.0), 
+         python3-plotly (>= 5.0.0), 
+         python3-matplotlib (>= 3.5.0), 
+         python3-numpy (>= 1.22.0)
+Description: Package necessary to run the REACHER Suite protocols
+ A package necessary to run the REACHER Suite protocols.
+ This package provides the functionality required for
+ serial communication and dashboard interfaces for the REACHER Suite.
+
