@@ -451,7 +451,7 @@ class REACHER:
         """
         logger.info("Ending program...")
         self.send_serial_command("END-PROGRAM")
-        time.sleep(1)
+        time.sleep(2)
         self.program_flag.set()
         self.program_running = False
         self.clear_queue()
