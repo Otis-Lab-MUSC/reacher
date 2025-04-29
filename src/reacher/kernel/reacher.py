@@ -451,6 +451,7 @@ class REACHER:
         """
         logger.info("Ending program...")
         self.send_serial_command("END-PROGRAM")
+        time.sleep(1)
         self.program_flag.set()
         self.program_running = False
         self.clear_queue()
@@ -543,10 +544,7 @@ class REACHER:
         **Args:**
         - `filename (str)`: The desired filename.
         """
-        if filename.endswith('.csv'):
-            self.behavior_filename = filename
-        else:
-            self.behavior_filename = filename + '.csv'
+        self.behavior_filename = filename
 
     def make_destination_folder(self) -> str:
         """Create a destination folder for data files.
