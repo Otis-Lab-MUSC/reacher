@@ -332,7 +332,7 @@ class MonitorTab(Dashboard):
             }
             summary = pd.Series(summary_dict)
             destination = self.reacher.make_destination_folder()
-            df.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_behavior-data"))
+            df.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_behavior-data.csv"))
             series.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_frame-timestamps.csv"))
             summary.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_session-summary.csv"))
             arduino_configuration_summary.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_arduino-configuration.csv"))
