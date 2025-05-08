@@ -8,6 +8,7 @@ import sys
 import time
 import datetime
 import pandas as pd
+import openpyxl
 import plotly.graph_objects as go
 import requests
 from typing import Optional, Any
@@ -332,10 +333,16 @@ class MonitorTab(Dashboard):
             }
             summary = pd.Series(summary_dict)
             destination = self.reacher.make_destination_folder()
-            df.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_behavior-data.csv"))
-            series.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_frame-timestamps.csv"))
-            summary.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_session-summary.csv"))
-            arduino_configuration_summary.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_arduino-configuration.csv"))
+            output = os.path.join(destination, f'{self.reacher.get_filename()}.xlsx')
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                summary.to_excel(writer, sheet_name='Session Summary')
+                df.to_excel(writer, sheet_name='Behavior Data')
+                arduino_configuration_summary.to_excel(writer, sheet_name='Arduino Configuration')
+                series.to_excel(writer, sheet_name='Frame Timestamps')
+            # df.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_behavior-data.csv"))
+            # series.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_frame-timestamps.csv"))
+            # summary.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_session-summary.csv"))
+            # arduino_configuration_summary.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_arduino-configuration.csv"))
             self.add_response(f"Data saved successfully at '{destination}'")
         except Exception as e:
             self.add_error("Failed to save data", str(e))
@@ -387,7 +394,7 @@ class MonitorTab(Dashboard):
                 self.animation_markdown,
                 pn.VSpacer(),
                 self.summary_pane,
-                width=250
+                width=300
             ),
             styles=dict(background="white")
         )

@@ -97,8 +97,12 @@ class Dashboard:
         """
         local_time = time.localtime()
         formatted_time = time.strftime("%H:%M:%S", local_time)
-        writeout = f"""<span style="color: cyan;">>>></span><span style="color: grey;"> [{formatted_time}]:</span><span style="color: white;"> {response}</span><br>"""
-        self.response_html.object += writeout
+        writeout = f"""
+        <span style="color: cyan;">>>></span>
+        <span style="color: grey;"> [{formatted_time}]:</span>
+        <span style="color: white;"> {response}</span><br>
+        """
+        self.response_textarea.object += writeout
 
     def add_error(self, response: str, details: str) -> None:
         """Add an error message to the response terminal.
@@ -112,8 +116,14 @@ class Dashboard:
         """
         local_time = time.localtime()
         formatted_time = time.strftime("%H:%M:%S", local_time)
-        writeout = f"""<span style="color: red;">>>></span><span style="color: grey;"> [{formatted_time}]:</span><span style="color: red; font-weight: bold;"> !!!ERROR!!!</span><span style="color: white;"> {response}</span><br><span style="color: grey;">     Details - {details}</span><br>"""
-        self.response_html.object += writeout
+        writeout = f"""
+        <span style="color: red;">>>></span>
+        <span style="color: grey;"> [{formatted_time}]:</span>
+        <span style="color: red; font-weight: bold;"> !!!ERROR!!!</span>
+        <span style="color: white;"> {response}</span><br>
+        <span style="color: grey;">     Details - {details}</span><br>
+        """
+        self.response_textarea.object += writeout
 
     def toggle_response_visibility(self, event: Any) -> None:
         """Toggle the visibility of the response_textarea and update button label.
