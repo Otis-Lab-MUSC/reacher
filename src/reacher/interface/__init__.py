@@ -13,5 +13,5 @@ __all__ = [
     'ProgramTab',
     'HardwareTab',
     'MonitorTab',
-    'ScheduleTab'
+    'ScheduleTab',
 ]
