@@ -8,7 +8,6 @@ import sys
 import time
 import datetime
 import pandas as pd
-import openpyxl
 import plotly.graph_objects as go
 import requests
 from typing import Optional, Any
@@ -85,13 +84,13 @@ class MonitorTab(Dashboard):
         """
         if df.empty:
             self.add_response("No data available to summarize.")
-            return pd.DataFrame(columns=["Action", "Component", "Count"])
+            return pd.DataFrame(columns=["event", "device", "count"])
         try:
-            summary = df[df["Action"] != "ORIGIN"].groupby(["Action", "Component"]).size().reset_index(name="Count")
+            summary = df[df["event"] != "START"].groupby(["event", "device"]).size().reset_index(name="count")
             return summary
         except KeyError as e:
             self.add_error("KeyError: Missing column(s) in DataFrame.", str(e))
-            return pd.DataFrame(columns=["Action", "Component", "Count"])
+            return pd.DataFrame(columns=["event", "device", "count"])
 
     def generate_plotly_plot(self) -> go.Figure:
         """Generate a Plotly plot of the behavioral events.
@@ -106,7 +105,7 @@ class MonitorTab(Dashboard):
             fig = go.Figure()
             fig.add_annotation(text="No data available", showarrow=False, x=0.5, y=0.5, xref="paper", yref="paper")
             return fig
-        components = self.df['Component'].unique()
+        components = self.df['device'].unique()
         y_positions = {component: i for i, component in enumerate(components)}
         colors = {
             'ACTIVE_PRESS': 'red',
@@ -115,17 +114,17 @@ class MonitorTab(Dashboard):
             'LICK': 'pink',
             'INFUSION': 'red',
             'STIM': 'green',
-            'ORIGIN': 'red'
+            'START': 'red'
         }
         fig = go.Figure(layout=dict(height=600))
         for _, row in self.df.iterrows():
-            component = row['Component']
-            action = row['Action']
-            start = row['Start Timestamp']
-            end = row['End Timestamp']
+            component = row['device']
+            action = row['event']
+            start = row['start_timestamp']
+            end = row['end_timestamp']
             y_pos = y_positions[component]
 
-            if action == 'ORIGIN':
+            if action == 'START':
                 fig.add_vline(
                     x=start,
                     line=dict(color=colors.get(action, 'grey'), width=2, dash='dash'),
@@ -217,12 +216,6 @@ class MonitorTab(Dashboard):
             self.add_error("Dependencies not set", "ProgramTab or HardwareTab not initialized.")
             return
         try:
-            reacher_log_path = os.path.expanduser(r'~/REACHER/LOG')
-            if os.path.exists(reacher_log_path):
-                self.reacher.set_logging_stream_destination(reacher_log_path)
-            else:
-                os.makedirs(reacher_log_path, exist_ok=True)
-                self.reacher.set_logging_stream_destination(reacher_log_path)
             if not self.reacher.ser.is_open:
                 self.add_error("Serial port is not open", "Please connect to the microcontroller first.")
                 return
@@ -305,17 +298,17 @@ class MonitorTab(Dashboard):
             arduino_configuration_summary = pd.Series(self.reacher.get_arduino_configuration())
             data = self.reacher.get_behavior_data()
             frames = self.reacher.get_frame_data()
-            df = pd.DataFrame.from_records(data, columns=['Component', 'Action', 'Start Timestamp', 'End Timestamp'])
+            df = pd.DataFrame.from_records(data, columns=['device', 'event', 'start_timestamp', 'end_timestamp'])
             series = pd.Series(frames)
-            rh_active_data = df[(df['Component'] == 'RH_LEVER') & (df['Action'] == 'ACTIVE_PRESS')]
-            rh_timeout_data = df[(df['Component'] == 'RH_LEVER') & (df['Action'] == 'TIMEOUT_PRESS')]
-            rh_inactive_data = df[(df['Component'] == 'RH_LEVER') & (df['Action'] == 'INACTIVE_PRESS')]
-            lh_active_data = df[(df['Component'] == 'LH_LEVER') & (df['Action'] == 'ACTIVE_PRESS')]
-            lh_timeout_data = df[(df['Component'] == 'LH_LEVER') & (df['Action'] == 'TIMEOUT_PRESS')]
-            lh_inactive_data = df[(df['Component'] == 'LH_LEVER') & (df['Action'] == 'INACTIVE_PRESS')]
-            pump_data = df[df['Component'] == 'PUMP']
-            lick_data = df[df['Component'] == 'LICK_CIRCUIT']
-            laser_data = df[df['Component'] == 'LASER']
+            rh_active_data = df[(df['device'] == 'RH_LEVER') & (df['event'] == 'ACTIVE_PRESS')]
+            rh_timeout_data = df[(df['device'] == 'RH_LEVER') & (df['event'] == 'TIMEOUT_PRESS')]
+            rh_inactive_data = df[(df['device'] == 'RH_LEVER') & (df['event'] == 'INACTIVE_PRESS')]
+            lh_active_data = df[(df['device'] == 'LH_LEVER') & (df['event'] == 'ACTIVE_PRESS')]
+            lh_timeout_data = df[(df['device'] == 'LH_LEVER') & (df['event'] == 'TIMEOUT_PRESS')]
+            lh_inactive_data = df[(df['device'] == 'LH_LEVER') & (df['event'] == 'INACTIVE_PRESS')]
+            pump_data = df[df['device'] == 'PUMP']
+            lick_data = df[df['device'] == 'LICK_CIRCUIT']
+            laser_data = df[df['device'] == 'LASER']
             summary_dict = {
                 'Start Time': start_time,
                 'End Time': end_time,
@@ -326,9 +319,9 @@ class MonitorTab(Dashboard):
                 'LH Active Presses': len(lh_active_data) if not lh_active_data.empty else 0,
                 'LH Timeout Presses': len(lh_timeout_data) if not lh_timeout_data.empty else 0,
                 'LH Inactive Presses': len(lh_inactive_data) if not lh_inactive_data.empty else 0,
-                'Infusions': len(pump_data[pump_data['Action'] == 'INFUSION']) if not pump_data.empty else 0,
-                'Licks': len(lick_data[lick_data['Action'] == 'LICK']) if not lick_data.empty else 0,
-                'Stims': len(laser_data[laser_data['Action'] == 'STIM']) if not laser_data.empty else 0,
+                'Infusions': len(pump_data[pump_data['event'] == 'INFUSION']) if not pump_data.empty else 0,
+                'Licks': len(lick_data[lick_data['event'] == 'LICK']) if not lick_data.empty else 0,
+                'Stims': len(laser_data[laser_data['event'] == 'STIM']) if not laser_data.empty else 0,
                 'Frames Collected': len(frames)
             }
             summary = pd.Series(summary_dict)
@@ -339,10 +332,6 @@ class MonitorTab(Dashboard):
                 df.to_excel(writer, sheet_name='Behavior Data')
                 arduino_configuration_summary.to_excel(writer, sheet_name='Arduino Configuration')
                 series.to_excel(writer, sheet_name='Frame Timestamps')
-            # df.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_behavior-data.csv"))
-            # series.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_frame-timestamps.csv"))
-            # summary.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_session-summary.csv"))
-            # arduino_configuration_summary.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_arduino-configuration.csv"))
             self.add_response(f"Data saved successfully at '{destination}'")
         except Exception as e:
             self.add_error("Failed to save data", str(e))

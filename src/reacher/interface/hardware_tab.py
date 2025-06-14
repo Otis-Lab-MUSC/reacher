@@ -151,9 +151,11 @@ class HardwareTab(Dashboard):
         - `event (Any)`: The event object containing the new lever selection.
         """
         if event.new == "LH Lever":
-            self.reacher.send_serial_command("ACTIVE_LEVER_LH")
+            self.reacher.send_serial_command({"cmd": 1381})
+            self.reacher.send_serial_command({"cmd": 1080})
         elif event.new == "RH Lever":
-            self.reacher.send_serial_command("ACTIVE_LEVER_RH")
+            self.reacher.send_serial_command({"cmd": 1081})
+            self.reacher.send_serial_command({"cmd": 1380})
 
     def arm_rh_lever(self, _: Any) -> None:
         """Arm or disarm the right-hand lever.
@@ -166,11 +168,11 @@ class HardwareTab(Dashboard):
         """
         try:
             if not self.rh_lever_armed:
-                self.reacher.send_serial_command("ARM_LEVER_RH")
+                self.reacher.send_serial_command({"cmd": 1001})
                 self.rh_lever_armed = True
                 self.arm_rh_lever_button.icon = "unlock"
             else:
-                self.reacher.send_serial_command("DISARM_LEVER_RH")
+                self.reacher.send_serial_command({"cmd": 1000})
                 self.rh_lever_armed = False
                 self.arm_rh_lever_button.icon = "lock"
         except Exception as e:
@@ -187,11 +189,11 @@ class HardwareTab(Dashboard):
         """
         try:
             if not self.lh_lever_armed:
-                self.reacher.send_serial_command("ARM_LEVER_LH")
+                self.reacher.send_serial_command({"cmd": 1301})
                 self.lh_lever_armed = True
                 self.arm_lh_lever_button.icon = "unlock"
             else:
-                self.reacher.send_serial_command("DISARM_LEVER_LH")
+                self.reacher.send_serial_command({"cmd": 1300})
                 self.lh_lever_armed = False
                 self.arm_lh_lever_button.icon = "lock"
         except Exception as e:
@@ -208,11 +210,11 @@ class HardwareTab(Dashboard):
         """
         try:
             if not self.cue_armed:
-                self.reacher.send_serial_command("ARM_CS")
+                self.reacher.send_serial_command({"cmd": 301})
                 self.cue_armed = True
                 self.arm_cue_button.icon = "unlock"
             else:
-                self.reacher.send_serial_command("DISARM_CS")
+                self.reacher.send_serial_command({"cmd": 300})
                 self.cue_armed = False
                 self.arm_cue_button.icon = "lock"
         except Exception as e:
@@ -227,8 +229,8 @@ class HardwareTab(Dashboard):
         **Args:**
         - `_ (Any)`: Unused event argument.
         """
-        self.reacher.send_serial_command(f"SET_FREQUENCY_CS:{self.cue_frequency_intslider.value}")
-        self.reacher.send_serial_command(f"SET_DURATION_CS:{self.cue_duration_intslider.value}")
+        self.reacher.send_serial_command({"cmd": 371, "frequency": self.cue_frequency_intslider.value})
+        self.reacher.send_serial_command({"cmd": 372, "duration": self.cue_duration_intslider.value})
 
     def arm_pump(self, _: Any) -> None:
         """Arm or disarm the pump.
@@ -241,11 +243,11 @@ class HardwareTab(Dashboard):
         """
         try:
             if not self.pump_armed:
-                self.reacher.send_serial_command("ARM_PUMP")
+                self.reacher.send_serial_command({"cmd": 401})
                 self.pump_armed = True
                 self.arm_pump_button.icon = "unlock"
             else:
-                self.reacher.send_serial_command("DISARM_PUMP")
+                self.reacher.send_serial_command({"cmd": 400})
                 self.pump_armed = False
                 self.arm_pump_button.icon = "lock"
         except Exception as e:
@@ -262,11 +264,11 @@ class HardwareTab(Dashboard):
         """
         try:
             if not self.lick_circuit_armed:
-                self.reacher.send_serial_command("ARM_LICK_CIRCUIT")
+                self.reacher.send_serial_command({"cmd": 501})
                 self.lick_circuit_armed = True
                 self.arm_lick_circuit_button.icon = "unlock"
             else:
-                self.reacher.send_serial_command("DISARM_LICK_CIRCUIT")
+                self.reacher.send_serial_command({"cmd": 500})
                 self.lick_circuit_armed = False
                 self.arm_lick_circuit_button.icon = "lock"
         except Exception as e:
@@ -287,7 +289,7 @@ class HardwareTab(Dashboard):
                 self.microscope_armed = True
                 self.arm_microscope_button.icon = "unlock"
             else:
-                self.reacher.send_serial_command("DISARM_FRAME")
+                self.reacher.send_serial_command("DISARM_FRAME") # FIXME: no code for this yet
                 self.microscope_armed = False
                 self.arm_microscope_button.icon = "lock"
         except Exception as e:
@@ -304,11 +306,11 @@ class HardwareTab(Dashboard):
         """
         try:
             if not self.laser_armed:
-                self.reacher.send_serial_command("ARM_LASER")
+                self.reacher.send_serial_command({"cmd": 601})
                 self.laser_armed = True
                 self.arm_laser_button.icon = "unlock"
             else:
-                self.reacher.send_serial_command("DISARM_LASER")
+                self.reacher.send_serial_command({"cmd": 600})
                 self.laser_armed = False
                 self.arm_laser_button.icon = "lock"
         except Exception as e:
@@ -324,9 +326,9 @@ class HardwareTab(Dashboard):
         - `_ (Any)`: Unused event argument.
         """
         try:
-            self.reacher.send_serial_command(f"LASER_STIM_MODE_{str(self.stim_mode_widget.value).upper()}")
-            self.reacher.send_serial_command(f"LASER_DURATION:{str(self.stim_duration_slider.value)}")
-            self.reacher.send_serial_command(f"LASER_FREQUENCY:{str(self.stim_frequency_slider.value)}")
+            self.reacher.send_serial_command({"cmd": (681 if self.stim_mode_widget.value == "Active-Press" else 680)}) 
+            self.reacher.send_serial_command({"cmd": 672, "duration": self.stim_duration_slider.value})
+            self.reacher.send_serial_command({"cmd": 671, "frequency": self.stim_frequency_slider.value})
         except Exception as e:
             self.add_error("Failed to send laser configuration", str(e))
 
