@@ -38,6 +38,7 @@ class MonitorTab(Dashboard):
         self.animation_image: pn.pane.Image = pn.pane.Image(self.img_path, width=200)
         self.animation_markdown: pn.pane.Markdown = pn.pane.Markdown("`Waiting...`")
         self.df: pd.DataFrame = pd.DataFrame()
+        self.callback_time: int = 5000
         self.plotly_pane: pn.pane.Plotly = pn.pane.Plotly(sizing_mode="stretch_width", height=600)
         self.summary_pane: pn.pane.DataFrame = pn.pane.DataFrame(index=False, max_rows=10, styles={"background-color": "#1e1e1e", "color": "white"})
         self.start_program_button: pn.widgets.Button = pn.widgets.Button(icon="player-play")
@@ -87,6 +88,15 @@ class MonitorTab(Dashboard):
             return pd.DataFrame(columns=["event", "device", "count"])
         try:
             summary = df[df["event"] != "START"].groupby(["event", "device"]).size().reset_index(name="count")
+            
+            timestamp_count = self.reacher.get_frame_timestamps_count()
+            timestamp_row = pd.DataFrame({
+                "event": ["FRAME"],
+                "device": ["MICROSCOPE"],
+                "count": [timestamp_count]
+            })
+            summary = pd.concat([summary, timestamp_row], ignore_index=True)
+            
             return summary
         except KeyError as e:
             self.add_error("KeyError: Missing column(s) in DataFrame.", str(e))
@@ -149,7 +159,7 @@ class MonitorTab(Dashboard):
                     name=component
                 ))
         fig.update_layout(
-            title="Event Timeline",
+            title=f"Event Timeline (refresh rate: {self.callback_time}ms)",
             xaxis_title="Timestamp",
             yaxis=dict(
                 title="Components",
@@ -225,7 +235,7 @@ class MonitorTab(Dashboard):
             self.add_response(f"Started program at {formatted_time}")
             if pn.state.curdoc:
                 if self.periodic_callback is None:
-                    self.periodic_callback = pn.state.add_periodic_callback(self.update_plot, period=5000)
+                    self.periodic_callback = pn.state.add_periodic_callback(self.update_plot, period=self.callback_time)
             self.animation_image.object = self.gif_path
             self.apply_preset()
             self.hardware_tab.arm_devices(self.program_tab.get_hardware())

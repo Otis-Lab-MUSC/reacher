@@ -22,6 +22,8 @@ class REACHER:
         - Configures program control flags and variables for experiment management.
         """
         
+        self.logger.info("Creating REACHER instance")
+        
         # Serial variables
         self.ser: serial.Serial = serial.Serial(baudrate=115200)
         self.queue: queue.Queue = queue.Queue()
@@ -62,19 +64,21 @@ class REACHER:
         self.arduino_configuration: Dict = {}
         self.reacher_log_path = os.path.expanduser(fr'~/REACHER/LOG/{self.get_time()}')
         os.makedirs(self.reacher_log_path, exist_ok=True)
-        self.json_log: str = os.path.join(self.reacher_log_path, "json_log.json")
-        self.logging: str = os.path.join(self.reacher_log_path, "logging.log")
+        self.controller_log: str = os.path.join(self.reacher_log_path, "controller_log.json")
+        self.interface_log: str = os.path.join(self.reacher_log_path, "interface_log.log")
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s [%(levelname)s]: %(message)s',
             handlers=[
-                    logging.FileHandler(self.logging),
+                    logging.FileHandler(self.interface_log),
                     logging.StreamHandler()
                 ]
         )
         self.logger = logging.getLogger(__name__)
         self.data_destination: Optional[str] = None
         self.behavior_filename: Optional[str] = None
+        
+        self.logger.info("REACHER instance created")
 
     def reset(self) -> None:
         """Reset the REACHER instance to its initial state.
@@ -85,7 +89,8 @@ class REACHER:
         - Restarts serial and queue handling threads.
         - Ensures a clean slate for a new experiment session.
         """
-        self.logger.info("Resetting REACHER instance...")
+        
+        self.logger.info("Resetting REACHER instance")
 
         if not self.program_flag.is_set():
             self.stop_program()
@@ -108,8 +113,8 @@ class REACHER:
         self.last_infusion_time = None
 
         self.arduino_configuration = {}
-        self.json_log: str = os.path.join(self.reacher_log_path, "json_log.json")
-        self.logging: str = os.path.join(self.reacher_log_path, "logging.log")
+        self.controller_log: str = os.path.join(self.reacher_log_path, "controller_log.json")
+        self.interface_log: str = os.path.join(self.reacher_log_path, "interface_log.log")
         self.data_destination = None
         self.behavior_filename = None
 
@@ -126,7 +131,7 @@ class REACHER:
         self.queue_thread.start()
         self.time_check_thread.start()
 
-        self.logger.info("REACHER instance reset complete.")
+        self.logger.info("REACHER instance reset")
 
     def get_COM_ports(self) -> List[str]:
         """Retrieve a list of available COM ports.
@@ -139,7 +144,13 @@ class REACHER:
         **Returns:**
         - `List[str]`: Available COM port names or a placeholder if none are detected.
         """
+        
+        self.logger.info("Accessing available COM ports")
+        
         available_ports = [p.device for p in list_ports.comports() if p.vid and p.pid]
+        
+        self.logger.info("COM ports successfully accessed")
+        
         return ["No available ports"] if len(available_ports) == 0 else available_ports
     
     def set_COM_port(self, port: str) -> None:
@@ -152,8 +163,13 @@ class REACHER:
         **Args:**
         - `port (str)`: The name of the COM port to use.
         """
+        
+        self.logger.info("Setting COM port")
+        
         if port in [p.device for p in list_ports.comports() if p.vid and p.pid]:
             self.ser.port = port
+            
+        self.logger.info(f"Set COM port to {port}")
 
     def open_serial(self) -> None:
         """Open the serial connection and start communication threads.
@@ -163,6 +179,9 @@ class REACHER:
         - Starts threads for reading serial data and processing the queue.
         - Sends a "LINK" command to initiate communication with the microcontroller.
         """
+        
+        self.logger.info("Opening serial connection")
+        
         if self.ser.is_open:
             self.ser.close()
             time.sleep(1)
@@ -177,6 +196,8 @@ class REACHER:
             self.queue_thread.start()
         time.sleep(2)
         self.ser.reset_input_buffer()
+        
+        self.logger.info("Serial connection opened")
 
     def clear_queue(self) -> None:
         """Clear the data queue and wait for processing to complete.
@@ -186,16 +207,19 @@ class REACHER:
         - Waits for all queued items to be processed before proceeding.
         - Ensures no residual data remains in the queue.
         """
-        self.logger.debug("Sending sentinel...")
+        
+        self.logger.info("Clearing queue")
+        
+        self.logger.info("---> Sending sentinel...")
         self.queue.put_nowait(None)
-        self.logger.debug("Waiting for queue to be processed...")
+        self.logger.info("--- > Waiting for queue to be processed")
         while not self.queue.empty():
             self.queue.get_nowait()
             self.queue.task_done()
-        self.logger.debug("Queue cleared.")
-        self.logger.debug("Waiting for queue thread to terminate...")
+        self.logger.info("---> Waiting for queue thread to terminate...")
         self.queue.join()
-        self.logger.debug("Queue terminated.")
+        
+        self.logger.info("Queue terminated")
 
     def close_serial(self) -> None:
         """Close the serial connection and terminate related threads.
@@ -205,21 +229,24 @@ class REACHER:
         - Closes the serial port and stops the serial thread.
         - Handles any errors during closure with detailed logging.
         """
+        
+        self.logger.info("Closing serial connection")
+        
         try:
             self.serial_flag.set()
-            self.logger.debug("Serial flag set to terminate threads.")
+            self.logger.info("---> Serial flag set to terminate threads")
             if self.ser.is_open:
                 time.sleep(0.5)
                 self.ser.flush()
                 self.ser.close()
-                self.logger.info("Serial port closed.")
-            self.logger.debug("Waiting for serial thread to terminate...")
+                self.logger.info("---> Serial port closed")
+            self.logger.info("---> Waiting for serial thread to terminate...")
             self.serial_thread.join(timeout=5)
-            self.logger.debug("Serial thread terminated.")
+            self.logger.info("---> Serial thread terminated")
         except Exception as e:
             self.logger.error(f"Error during closure: {e}")
         finally:
-            self.logger.debug("Cleanup complete.")
+            self.logger.info("Cleanup complete")
 
     def read_serial(self) -> None:
         """Read data from the serial port and queue it for processing.
@@ -233,7 +260,7 @@ class REACHER:
             if self.ser.is_open and self.ser.in_waiting > 0:
                 with self.thread_lock:
                     data = self.ser.readline().decode(encoding='utf-8', errors='replace').strip()
-                    self.logger.debug(f"Serial data received: {data}")
+                    self.logger.info(f"Serial data received: {data}")
                     self.queue.put(data)
             else:
                 time.sleep(0.1)
@@ -251,9 +278,9 @@ class REACHER:
                 line = self.queue.get(timeout=1)
                 self.queue.task_done()
                 if line is None:
-                    self.logger.debug("Sentinel received. Exiting queue thread.")
+                    self.logger.info("Sentinel received. Exiting queue thread.")
                     break
-                self.logger.debug(f"Processing queue data: {line}")
+                self.logger.info(f"Processing queue data: {line}")
 
                 self.handle_data(line)
             except queue.Empty:
@@ -272,19 +299,22 @@ class REACHER:
         **Args:**
         - `line (str)`: The raw data line to process.
         """
-        self.logger.debug(f"Handling data: {line}")
+        self.logger.info(f"Handling data: {line}")
 
         try:
             with self.thread_lock:
                 data = json.loads(line)
-
-                with open(self.json_log, 'a', newline='') as file:
-                    file.write(str(data))
-                    file.write('\n')
-                    file.flush()
+                
+                with open(self.controller_log, 'a', newline='') as file:
+                            file.write(str(data))
+                            file.write('\n')
+                            file.flush()
 
                 if data['level'] == "PROGOUT":
-                    self.update_behavioral_events(data)
+                    if data['event'] == "FRAME":
+                        self.update_frame_events(data)
+                    else:
+                        self.update_behavioral_events(data)
                 elif data['level'] == "SETUP":
                     self.arduino_configuration = data
             return
@@ -294,53 +324,30 @@ class REACHER:
             self.logger.error(f"Error processing JSON data: {e}")
 
     def update_behavioral_events(self, event: dict) -> None:
-        print(event)
-        entry_dict: Dict[str, Union[str, int]] = {
-            "start_timestamp": event.get('start_timestamp', 'UNKNOWN'),
-            "end_timestamp": event.get('end_timestamp', 'UNKNOWN'),
-        }
-
+        entry_dict: Dict[str, Union[str, int]] = {}
+        
         match event.get('device'):
             case "SWITCH_LEVER":
                 entry_dict['device'] = event.get('orientation') + "_LEVER"
-                entry_dict['event'] = event.get('classification') + "_PRESS"
-            case "CUE":
-                entry_dict['device'] = event.get('device', 'UNKNOWN')
-                entry_dict['event'] = "TONE"
-            case "PUMP":
-                entry_dict['device'] = event.get('device', 'UNKNOWN')
-                entry_dict['event'] = "INFUSION"
-            case "LICK_CIRCUIT":
-                entry_dict['device'] = event.get('device', 'UNKNOWN')
-                entry_dict['event'] = "LICK"
-            case "LASER":
-                entry_dict['device'] = event.get('device', 'UNKNOWN')
-                entry_dict['event'] = "STIM"
+                entry_dict['event'] = f"{event.get('classification')}_{event.get('event')}"
+                entry_dict['start_timestamp'] = event.get('start_timestamp')
+                entry_dict['end_timestamp'] = event.get('end_timestamp')
             case "CONTROLLER":
-                entry_dict['device'] = event.get('device', 'UNKNOWN')
-                entry_dict['event'] = event.get('classification', 'UNKNOWN')
-
+                entry_dict['device'] = event.get('device')
+                entry_dict['event'] = event.get('event')
+                entry_dict['start_timestamp'] = event.get('timestamp')
+                entry_dict['end_timestamp'] = event.get('timestamp')
+            case _:
+                entry_dict['device'] = event.get('device')
+                entry_dict['event'] = event.get('event')
+                entry_dict['start_timestamp'] = event.get('start_timestamp')
+                entry_dict['end_timestamp'] = event.get('end_timestamp')  
+                
         self.behavior_data.append(entry_dict)
+                
 
-    def update_frame_events(self, parts: List[str]) -> None:
-        """Updates frame counts.
-
-        **Description:**
-        - Processes frame events (e.g., timestamps) from serial data.
-        - Logs frame timestamps to a CSV file.
-        - Thread-safe updates to the frame_data list.
-
-        **Args:**
-        - `parts (List[str])`: Frame data as [_, timestamp].
-        """
-        _, timestamp = parts
-        with self.thread_lock:
-            self.logger.debug(f"Frame event: {timestamp}")
-            self.frame_data.append(timestamp)
-
-        with open(self.logging, 'a', newline='\n') as file:
-            writer = csv.DictWriter(file, fieldnames=['Frame Timestamp'])
-            writer.writerow({'Frame Timestamp': timestamp})
+    def update_frame_events(self, event: dict) -> None:
+        self.frame_data.append(event.get('timestamp'))
 
     def send_serial_command(self, command: dict) -> None:
         """Send a command to the Arduino via serial.
@@ -616,6 +623,9 @@ class REACHER:
         - `List[str]`: List of frame timestamps.
         """
         return self.frame_data
+    
+    def get_frame_timestamps_count(self) -> int:
+        return len(self.frame_data) if self.frame_data else 0
     
     def get_arduino_configuration(self) -> Dict:
         """Get the current Arduino configuration.

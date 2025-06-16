@@ -27,7 +27,7 @@ class HardwareTab(Dashboard):
             "Pump": self.arm_pump,
             "Lick Circuit": self.arm_lick_circuit,
             "Laser": self.arm_laser,
-            "Imaging Timestamp Receptor": self.arm_frames
+            "Imaging Microscope": self.arm_frames
         }
         self.active_lever_button: pn.widgets.MenuButton = pn.widgets.MenuButton(
             name="Active Lever", items=[("LH Lever", "LH Lever"), ("RH Lever", "RH Lever")], button_type="primary"
@@ -285,11 +285,11 @@ class HardwareTab(Dashboard):
         """
         try:
             if not self.microscope_armed:
-                self.reacher.send_serial_command("ARM_FRAME")
+                self.reacher.send_serial_command({"cmd": 901})
                 self.microscope_armed = True
                 self.arm_microscope_button.icon = "unlock"
             else:
-                self.reacher.send_serial_command("DISARM_FRAME") # FIXME: no code for this yet
+                self.reacher.send_serial_command({"cmd": 900})
                 self.microscope_armed = False
                 self.arm_microscope_button.icon = "lock"
         except Exception as e:
