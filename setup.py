@@ -12,7 +12,7 @@ INSTALL_REQUIRES = [
 
 setup(
     name="reacher",
-    version="1.0.1",
+    version="1.1.1",
     packages=find_packages(where="src"),  # Finds reacher and submodules
     package_dir={"": "src"},              # Root package is in src/
     install_requires=INSTALL_REQUIRES,
