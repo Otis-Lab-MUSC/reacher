@@ -21,9 +21,7 @@ class REACHER:
         - Prepares data structures for behavioral and frame data logging.
         - Configures program control flags and variables for experiment management.
         """
-        
-        self.logger.info("Creating REACHER instance")
-        
+                
         # Serial variables
         self.ser: serial.Serial = serial.Serial(baudrate=115200)
         self.queue: queue.Queue = queue.Queue()
@@ -77,6 +75,13 @@ class REACHER:
         self.logger = logging.getLogger(__name__)
         self.data_destination: Optional[str] = None
         self.behavior_filename: Optional[str] = None
+        self.code_dict: Dict = {
+            "000": self.update_behavioral_events,
+            "001": self.logger.info,
+            "006": self.logger.error,
+            "007": self.update_behavioral_events,
+            "008": self.update_frame_events
+        }
         
         self.logger.info("REACHER instance created")
 
@@ -212,7 +217,7 @@ class REACHER:
         
         self.logger.info("---> Sending sentinel...")
         self.queue.put_nowait(None)
-        self.logger.info("--- > Waiting for queue to be processed")
+        self.logger.info("---> Waiting for queue to be processed")
         while not self.queue.empty():
             self.queue.get_nowait()
             self.queue.task_done()
@@ -280,7 +285,7 @@ class REACHER:
                 if line is None:
                     self.logger.info("Sentinel received. Exiting queue thread.")
                     break
-                self.logger.info(f"Processing queue data: {line}")
+                self.logger.info(f"--> Data is in queue")
 
                 self.handle_data(line)
             except queue.Empty:
@@ -299,9 +304,10 @@ class REACHER:
         **Args:**
         - `line (str)`: The raw data line to process.
         """
-        self.logger.info(f"Handling data: {line}")
 
         try:
+            self.logger.info(f"--> Processing data")
+            
             with self.thread_lock:
                 data = json.loads(line)
                 
@@ -309,14 +315,22 @@ class REACHER:
                             file.write(str(data))
                             file.write('\n')
                             file.flush()
-
-                if data['level'] == "PROGOUT":
-                    if data['event'] == "FRAME":
-                        self.update_frame_events(data)
-                    else:
-                        self.update_behavioral_events(data)
-                elif data['level'] == "SETUP":
-                    self.arduino_configuration = data
+                
+                level = data['level']
+                if self.code_dict.get(level) == "001" or "006":
+                    self.code_dict.get(level)(data['desc'])
+                else:
+                    self.code_dict.get(level)(data)
+                
+                # if level == "007": # behavioral events code
+                #     if data['event'] == "TIMESTAMP":
+                #         self.update_frame_events(data)
+                #     else:
+                #         self.update_behavioral_events(data)
+                # elif level == "000": # controller setup code
+                #     self.arduino_configuration = data
+                # elif level == "006": # controller level error code
+                #     self.logger.error(f"Error: {level['desc']}")
             return
         except json.JSONDecodeError as e:
             self.logger.error(f"Failed to parse JSON: {e}. Raw data: {data}")
@@ -329,7 +343,7 @@ class REACHER:
         match event.get('device'):
             case "SWITCH_LEVER":
                 entry_dict['device'] = event.get('orientation') + "_LEVER"
-                entry_dict['event'] = f"{event.get('classification')}_{event.get('event')}"
+                entry_dict['event'] = f"{event.get('class')}_{event.get('event')}"
                 entry_dict['start_timestamp'] = event.get('start_timestamp')
                 entry_dict['end_timestamp'] = event.get('end_timestamp')
             case "CONTROLLER":
@@ -560,7 +574,7 @@ class REACHER:
         """
         if not self.behavior_filename and not self.data_destination:
             self.data_destination = os.path.expanduser(r'~/REACHER/DATA')
-            self.behavior_filename = f"{self.get_time()}.csv"
+            self.behavior_filename = f"{self.get_time()}"
         containing_folder = os.path.join(self.data_destination, self.behavior_filename.split('.')[0])
         if os.path.exists(containing_folder):
             data_folder_path = os.path.join(self.data_destination, f"{self.behavior_filename.split('.')[0]}-{time.time():.4f}")

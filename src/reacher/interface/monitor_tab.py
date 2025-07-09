@@ -4,6 +4,8 @@ from matplotlib import pyplot as plt
 matplotlib.use('QtAgg') 
 import panel as pn
 import os
+from pathlib import Path
+import urllib.parse
 import sys
 import time
 import datetime
@@ -85,14 +87,14 @@ class MonitorTab(Dashboard):
         """
         if df.empty:
             self.add_response("No data available to summarize.")
-            return pd.DataFrame(columns=["event", "device", "count"])
+            return pd.DataFrame(columns=["device", "event", "count"])
         try:
-            summary = df[df["event"] != "START"].groupby(["event", "device"]).size().reset_index(name="count")
+            summary = df[df["event"] != "START"].groupby(["device", "event"]).size().reset_index(name="count")
             
             timestamp_count = self.reacher.get_frame_timestamps_count()
             timestamp_row = pd.DataFrame({
-                "event": ["FRAME"],
                 "device": ["MICROSCOPE"],
+                "event": ["FRAME"],
                 "count": [timestamp_count]
             })
             summary = pd.concat([summary, timestamp_row], ignore_index=True)
@@ -100,7 +102,7 @@ class MonitorTab(Dashboard):
             return summary
         except KeyError as e:
             self.add_error("KeyError: Missing column(s) in DataFrame.", str(e))
-            return pd.DataFrame(columns=["event", "device", "count"])
+            return pd.DataFrame(columns=["device", "event", "count"])
 
     def generate_plotly_plot(self) -> go.Figure:
         """Generate a Plotly plot of the behavioral events.
@@ -292,57 +294,63 @@ class MonitorTab(Dashboard):
             self.header.object = "Program finished."
         except Exception as e:
             self.add_error("Failed to end program", str(e))
-
+            
     def download(self, _: Any) -> None:
         """Download experiment data to files.
 
         **Description:**
         - Exports behavioral data, frame timestamps, and summaries to CSV files.
+        - Dynamically summarizes counts of all device and event combinations.
 
         **Args:**
         - `_ (Any)`: Unused event argument.
         """
         try:
-            start_time = datetime.datetime.fromtimestamp(self.reacher.get_start_time()).strftime('%H:%M:%S') if self.reacher.get_start_time() else "N/A"
-            end_time = datetime.datetime.fromtimestamp(self.reacher.get_end_time()).strftime('%H:%M:%S') if self.reacher.get_end_time() else "N/A"
+            start_time = (datetime.datetime.fromtimestamp(self.reacher.get_start_time())
+                        .strftime('%H:%M:%S') if self.reacher.get_start_time() else "N/A")
+            end_time = (datetime.datetime.fromtimestamp(self.reacher.get_end_time())
+                        .strftime('%H:%M:%S') if self.reacher.get_end_time() else "N/A")
+
             arduino_configuration_summary = pd.Series(self.reacher.get_arduino_configuration())
             data = self.reacher.get_behavior_data()
             frames = self.reacher.get_frame_data()
+
             df = pd.DataFrame.from_records(data, columns=['device', 'event', 'start_timestamp', 'end_timestamp'])
-            series = pd.Series(frames)
-            rh_active_data = df[(df['device'] == 'RH_LEVER') & (df['event'] == 'ACTIVE_PRESS')]
-            rh_timeout_data = df[(df['device'] == 'RH_LEVER') & (df['event'] == 'TIMEOUT_PRESS')]
-            rh_inactive_data = df[(df['device'] == 'RH_LEVER') & (df['event'] == 'INACTIVE_PRESS')]
-            lh_active_data = df[(df['device'] == 'LH_LEVER') & (df['event'] == 'ACTIVE_PRESS')]
-            lh_timeout_data = df[(df['device'] == 'LH_LEVER') & (df['event'] == 'TIMEOUT_PRESS')]
-            lh_inactive_data = df[(df['device'] == 'LH_LEVER') & (df['event'] == 'INACTIVE_PRESS')]
-            pump_data = df[df['device'] == 'PUMP']
-            lick_data = df[df['device'] == 'LICK_CIRCUIT']
-            laser_data = df[df['device'] == 'LASER']
+
+            event_counts = df.groupby(['device', 'event']).size().unstack(fill_value=0)
             summary_dict = {
                 'Start Time': start_time,
                 'End Time': end_time,
                 'Behavior Chamber': self.reacher.get_box_name(),
-                'RH Active Presses': len(rh_active_data) if not rh_active_data.empty else 0,
-                'RH Timeout Presses': len(rh_timeout_data) if not rh_timeout_data.empty else 0,
-                'RH Inactive Presses': len(rh_inactive_data) if not rh_inactive_data.empty else 0,
-                'LH Active Presses': len(lh_active_data) if not lh_active_data.empty else 0,
-                'LH Timeout Presses': len(lh_timeout_data) if not lh_timeout_data.empty else 0,
-                'LH Inactive Presses': len(lh_inactive_data) if not lh_inactive_data.empty else 0,
-                'Infusions': len(pump_data[pump_data['event'] == 'INFUSION']) if not pump_data.empty else 0,
-                'Licks': len(lick_data[lick_data['event'] == 'LICK']) if not lick_data.empty else 0,
-                'Stims': len(laser_data[laser_data['event'] == 'STIM']) if not laser_data.empty else 0,
                 'Frames Collected': len(frames)
             }
+
+            for device in event_counts.index:
+                for event in event_counts.columns:
+                    count = event_counts.loc[device, event]
+                    if count > 0:  # only include non-zero counts
+                        summary_dict[f"{device} {event}"] = count
+
             summary = pd.Series(summary_dict)
+            series = pd.Series(frames)
+
             destination = self.reacher.make_destination_folder()
             output = os.path.join(destination, f'{self.reacher.get_filename()}.xlsx')
+            file_url = Path(os.path.join(destination, output))
+            
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 summary.to_excel(writer, sheet_name='Session Summary')
                 df.to_excel(writer, sheet_name='Behavior Data')
                 arduino_configuration_summary.to_excel(writer, sheet_name='Arduino Configuration')
                 series.to_excel(writer, sheet_name='Frame Timestamps')
-            self.add_response(f"Data saved successfully at '{destination}'")
+
+            link_id = f"copy_link_{id(self)}_{self.get_time().replace(':', '-')}"
+            file_path_str = str(file_url).replace('\\', '\\\\') 
+
+            js_copy = """
+            <a href='#' id='{link_id}' onclick="navigator.clipboard.writeText('{file_path}').then(() => alert('File path copied to clipboard: {file_path}'))">{file_path}</a>
+            """
+            self.add_response(f"Data saved successfully at {js_copy.format(link_id=link_id, file_path=file_path_str)}")
         except Exception as e:
             self.add_error("Failed to save data", str(e))
 

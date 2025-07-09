@@ -110,6 +110,12 @@ class HardwareTab(Dashboard):
             disabled=False
         )
         self.arm_laser_button.param.watch(self.arm_laser, 'value')
+        self.test_laser_button: pn.widgets.Button = pn.widgets.Button(
+            name="Test Laser",
+            button_type="danger",
+            disabled=False
+        )
+        self.test_laser_button.on_click(self.test_laser)
         self.stim_mode_widget: pn.widgets.Select = pn.widgets.Select(
             name="Stim Mode",
             options=["Cycle", "Active-Press"],
@@ -315,6 +321,12 @@ class HardwareTab(Dashboard):
                 self.arm_laser_button.icon = "lock"
         except Exception as e:
             self.add_error(f"{e}", str(e))
+    
+    def test_laser(self, _: Any) -> None:
+        try:
+            self.reacher.send_serial_command({"cmd":603})
+        except Exception as e:
+            self.add_error(f"{e}", str(e))
 
     def send_laser_configuration(self, _: Any) -> None:
         """Send laser configuration to the Arduino.
@@ -326,9 +338,12 @@ class HardwareTab(Dashboard):
         - `_ (Any)`: Unused event argument.
         """
         try:
-            self.reacher.send_serial_command({"cmd": (681 if self.stim_mode_widget.value == "Active-Press" else 680)}) 
-            self.reacher.send_serial_command({"cmd": 672, "duration": self.stim_duration_slider.value})
+            self.reacher.send_serial_command({"cmd": (681 if self.stim_mode_widget.value == "Active-Press" else 682)}) 
+            self.reacher.send_serial_command({"cmd": 672, "duration": self.stim_duration_slider.value * 1000}) # converted to milliseconds
             self.reacher.send_serial_command({"cmd": 671, "frequency": self.stim_frequency_slider.value})
+            
+            self.reacher.logger.info(f"Setting laser duration to {self.stim_duration_slider.value}s")
+            self.reacher.logger.info(f"Setting laser frequency to {self.stim_frequency_slider.value}Hz")
         except Exception as e:
             self.add_error("Failed to send laser configuration", str(e))
 
@@ -412,6 +427,7 @@ class HardwareTab(Dashboard):
             pn.Spacer(height=50),
             pn.pane.Markdown("### Laser"),
             self.arm_laser_button,
+            self.test_laser_button,
             self.stim_mode_widget,
             self.stim_frequency_slider,
             self.stim_duration_slider,

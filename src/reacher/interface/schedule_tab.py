@@ -17,8 +17,8 @@ class ScheduleTab(Dashboard):
         self.reacher = reacher
         self.response_textarea = response_textarea
         self.timeout_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(name="Timeout Duration(s)", value=20, start=0, end=600, step=5)
-        self.send_timeout_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
-        self.send_timeout_button.on_click(self.send_timeout)
+        self.send_rh_timeout_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
+        self.send_rh_timeout_button.on_click(self.send_rh_timeout)
         self.trace_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(name="Trace Duration(s)", value=0, start=0, end=60, step=1)
         self.send_trace_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
         self.send_trace_button.on_click(self.send_trace)
@@ -35,7 +35,7 @@ class ScheduleTab(Dashboard):
         self.send_omission_interval_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
         self.send_omission_interval_button.on_click(self.send_omission_interval)
 
-    def send_timeout(self, _: Any) -> None:
+    def send_rh_timeout(self, _: Any) -> None:
         """Send the timeout duration to the Arduino.
 
         **Description:**
@@ -45,7 +45,7 @@ class ScheduleTab(Dashboard):
         - `_ (Any)`: Unused event argument.
         """
         try:
-            self.reacher.send_serial_command(f"SET_TIMEOUT_PERIOD_LENGTH:{self.timeout_intslider.value * 1000}")
+            self.reacher.send_serial_command({"cmd": 1074, "timeout": self.timeout_intslider.value * 1000})
             self.add_response(f"Set timeout period to {self.timeout_intslider.value * 1000}")
         except Exception as e:
             self.add_error("Failed to send timeout interval", str(e))
@@ -60,7 +60,7 @@ class ScheduleTab(Dashboard):
         - `_ (Any)`: Unused event argument.
         """
         try:
-            self.reacher.send_serial_command(f"SET_TRACE_INTERVAL:{self.trace_intslider.value * 1000}")
+            self.reacher.send_serial_command({"cmd": 373, "trace": self.trace_intslider.value * 1000})
             self.add_response(f"Set trace interval to {self.trace_intslider.value * 1000}")
         except Exception as e:
             self.add_error("Failed to send trace interval", str(e))
@@ -150,7 +150,7 @@ class ScheduleTab(Dashboard):
         """
         within_trial_dynamics_area = pn.Column(
             pn.pane.Markdown("### Within-Trial Dynamics"),
-            pn.Row(self.timeout_intslider, self.send_timeout_button),
+            pn.Row(self.timeout_intslider, self.send_rh_timeout_button),
             pn.Row(self.trace_intslider, self.send_trace_button)
         )
         training_schedule_area = pn.Column(
