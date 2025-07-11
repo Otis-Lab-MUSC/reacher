@@ -65,7 +65,7 @@ class ScheduleTab(Dashboard):
         except Exception as e:
             self.add_error("Failed to send trace interval", str(e))
 
-    def send_fixed_ratio(self, _: Any) -> None:
+    def send_fixed_ratio(self, _: Any) -> None: #FIXME: add JSON code
         """Send the fixed ratio interval to the Arduino.
 
         **Description:**
@@ -80,7 +80,7 @@ class ScheduleTab(Dashboard):
         except Exception as e:
             self.add_error("Failed to send fixed ratio interval", str(e))
 
-    def send_progressive_ratio(self, _: Any) -> None:
+    def send_progressive_ratio(self, _: Any) -> None: #FIXME: add JSON code
         """Send the progressive ratio interval to the Arduino.
 
         **Description:**
@@ -95,7 +95,7 @@ class ScheduleTab(Dashboard):
         except Exception as e:
             self.add_error("Failed to send progressive ratio interval", str(e))
 
-    def send_variable_interval(self, _: Any) -> None:
+    def send_variable_interval(self, _: Any) -> None: #FIXME: add JSON code
         """Send the variable interval to the Arduino.
 
         **Description:**
@@ -110,7 +110,7 @@ class ScheduleTab(Dashboard):
         except Exception as e:
             self.add_error("Failed to send variable interval", str(e))
 
-    def send_omission_interval(self, _: Any) -> None:
+    def send_omission_interval(self, _: Any) -> None: #FIXME: add JSON code
         """Send the omission interval to the Arduino.
 
         **Description:**

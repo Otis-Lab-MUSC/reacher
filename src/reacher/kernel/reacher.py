@@ -321,16 +321,7 @@ class REACHER:
                     self.code_dict.get(level)(data['desc'])
                 else:
                     self.code_dict.get(level)(data)
-                
-                # if level == "007": # behavioral events code
-                #     if data['event'] == "TIMESTAMP":
-                #         self.update_frame_events(data)
-                #     else:
-                #         self.update_behavioral_events(data)
-                # elif level == "000": # controller setup code
-                #     self.arduino_configuration = data
-                # elif level == "006": # controller level error code
-                #     self.logger.error(f"Error: {level['desc']}")
+                    
             return
         except json.JSONDecodeError as e:
             self.logger.error(f"Failed to parse JSON: {e}. Raw data: {data}")
