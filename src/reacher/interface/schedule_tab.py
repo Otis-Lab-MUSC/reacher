@@ -65,7 +65,7 @@ class ScheduleTab(Dashboard):
         except Exception as e:
             self.add_error("Failed to send trace interval", str(e))
 
-    def send_fixed_ratio(self, _: Any) -> None: #FIXME: add JSON code
+    def send_fixed_ratio(self, _: Any) -> None:
         """Send the fixed ratio interval to the Arduino.
 
         **Description:**
@@ -75,7 +75,7 @@ class ScheduleTab(Dashboard):
         - `_ (Any)`: Unused event argument.
         """
         try:
-            self.reacher.send_serial_command(f"SET_RATIO:{self.fixed_ratio_intslider.value}")
+            self.reacher.send_serial_command({"cmd": 201, "ratio": self.fixed_ratio_intslider.value})
             self.add_response(f"Set fixed ratio to {self.fixed_ratio_intslider.value}")
         except Exception as e:
             self.add_error("Failed to send fixed ratio interval", str(e))

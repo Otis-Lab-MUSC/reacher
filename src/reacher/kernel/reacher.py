@@ -59,7 +59,12 @@ class REACHER:
 
         # Configuration variables
         self.box_name: Optional[str] = None
-        self.arduino_configuration: Dict = {}
+        self.arduino_configuration: Dict = {
+            "sketch": None, 
+            "version": None, 
+            "baud_rate": None, 
+            "desc": None
+        }
         self.reacher_log_path = os.path.expanduser(fr'~/REACHER/LOG/{self.get_time()}')
         os.makedirs(self.reacher_log_path, exist_ok=True)
         self.controller_log: str = os.path.join(self.reacher_log_path, "controller_log.json")
@@ -76,7 +81,7 @@ class REACHER:
         self.data_destination: Optional[str] = None
         self.behavior_filename: Optional[str] = None
         self.code_dict: Dict = {
-            "000": self.update_behavioral_events,
+            "000": self.update_arduino_configuration,
             "001": self.logger.info,
             "006": self.logger.error,
             "007": self.update_behavioral_events,
@@ -194,15 +199,17 @@ class REACHER:
         if self.serial_flag.is_set():
             self.serial_flag.clear()
         if not self.serial_thread.is_alive(): 
+            self.logger.info("--> Starting serial thread")
             self.serial_thread = threading.Thread(target=self.read_serial, daemon=True)
             self.serial_thread.start()
         if not self.queue_thread.is_alive():
+            self.logger.info("--> Starting queue thread")
             self.queue_thread = threading.Thread(target=self.handle_queue, daemon=True)
             self.queue_thread.start()
         time.sleep(2)
         self.ser.reset_input_buffer()
         
-        self.logger.info("Serial connection opened")
+        self.logger.info("--> Serial connection opened")
 
     def clear_queue(self) -> None:
         """Clear the data queue and wait for processing to complete.
@@ -285,7 +292,7 @@ class REACHER:
                 if line is None:
                     self.logger.info("Sentinel received. Exiting queue thread.")
                     break
-                self.logger.info(f"--> Data is in queue")
+                self.logger.info(f"--> Data in queue: {line}")
 
                 self.handle_data(line)
             except queue.Empty:
@@ -306,7 +313,7 @@ class REACHER:
         """
 
         try:
-            self.logger.info(f"--> Processing data")
+            self.logger.info(f"--> Processing data: {line}")
             
             with self.thread_lock:
                 data = json.loads(line)
@@ -317,10 +324,7 @@ class REACHER:
                             file.flush()
                 
                 level = data['level']
-                if self.code_dict.get(level) == "001" or "006":
-                    self.code_dict.get(level)(data['desc'])
-                else:
-                    self.code_dict.get(level)(data)
+                self.code_dict.get(level)(data)
                     
             return
         except json.JSONDecodeError as e:
@@ -328,6 +332,10 @@ class REACHER:
         except Exception as e:
             self.logger.error(f"Error processing JSON data: {e}")
 
+    def update_arduino_configuration(self, event: dict) -> None:
+        self.arduino_configuration = event
+        self.logger.info("--> Updated arduino configuration")
+        
     def update_behavioral_events(self, event: dict) -> None:
         entry_dict: Dict[str, Union[str, int]] = {}
         
@@ -349,10 +357,11 @@ class REACHER:
                 entry_dict['end_timestamp'] = event.get('end_timestamp')  
                 
         self.behavior_data.append(entry_dict)
+        self.logger.info("--> Updated behavioral data")
                 
-
     def update_frame_events(self, event: dict) -> None:
         self.frame_data.append(event.get('timestamp'))
+        self.logger.info("--> Updated frame data")
 
     def send_serial_command(self, command: dict) -> None:
         """Send a command to the Arduino via serial.

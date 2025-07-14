@@ -2,6 +2,7 @@ import panel as pn
 from typing import Any
 from .dashboard import Dashboard
 from reacher.kernel import REACHER
+import json
 
 class HomeTab(Dashboard):
     """A class to manage the Home tab UI for REACHER experiments."""
@@ -26,6 +27,9 @@ class HomeTab(Dashboard):
         self.serial_connect_button.on_click(self.connect_to_microcontroller)
         self.serial_disconnect_button = pn.widgets.Button(name="Disconnect")
         self.serial_disconnect_button.on_click(self.disconnect_from_microcontroller)
+        self.sketch_name_textbox = pn.widgets.StaticText(name="Firmware", value="(none loaded)")
+        self.sketch_version_textbox = pn.widgets.StaticText(name="Version", value="(none loaded)")
+        self.sketch_schedule_textbox = pn.widgets.StaticText(name="Schedule", value="(none loaded)")
 
     def search_for_microcontrollers(self, _: Any) -> None:
         """Search for available microcontrollers and update the menu."""
@@ -51,6 +55,22 @@ class HomeTab(Dashboard):
             self.set_COM()
             self.reacher.open_serial()
             self.add_response("Opened serial connection")
+            
+            config = self.reacher.get_arduino_configuration()
+            
+            if config["sketch"] == None:
+                sketch_name = config["sketch"] if config["sketch"] != None else "None specified"
+                version = config["version"]if config["version"] != None else "None specified"
+                schedule = config["desc"]if config["desc"] != None else "None specified"
+                
+                self.sketch_name_textbox.value = sketch_name
+                self.sketch_version_textbox.value = version
+                self.sketch_schedule_textbox.value = schedule
+            else:
+                self.add_error("Loaded firmware is incompatible. Please upload a qualified file.", "Firmware missing valid fields.")
+                self.add_response("Closing serial connection")
+                self.reacher.close_serial()
+            
         except Exception as e:
             self.add_error(f"Failed to connect to {self.microcontroller_menu.value}", str(e))
 
@@ -73,7 +93,13 @@ class HomeTab(Dashboard):
             pn.pane.Markdown("### COM Connection"),
             self.microcontroller_menu,
             self.search_microcontrollers_button,
-            pn.Row(self.serial_connect_button, self.serial_disconnect_button)
+            pn.Row(self.serial_connect_button, self.serial_disconnect_button),
+            pn.Spacer(height=50),
+            pn.Column(
+                self.sketch_name_textbox,
+                self.sketch_version_textbox,
+                self.sketch_schedule_textbox
+            )
         )
         return pn.Column(microcontroller_layout)
 
