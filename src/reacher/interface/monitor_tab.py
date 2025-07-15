@@ -3,6 +3,7 @@ import matplotlib
 from matplotlib import pyplot as plt
 matplotlib.use('QtAgg') 
 import panel as pn
+pn.extension('modal', 'tabulator')
 import os
 from pathlib import Path
 import urllib.parse
@@ -19,8 +20,8 @@ from reacher.interface import Dashboard
 class MonitorTab(Dashboard):
     """A class to manage the Monitor tab UI for real-time experiment monitoring, inheriting from Dashboard."""
 
-    def __init__(self, reacher: REACHER, program_tab: Any, hardware_tab: Any, response_textarea: pn.pane.HTML, header: pn.pane.Alert) -> None:
-        from reacher.interface import ProgramTab, HardwareTab
+    def __init__(self, reacher: REACHER, program_tab: Any, hardware_tab: Any, schedule_tab: Any, response_textarea: pn.pane.HTML, header: pn.pane.Alert) -> None:
+        from reacher.interface import ProgramTab, HardwareTab, ScheduleTab
         """Initialize the MonitorTab with inherited Dashboard components and tab-specific UI.
 
         **Description:**
@@ -43,8 +44,6 @@ class MonitorTab(Dashboard):
         self.callback_time: int = 5000
         self.plotly_pane: pn.pane.Plotly = pn.pane.Plotly(sizing_mode="stretch_width", height=600)
         self.summary_pane: pn.pane.DataFrame = pn.pane.DataFrame(index=False, max_rows=10, styles={"background-color": "#1e1e1e", "color": "white"})
-        self.start_program_button: pn.widgets.Button = pn.widgets.Button(icon="player-play")
-        self.start_program_button.on_click(self.start)
         self.pause_program_button: pn.widgets.Button = pn.widgets.Button(icon="player-pause")
         self.pause_program_button.on_click(self.pause)
         self.stop_program_button: pn.widgets.Button = pn.widgets.Button(icon="player-stop")
@@ -54,6 +53,39 @@ class MonitorTab(Dashboard):
         self.periodic_callback: Optional[Any] = None
         self.program_tab: ProgramTab = program_tab
         self.hardware_tab: HardwareTab = hardware_tab
+        self.schedule_tab: ScheduleTab = schedule_tab
+        self.confirm_start_button: pn.widgets.Button = pn.widgets.Button(name="Ready to run?", icon="player-play", button_type="primary")
+        self.confirm_start_button.on_click(self.start)
+        self.confirm_start_settings: pn.pane.HTML = pn.pane.HTML()
+        self.confirm_start_modal = pn.Modal(
+            self.confirm_start_settings,
+            self.confirm_start_button,
+            background_close=True,
+            show_close_button=False
+        )
+        self.start_program_button = self.confirm_start_modal.create_button("toggle", icon="player-play")
+        self.start_program_button.on_click(self.get_session_setting)
+        
+    def get_session_setting(self, _: Any):
+        styles = {
+            'background-color': '#F6F6F6',
+            'color': "black", 
+            'border': '2px solid black',
+            'border-radius': '5px', 
+            'padding': '10px'
+        }
+        text = f"""
+        <h5 style='color: black;'><u>Settings Overview</u></h5><br>
+        <p>Schedule: {self.reacher.get_firmware_information().get("desc")}</p>
+        <p>Ratio or Interval: {self.schedule_tab.fixed_ratio_intslider.value} (active presses or s)</p>
+        <p>Active Lever Timeout: {self.schedule_tab.timeout_intslider.value} (s)</p>
+        <p>Armed devices: {self.program_tab.get_hardware()}</p>
+        <p>Limiter: {self.program_tab.limit_type_radiobutton.value}</p>
+        <p>Time Limit: {self.program_tab.get_formatted_time() if self.program_tab.limit_type_radiobutton.value == "Time" or self.program_tab.limit_type_radiobutton.value == "Both" else "N/A"}</p>
+        <p>Infusion Limit: {self.program_tab.infusion_limit_intslider.value if self.program_tab.limit_type_radiobutton.value == "Infusion" or self.program_tab.limit_type_radiobutton.value == "Both" else "N/A"}</p>
+        """        
+        self.confirm_start_settings.object = text
+        self.confirm_start_settings.styles = styles
 
     def fetch_data(self) -> pd.DataFrame:
         """Fetch behavioral data from the REACHER instance.
@@ -211,12 +243,13 @@ class MonitorTab(Dashboard):
         preset_action = self.program_tab.presets_dict.get(self.preset_name)
         if preset_action:
             preset_action()
-
+        
     def start(self, _: Any) -> None:
-        """Start the experimental program.
+        """Start the experimental program after confirmation.
 
         **Description:**
         - Initiates the experiment, arms devices, and starts periodic updates.
+        - Closes the confirmation modal.
 
         **Args:**
         - `_ (Any)`: Unused event argument.
@@ -224,10 +257,8 @@ class MonitorTab(Dashboard):
         **Note:**
         - Requires `program_tab` and `hardware_tab` to be set by a parent class.
         """
-        if self.program_tab is None or self.hardware_tab is None:
-            self.add_error("Dependencies not set", "ProgramTab or HardwareTab not initialized.")
-            return
         try:
+            self.confirm_start_modal.hide()
             if not self.reacher.ser.is_open:
                 self.add_error("Serial port is not open", "Please connect to the microcontroller first.")
                 return
@@ -311,7 +342,7 @@ class MonitorTab(Dashboard):
             end_time = (datetime.datetime.fromtimestamp(self.reacher.get_end_time())
                         .strftime('%H:%M:%S') if self.reacher.get_end_time() else "N/A")
 
-            arduino_configuration_summary = pd.Series(self.reacher.get_arduino_configuration())
+            firmware_information = pd.Series(self.reacher.get_firmware_information())
             data = self.reacher.get_behavior_data()
             frames = self.reacher.get_frame_data()
 
@@ -341,7 +372,7 @@ class MonitorTab(Dashboard):
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 summary.to_excel(writer, sheet_name='Session Summary')
                 df.to_excel(writer, sheet_name='Behavior Data')
-                arduino_configuration_summary.to_excel(writer, sheet_name='Arduino Configuration')
+                firmware_information.to_excel(writer, sheet_name='Firmware Information')
                 series.to_excel(writer, sheet_name='Frame Timestamps')
 
             link_id = f"copy_link_{id(self)}_{self.get_time().replace(':', '-')}"
@@ -391,7 +422,7 @@ class MonitorTab(Dashboard):
         """
         program_control_area = pn.Column(
             pn.pane.Markdown("### Program Controls"),
-            pn.Row(self.start_program_button, self.pause_program_button, self.stop_program_button, self.download_button)
+            pn.Row(self.start_program_button, self.confirm_start_modal, self.pause_program_button, self.stop_program_button, self.download_button)
         )
         plot_area = pn.Row(
             self.plotly_pane,

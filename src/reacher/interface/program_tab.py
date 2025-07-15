@@ -119,6 +119,15 @@ class ProgramTab(Dashboard):
         extra_hours, minutes = divmod(total_minutes, 60)
         hours += extra_hours
         return f"{hours}hr {minutes}min {seconds}s"
+    
+    def get_formatted_time(self) -> str:
+        hours = self.time_limit_hour.value
+        minutes = self.time_limit_min.value
+        seconds = self.time_limit_sec.value
+        total_minutes = minutes
+        extra_hours, minutes = divmod(total_minutes, 60)
+        hours += extra_hours
+        return f"{hours}hr {minutes}min {seconds}s"
 
     def get_hardware(self) -> List[str]:
         """Get the selected hardware components.

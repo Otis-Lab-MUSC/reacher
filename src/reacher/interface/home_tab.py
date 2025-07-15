@@ -27,7 +27,7 @@ class HomeTab(Dashboard):
         self.serial_connect_button.on_click(self.connect_to_microcontroller)
         self.serial_disconnect_button = pn.widgets.Button(name="Disconnect")
         self.serial_disconnect_button.on_click(self.disconnect_from_microcontroller)
-        self.sketch_name_textbox = pn.widgets.StaticText(name="Firmware", value="(none loaded)")
+        self.sketch_name_textbox = pn.widgets.StaticText(name="File", value="(none loaded)")
         self.sketch_version_textbox = pn.widgets.StaticText(name="Version", value="(none loaded)")
         self.sketch_schedule_textbox = pn.widgets.StaticText(name="Schedule", value="(none loaded)")
 
@@ -56,9 +56,9 @@ class HomeTab(Dashboard):
             self.reacher.open_serial()
             self.add_response("Opened serial connection")
             
-            config = self.reacher.get_arduino_configuration()
+            config = self.reacher.get_firmware_information()
             
-            if config["sketch"] == None:
+            if config["sketch"] != None:
                 sketch_name = config["sketch"] if config["sketch"] != None else "None specified"
                 version = config["version"]if config["version"] != None else "None specified"
                 schedule = config["desc"]if config["desc"] != None else "None specified"
@@ -94,8 +94,9 @@ class HomeTab(Dashboard):
             self.microcontroller_menu,
             self.search_microcontrollers_button,
             pn.Row(self.serial_connect_button, self.serial_disconnect_button),
-            pn.Spacer(height=50),
+            pn.Spacer(height=20),
             pn.Column(
+                pn.pane.Markdown("### Firmware Information"),
                 self.sketch_name_textbox,
                 self.sketch_version_textbox,
                 self.sketch_schedule_textbox

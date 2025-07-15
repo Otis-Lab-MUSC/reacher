@@ -59,7 +59,7 @@ class REACHER:
 
         # Configuration variables
         self.box_name: Optional[str] = None
-        self.arduino_configuration: Dict = {
+        self.firmware_information: Dict = {
             "sketch": None, 
             "version": None, 
             "baud_rate": None, 
@@ -81,7 +81,7 @@ class REACHER:
         self.data_destination: Optional[str] = None
         self.behavior_filename: Optional[str] = None
         self.code_dict: Dict = {
-            "000": self.update_arduino_configuration,
+            "000": self.update_firmware_information,
             "001": self.logger.info,
             "006": self.logger.error,
             "007": self.update_behavioral_events,
@@ -122,7 +122,7 @@ class REACHER:
         self.stop_delay = None
         self.last_infusion_time = None
 
-        self.arduino_configuration = {}
+        self.firmware_information = {}
         self.controller_log: str = os.path.join(self.reacher_log_path, "controller_log.json")
         self.interface_log: str = os.path.join(self.reacher_log_path, "interface_log.log")
         self.data_destination = None
@@ -258,7 +258,7 @@ class REACHER:
         except Exception as e:
             self.logger.error(f"Error during closure: {e}")
         finally:
-            self.logger.info("Cleanup complete")
+            self.logger.info("--> Cleanup complete")
 
     def read_serial(self) -> None:
         """Read data from the serial port and queue it for processing.
@@ -332,8 +332,8 @@ class REACHER:
         except Exception as e:
             self.logger.error(f"Error processing JSON data: {e}")
 
-    def update_arduino_configuration(self, event: dict) -> None:
-        self.arduino_configuration = event
+    def update_firmware_information(self, event: dict) -> None:
+        self.firmware_information = event
         self.logger.info("--> Updated arduino configuration")
         
     def update_behavioral_events(self, event: dict) -> None:
@@ -641,7 +641,7 @@ class REACHER:
     def get_frame_timestamps_count(self) -> int:
         return len(self.frame_data) if self.frame_data else 0
     
-    def get_arduino_configuration(self) -> Dict:
+    def get_firmware_information(self) -> Dict:
         """Get the current Arduino configuration.
 
         **Description:**
@@ -651,7 +651,7 @@ class REACHER:
         **Returns:**
         - `Dict`: The configuration dictionary.
         """
-        return self.arduino_configuration
+        return self.firmware_information
     
     def get_box_name(self) -> Optional[str]:
         """Get the name of the box.

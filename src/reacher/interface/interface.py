@@ -36,14 +36,15 @@ class Interface(Dashboard):
         self.home_tab = HomeTab(self.reacher, self.response_textarea)
         self.program_tab = ProgramTab(self.reacher, self.response_textarea)
         self.hardware_tab = HardwareTab(self.reacher, self.response_textarea)
+        self.schedule_tab = ScheduleTab(self.reacher, self.response_textarea)
         self.monitor_tab = MonitorTab(
             reacher=self.reacher,
             program_tab=self.program_tab,
             hardware_tab=self.hardware_tab,
+            schedule_tab=self.schedule_tab,
             response_textarea=self.response_textarea,
             header=self.header
         )
-        self.schedule_tab = ScheduleTab(self.reacher, self.response_textarea)
         self.tabs = [self.home_tab, self.program_tab, self.hardware_tab, self.monitor_tab, self.schedule_tab]
 
         self.dashboard = pn.Tabs(
