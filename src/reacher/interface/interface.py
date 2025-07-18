@@ -18,6 +18,7 @@ class Interface(Dashboard):
         - Sets up the tabbed interface with shared UI components (header, response_textarea, etc.).
         """
         super().__init__()
+        self.behavior_chamber = behavior_chamber
         self.header = pn.pane.Alert("Program not started...", alert_type="info")
         self.response_textarea = pn.pane.HTML(
             "REACHER Output:<br><br>",
@@ -32,7 +33,7 @@ class Interface(Dashboard):
         self.reset_button.on_click(self.reset)
 
         self.reacher = REACHER()
-        self.reacher.set_box_name(behavior_chamber)
+        self.reacher.set_box_name(self.behavior_chamber)
         self.home_tab = HomeTab(self.reacher, self.response_textarea)
         self.program_tab = ProgramTab(self.reacher, self.response_textarea)
         self.hardware_tab = HardwareTab(self.reacher, self.response_textarea)
@@ -51,16 +52,29 @@ class Interface(Dashboard):
             ("Home", self.home_tab.layout()),
             ("Program", self.program_tab.layout()),
             ("Hardware", self.hardware_tab.layout()),
-            ("Monitor", self.monitor_tab.layout()),
             ("Schedule", self.schedule_tab.layout()),
+            ("Monitor", self.monitor_tab.layout()),
             tabs_location="left",
         )
 
     def reset(self, _) -> None:
-        self.reacher.reset()
         for tab in self.tabs:
             if hasattr(tab, "reset"):
                 tab.reset()
+        self.reacher = REACHER()
+        self.reacher.set_box_name(self.behavior_chamber)
+        self.home_tab = HomeTab(self.reacher, self.response_textarea)
+        self.program_tab = ProgramTab(self.reacher, self.response_textarea)
+        self.hardware_tab = HardwareTab(self.reacher, self.response_textarea)
+        self.schedule_tab = ScheduleTab(self.reacher, self.response_textarea)
+        self.monitor_tab = MonitorTab(
+            reacher=self.reacher,
+            program_tab=self.program_tab,
+            hardware_tab=self.hardware_tab,
+            schedule_tab=self.schedule_tab,
+            response_textarea=self.response_textarea,
+            header=self.header
+        )
         self.header.alert_type = "info"
         self.header.object = "Program not started..."
         self.response_textarea.object = "REACHER Output:<br><br>"

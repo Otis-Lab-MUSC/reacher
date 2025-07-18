@@ -43,7 +43,12 @@ class Dashboard:
             raise ValueError("Dashboard tabs must be initialized before calling layout.")
         header_row = pn.Row(self.header, self.toggle_button)
         main_row = pn.Row(self.dashboard, self.response_textarea)
-        return pn.Column(header_row, main_row, self.reset_button)
+        interface = pn.Column(
+            header_row, 
+            main_row, 
+            # self.reset_button # FIXME: reset button temporarily unavailable
+        )
+        return interface
 
     def get_response_terminal(self) -> pn.pane.HTML:
         """Get the response terminal pane.

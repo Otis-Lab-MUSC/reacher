@@ -42,7 +42,7 @@ class MonitorTab(Dashboard):
         self.animation_markdown: pn.pane.Markdown = pn.pane.Markdown("`Waiting...`")
         self.df: pd.DataFrame = pd.DataFrame()
         self.callback_time: int = 5000
-        self.plotly_pane: pn.pane.Plotly = pn.pane.Plotly(sizing_mode="stretch_width", height=600)
+        self.plotly_pane: pn.pane.Plotly = pn.pane.Plotly(sizing_mode="stretch_width", height=500, width=500)
         self.summary_pane: pn.pane.DataFrame = pn.pane.DataFrame(index=False, max_rows=10, styles={"background-color": "#1e1e1e", "color": "white"})
         self.pause_program_button: pn.widgets.Button = pn.widgets.Button(icon="player-pause")
         self.pause_program_button.on_click(self.pause)
