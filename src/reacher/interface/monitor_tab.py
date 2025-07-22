@@ -343,6 +343,7 @@ class MonitorTab(Dashboard):
                         .strftime('%H:%M:%S') if self.reacher.get_end_time() else "N/A")
 
             firmware_information = pd.Series(self.reacher.get_firmware_information())
+            hardware_settings = pd.json_normalize(self.reacher.get_hardware_settings(), sep=' | ')
             data = self.reacher.get_behavior_data()
             frames = self.reacher.get_frame_data()
 
@@ -373,6 +374,7 @@ class MonitorTab(Dashboard):
                 summary.to_excel(writer, sheet_name='Session Summary')
                 df.to_excel(writer, sheet_name='Behavior Data')
                 firmware_information.to_excel(writer, sheet_name='Firmware Information')
+                hardware_settings.to_excel(writer, 'Hardware Settings')
                 series.to_excel(writer, sheet_name='Frame Timestamps')
 
             link_id = f"copy_link_{id(self)}_{self.get_time().replace(':', '-')}"

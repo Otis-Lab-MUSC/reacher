@@ -34,10 +34,10 @@ class Interface(Dashboard):
 
         self.reacher = REACHER()
         self.reacher.set_box_name(self.behavior_chamber)
-        self.home_tab = HomeTab(self.reacher, self.response_textarea)
         self.program_tab = ProgramTab(self.reacher, self.response_textarea)
         self.hardware_tab = HardwareTab(self.reacher, self.response_textarea)
         self.schedule_tab = ScheduleTab(self.reacher, self.response_textarea)
+        self.home_tab = HomeTab(self.reacher, self.response_textarea,)
         self.monitor_tab = MonitorTab(
             reacher=self.reacher,
             program_tab=self.program_tab,
@@ -46,7 +46,13 @@ class Interface(Dashboard):
             response_textarea=self.response_textarea,
             header=self.header
         )
-        self.tabs = [self.home_tab, self.program_tab, self.hardware_tab, self.monitor_tab, self.schedule_tab]
+        self.tabs = [
+            self.home_tab, 
+            self.program_tab, 
+            self.hardware_tab, 
+            self.monitor_tab, 
+            self.schedule_tab
+        ]
 
         self.dashboard = pn.Tabs(
             ("Home", self.home_tab.layout()),

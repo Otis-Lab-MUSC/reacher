@@ -65,6 +65,7 @@ class REACHER:
             "baud_rate": None, 
             "desc": None
         }
+        self.hardware_settings: List = []
         self.reacher_log_path = os.path.expanduser(fr'~/REACHER/LOG/{self.get_time()}')
         os.makedirs(self.reacher_log_path, exist_ok=True)
         self.controller_log: str = os.path.join(self.reacher_log_path, "controller_log.json")
@@ -333,8 +334,13 @@ class REACHER:
             self.logger.error(f"Error processing JSON data: {e}")
 
     def update_firmware_information(self, event: dict) -> None:
-        self.firmware_information = event
-        self.logger.info("--> Updated arduino configuration")
+        if event["device"] == "CONTROLLER":
+            self.firmware_information = event
+            self.logger.info("--> Updated arduino configuration")
+        else:
+            self.hardware_settings.append(event)
+            self.logger.info("--> Updated hardware defaults list")
+            
         
     def update_behavioral_events(self, event: dict) -> None:
         entry_dict: Dict[str, Union[str, int]] = {}
@@ -652,6 +658,9 @@ class REACHER:
         - `Dict`: The configuration dictionary.
         """
         return self.firmware_information
+    
+    def get_hardware_settings(self) -> List:
+        return self.hardware_settings
     
     def get_box_name(self) -> Optional[str]:
         """Get the name of the box.

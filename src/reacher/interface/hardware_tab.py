@@ -30,7 +30,10 @@ class HardwareTab(Dashboard):
             "Imaging Microscope": self.arm_frames
         }
         self.active_lever_button: pn.widgets.MenuButton = pn.widgets.MenuButton(
-            name="Active Lever", items=[("LH Lever", "LH Lever"), ("RH Lever", "RH Lever")], button_type="primary"
+            name="Active Lever", 
+            items=[("LH Lever", "LH Lever"), 
+                   ("RH Lever", "RH Lever")], 
+            button_type="primary"
         )
         self.active_lever_button.on_click(self.set_active_lever)
         self.rh_lever_armed: bool = False
@@ -116,24 +119,25 @@ class HardwareTab(Dashboard):
             disabled=False
         )
         self.test_laser_button.on_click(self.test_laser)
-        self.stim_mode_widget: pn.widgets.Select = pn.widgets.Select(
+        self.stim_mode_widget: pn.widgets.ToggleGroup = pn.widgets.ToggleGroup(
             name="Stim Mode",
             options=["Cycle", "Active-Press"],
-            value="Cycle"
+            behavior="radio",
+            value="Active-Press"
         )
         self.stim_frequency_slider: pn.widgets.IntInput = pn.widgets.IntInput(
             name="Frequency (Hz)",
             start=1,
             end=100,
             step=1,
-            value=20
+            value=40
         )
         self.stim_duration_slider: pn.widgets.IntInput = pn.widgets.IntInput(
             name="Stim Duration (s)",
             start=1,
             end=60,
             step=5,
-            value=30
+            value=5
         )
         self.send_laser_config_button: pn.widgets.Button = pn.widgets.Button(
             name="Send",
@@ -359,24 +363,28 @@ class HardwareTab(Dashboard):
         **Returns:**
         - `plt.Figure`: The matplotlib figure object.
         """
-        total_duration = 1
-        t = np.linspace(0, total_duration, 1000)
-        square_wave = np.zeros_like(t)
-        if frequency == 1:
-            square_wave[1:999] = 1
-        else:
-            period = 1 / frequency
-            for i, time_point in enumerate(t):
-                if (time_point % period) < (period / 2):
-                    square_wave[i] = 1
-        plt.figure(figsize=(5, 2))
-        plt.plot(t, square_wave, drawstyle='steps-pre')
-        plt.title(f'Square Wave - {frequency} Hz')
-        plt.xlabel('Time [s]')
-        plt.ylabel('Amplitude')
-        plt.ylim([-0.1, 1.1])
-        plt.grid(True)
-        return plt.gcf()
+        try:
+            total_duration = 1
+            t = np.linspace(0, total_duration, 1000)
+            square_wave = np.zeros_like(t)
+            if frequency == 1:
+                square_wave[1:999] = 1
+            else:
+                if frequency > 0:
+                    period = 1 / frequency
+                    for i, time_point in enumerate(t):
+                        if (time_point % period) < (period / 2):
+                            square_wave[i] = 1
+            plt.figure(figsize=(5, 2))
+            plt.plot(t, square_wave, drawstyle='steps-pre')
+            plt.title(f'Square Wave - {frequency} Hz')
+            plt.xlabel('Time [s]')
+            plt.ylabel('Amplitude')
+            plt.ylim([-0.1, 1.1])
+            plt.grid(True)
+            return plt.gcf()
+        except Exception as e:
+            self.add_error(f"Failed to plot laser frequency model", e)
 
     def arm_devices(self, devices: List[str]) -> None:
         """Arm the specified devices.
@@ -390,8 +398,8 @@ class HardwareTab(Dashboard):
         for device in devices:
             arm_device = self.hardware_components.get(device)
             if arm_device:
-                arm_device(None)
-
+                arm_device(None)              
+            
     def layout(self) -> pn.Row:
         """Construct the layout for the HardwareTab.
 

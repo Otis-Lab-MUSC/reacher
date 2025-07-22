@@ -19,7 +19,6 @@ class ProgramTab(Dashboard):
         self.hardware_checkbuttongroup: pn.widgets.CheckButtonGroup = pn.widgets.CheckButtonGroup(
             name="Select hardware to use:",
             options=["LH Lever", "RH Lever", "Cue", "Pump", "Lick Circuit", "Laser", "Imaging Microscope"],
-            value=["LH Lever", "RH Lever", "Cue", "Pump"],
             orientation='vertical',
             button_style="outline"
         )
