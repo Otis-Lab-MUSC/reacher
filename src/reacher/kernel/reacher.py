@@ -9,21 +9,6 @@ import logging
 from typing import List, Dict, Union, Optional
 from serial.tools import list_ports
 
-# Configure logging
-log_dir = os.path.expanduser('~/REACHER/LOG')
-os.makedirs(log_dir, exist_ok=True)
-log_file = os.path.join(log_dir, f"log-{time.strftime('%Y-%m-%d_%H-%M-%S')}.log")
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s]: %(message)s',
-    handlers=[
-        logging.FileHandler(log_file),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
 class REACHER:
     """A class to manage serial communication and data collection for REACHER experiments."""
 
@@ -36,7 +21,7 @@ class REACHER:
         - Prepares data structures for behavioral and frame data logging.
         - Configures program control flags and variables for experiment management.
         """
-        
+                
         # Serial variables
         self.ser: serial.Serial = serial.Serial(baudrate=115200)
         self.queue: queue.Queue = queue.Queue()
@@ -74,10 +59,37 @@ class REACHER:
 
         # Configuration variables
         self.box_name: Optional[str] = None
-        self.arduino_configuration: Dict = {}
-        self.logging_stream_file: str = f"log-{self.get_time()}.csv"
+        self.firmware_information: Dict = {
+            "sketch": None, 
+            "version": None, 
+            "baud_rate": None, 
+            "desc": None
+        }
+        self.hardware_settings: List = []
+        self.reacher_log_path = os.path.expanduser(fr'~/REACHER/LOG/{self.get_time()}')
+        os.makedirs(self.reacher_log_path, exist_ok=True)
+        self.controller_log: str = os.path.join(self.reacher_log_path, "controller_log.json")
+        self.interface_log: str = os.path.join(self.reacher_log_path, "interface_log.log")
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s [%(levelname)s]: %(message)s',
+            handlers=[
+                    logging.FileHandler(self.interface_log),
+                    logging.StreamHandler()
+                ]
+        )
+        self.logger = logging.getLogger(__name__)
         self.data_destination: Optional[str] = None
         self.behavior_filename: Optional[str] = None
+        self.code_dict: Dict = {
+            "000": self.update_firmware_information,
+            "001": self.logger.info,
+            "006": self.logger.error,
+            "007": self.update_behavioral_events,
+            "008": self.update_frame_events
+        }
+        
+        self.logger.info("REACHER instance created")
 
     def reset(self) -> None:
         """Reset the REACHER instance to its initial state.
@@ -88,7 +100,8 @@ class REACHER:
         - Restarts serial and queue handling threads.
         - Ensures a clean slate for a new experiment session.
         """
-        logger.info("Resetting REACHER instance...")
+        
+        self.logger.info("Resetting REACHER instance")
 
         if not self.program_flag.is_set():
             self.stop_program()
@@ -110,8 +123,9 @@ class REACHER:
         self.stop_delay = None
         self.last_infusion_time = None
 
-        self.arduino_configuration = {}
-        self.logging_stream_file = f"log-{self.get_time()}.csv"
+        self.firmware_information = {}
+        self.controller_log: str = os.path.join(self.reacher_log_path, "controller_log.json")
+        self.interface_log: str = os.path.join(self.reacher_log_path, "interface_log.log")
         self.data_destination = None
         self.behavior_filename = None
 
@@ -128,7 +142,7 @@ class REACHER:
         self.queue_thread.start()
         self.time_check_thread.start()
 
-        logger.info("REACHER instance reset complete.")
+        self.logger.info("REACHER instance reset")
 
     def get_COM_ports(self) -> List[str]:
         """Retrieve a list of available COM ports.
@@ -141,7 +155,13 @@ class REACHER:
         **Returns:**
         - `List[str]`: Available COM port names or a placeholder if none are detected.
         """
+        
+        self.logger.info("Accessing available COM ports")
+        
         available_ports = [p.device for p in list_ports.comports() if p.vid and p.pid]
+        
+        self.logger.info("COM ports successfully accessed")
+        
         return ["No available ports"] if len(available_ports) == 0 else available_ports
     
     def set_COM_port(self, port: str) -> None:
@@ -154,8 +174,13 @@ class REACHER:
         **Args:**
         - `port (str)`: The name of the COM port to use.
         """
+        
+        self.logger.info("Setting COM port")
+        
         if port in [p.device for p in list_ports.comports() if p.vid and p.pid]:
             self.ser.port = port
+            
+        self.logger.info(f"Set COM port to {port}")
 
     def open_serial(self) -> None:
         """Open the serial connection and start communication threads.
@@ -165,6 +190,9 @@ class REACHER:
         - Starts threads for reading serial data and processing the queue.
         - Sends a "LINK" command to initiate communication with the microcontroller.
         """
+        
+        self.logger.info("Opening serial connection")
+        
         if self.ser.is_open:
             self.ser.close()
             time.sleep(1)
@@ -172,14 +200,17 @@ class REACHER:
         if self.serial_flag.is_set():
             self.serial_flag.clear()
         if not self.serial_thread.is_alive(): 
+            self.logger.info("--> Starting serial thread")
             self.serial_thread = threading.Thread(target=self.read_serial, daemon=True)
             self.serial_thread.start()
         if not self.queue_thread.is_alive():
+            self.logger.info("--> Starting queue thread")
             self.queue_thread = threading.Thread(target=self.handle_queue, daemon=True)
             self.queue_thread.start()
         time.sleep(2)
-        self.send_serial_command("LINK")
         self.ser.reset_input_buffer()
+        
+        self.logger.info("--> Serial connection opened")
 
     def clear_queue(self) -> None:
         """Clear the data queue and wait for processing to complete.
@@ -189,16 +220,19 @@ class REACHER:
         - Waits for all queued items to be processed before proceeding.
         - Ensures no residual data remains in the queue.
         """
-        logger.debug("Sending sentinel...")
+        
+        self.logger.info("Clearing queue")
+        
+        self.logger.info("---> Sending sentinel...")
         self.queue.put_nowait(None)
-        logger.debug("Waiting for queue to be processed...")
+        self.logger.info("---> Waiting for queue to be processed")
         while not self.queue.empty():
             self.queue.get_nowait()
             self.queue.task_done()
-        logger.debug("Queue cleared.")
-        logger.debug("Waiting for queue thread to terminate...")
+        self.logger.info("---> Waiting for queue thread to terminate...")
         self.queue.join()
-        logger.debug("Queue terminated.")
+        
+        self.logger.info("Queue terminated")
 
     def close_serial(self) -> None:
         """Close the serial connection and terminate related threads.
@@ -208,22 +242,24 @@ class REACHER:
         - Closes the serial port and stops the serial thread.
         - Handles any errors during closure with detailed logging.
         """
+        
+        self.logger.info("Closing serial connection")
+        
         try:
             self.serial_flag.set()
-            logger.debug("Serial flag set to terminate threads.")
+            self.logger.info("---> Serial flag set to terminate threads")
             if self.ser.is_open:
-                self.send_serial_command("UNLINK")
                 time.sleep(0.5)
                 self.ser.flush()
                 self.ser.close()
-                logger.info("Serial port closed.")
-            logger.debug("Waiting for serial thread to terminate...")
+                self.logger.info("---> Serial port closed")
+            self.logger.info("---> Waiting for serial thread to terminate...")
             self.serial_thread.join(timeout=5)
-            logger.debug("Serial thread terminated.")
+            self.logger.info("---> Serial thread terminated")
         except Exception as e:
-            logger.error(f"Error during closure: {e}")
+            self.logger.error(f"Error during closure: {e}")
         finally:
-            logger.debug("Cleanup complete.")
+            self.logger.info("--> Cleanup complete")
 
     def read_serial(self) -> None:
         """Read data from the serial port and queue it for processing.
@@ -237,7 +273,7 @@ class REACHER:
             if self.ser.is_open and self.ser.in_waiting > 0:
                 with self.thread_lock:
                     data = self.ser.readline().decode(encoding='utf-8', errors='replace').strip()
-                    logger.debug(f"Serial data received: {data}")
+                    self.logger.info(f"Serial data received: {data}")
                     self.queue.put(data)
             else:
                 time.sleep(0.1)
@@ -252,30 +288,18 @@ class REACHER:
         """
         while True:
             try:
-                data = self.queue.get(timeout=1)
+                line = self.queue.get(timeout=1)
                 self.queue.task_done()
-                if data is None:
-                    logger.debug("Sentinel received. Exiting queue thread.")
+                if line is None:
+                    self.logger.info("Sentinel received. Exiting queue thread.")
                     break
-                logger.debug(f"Processing queue data: {data}")
-                for line in str(data).split('\n'):
-                    if not self.program_flag.is_set():
-                        self.handle_data(line)
+                self.logger.info(f"--> Data in queue: {line}")
+
+                self.handle_data(line)
             except queue.Empty:
                 if self.serial_flag.is_set():
                     break
                 continue
-
-    def monitor_time_limit(self) -> None:
-        """Continuously monitor the time limit in a separate thread.
-
-        This method runs in a dedicated thread and checks if program limits are met,
-        ensuring timely stopping even when no serial data is received.
-        """
-        while self.time_check_flag.is_set():
-            if not self.program_flag.is_set():  # Program is running
-                self.check_limit_met()
-            time.sleep(0.1)  # Check every 100ms for responsiveness
 
     def handle_data(self, line: str) -> None:
         """Process a line of data from the queue.
@@ -288,77 +312,64 @@ class REACHER:
         **Args:**
         - `line (str)`: The raw data line to process.
         """
-        logger.debug(f"Handling data: {line}")
+
         try:
+            self.logger.info(f"--> Processing data: {line}")
+            
             with self.thread_lock:
-                self.arduino_configuration = json.loads(line)
-                logger.info(f"Updated arduino_configuration: {self.arduino_configuration}")
+                data = json.loads(line)
+                
+                with open(self.controller_log, 'a', newline='') as file:
+                            file.write(str(data))
+                            file.write('\n')
+                            file.flush()
+                
+                level = data['level']
+                self.code_dict.get(level)(data)
+                    
             return
-        except json.JSONDecodeError:
-            pass
-        try:
-            event_handlers = {
-                4: self.update_behavioral_events,
-                2: self.update_frame_events,
-            }
-            parts = str(line).split(',')
-            handler = event_handlers.get(len(parts))
-            if handler:
-                logger.debug(f"Processing parts: {parts}")
-                handler(parts)
-            else:
-                logger.debug(f"No handler found for data: {line}")
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Failed to parse JSON: {e}. Raw data: {data}")
         except Exception as e:
-            logger.error(f"Error processing data: {e}")
+            self.logger.error(f"Error processing JSON data: {e}")
 
-    def update_behavioral_events(self, parts: List[str]) -> None:
-        """Reflects lever press occurrences in GUI.
+    def update_firmware_information(self, event: dict) -> None:
+        if event["device"] == "CONTROLLER":
+            self.firmware_information = event
+            self.logger.info("--> Updated arduino configuration")
+        else:
+            self.hardware_settings.append(event)
+            self.logger.info("--> Updated hardware defaults list")
+            
+        
+    def update_behavioral_events(self, event: dict) -> None:
+        entry_dict: Dict[str, Union[str, int]] = {}
+        
+        match event.get('device'):
+            case "SWITCH_LEVER":
+                entry_dict['device'] = event.get('orientation') + "_LEVER"
+                entry_dict['event'] = f"{event.get('class')}_{event.get('event')}"
+                entry_dict['start_timestamp'] = event.get('start_timestamp')
+                entry_dict['end_timestamp'] = event.get('end_timestamp')
+            case "CONTROLLER":
+                entry_dict['device'] = event.get('device')
+                entry_dict['event'] = event.get('event')
+                entry_dict['start_timestamp'] = event.get('timestamp')
+                entry_dict['end_timestamp'] = event.get('timestamp')
+            case _:
+                entry_dict['device'] = event.get('device')
+                entry_dict['event'] = event.get('event')
+                entry_dict['start_timestamp'] = event.get('start_timestamp')
+                entry_dict['end_timestamp'] = event.get('end_timestamp')  
+                
+        self.behavior_data.append(entry_dict)
+        self.logger.info("--> Updated behavioral data")
+                
+    def update_frame_events(self, event: dict) -> None:
+        self.frame_data.append(event.get('timestamp'))
+        self.logger.info("--> Updated frame data")
 
-        **Description:**
-        - Processes behavioral events (e.g., lever presses) from serial data.
-        - Logs events to a CSV file with component, action, and timestamps.
-        - Thread-safe updates to the behavior_data list.
-
-        **Args:**
-        - `parts (List[str])`: Event data as [component, action, start_ts, end_ts].
-        """
-        component, action, start_ts, end_ts = parts
-        entry_dict: Dict[str, Union[str, int]] = {
-            'Component': component,
-            'Action': action,
-            'Start Timestamp': int(start_ts) if start_ts != '_' else start_ts,
-            'End Timestamp': int(end_ts) if end_ts != '_' else end_ts
-        }
-        with self.thread_lock:
-            logger.debug(f"Behavioral event: {entry_dict}")
-            self.behavior_data.append(entry_dict)
-
-        with open(self.logging_stream_file, 'a', newline='\n') as file:
-            writer = csv.DictWriter(file, fieldnames=['Component', 'Action', 'Start Timestamp', 'End Timestamp'])
-            writer.writerow(entry_dict)
-            file.flush()
-
-    def update_frame_events(self, parts: List[str]) -> None:
-        """Updates frame counts.
-
-        **Description:**
-        - Processes frame events (e.g., timestamps) from serial data.
-        - Logs frame timestamps to a CSV file.
-        - Thread-safe updates to the frame_data list.
-
-        **Args:**
-        - `parts (List[str])`: Frame data as [_, timestamp].
-        """
-        _, timestamp = parts
-        with self.thread_lock:
-            logger.debug(f"Frame event: {timestamp}")
-            self.frame_data.append(timestamp)
-
-        with open(self.logging_stream_file, 'a', newline='\n') as file:
-            writer = csv.DictWriter(file, fieldnames=['Frame Timestamp'])
-            writer.writerow({'Frame Timestamp': timestamp})
-
-    def send_serial_command(self, command: str) -> None:
+    def send_serial_command(self, command: dict) -> None:
         """Send a command to the Arduino via serial.
 
         **Description:**
@@ -374,8 +385,8 @@ class REACHER:
         with self.thread_lock:
             if not self.ser.is_open:
                 raise Exception("Serial port is not open.")
-            send = (f"{command}\n").encode()
-            logger.debug(f"Sending command '{send}' to Arduino.")
+            send = json.dumps(command).encode() + b'\n'
+            self.logger.debug(f"Sending command '{send}' to Arduino.")
             self.ser.write(send)
             self.ser.flush()
 
@@ -391,9 +402,9 @@ class REACHER:
         """
         if limit_type in ['Time', 'Infusion', 'Both']: 
             self.limit_type = limit_type
-            logger.info(f"Limit type set to: {limit_type}")
+            self.logger.info(f"Limit type set to: {limit_type}")
         else:
-            logger.warning(f"Invalid limit type: {limit_type}")
+            self.logger.warning(f"Invalid limit type: {limit_type}")
 
     def set_infusion_limit(self, limit: int) -> None:
         """Set the maximum number of infusions allowed.
@@ -438,9 +449,9 @@ class REACHER:
         if self.program_flag.is_set():
             self.program_flag.clear()
         self.program_running = True
-        self.send_serial_command("START-PROGRAM")
+        self.send_serial_command({"cmd": 101})
         self.program_start_time = time.time()
-        logger.info(f"Program started at {self.get_time()}")
+        self.logger.info(f"Program started at {self.get_time()}")
 
     def stop_program(self) -> None:
         """Stop the experimental program.
@@ -449,15 +460,15 @@ class REACHER:
         - Terminates the experiment by sending "END-PROGRAM".
         - Cleans up resources and records the end time.
         """
-        logger.info("Ending program...")
-        self.send_serial_command("END-PROGRAM")
+        self.logger.info("Ending program...")
+        self.send_serial_command({"cmd": 100})
         time.sleep(2)
         self.program_flag.set()
         self.program_running = False
         self.clear_queue()
         self.close_serial()
         self.program_end_time = time.time()
-        logger.info(f"Program ended at {self.get_time()}")
+        self.logger.info(f"Program ended at {self.get_time()}")
 
     def pause_program(self) -> None:
         """Pause the experimental program.
@@ -489,6 +500,17 @@ class REACHER:
         """
         return self.program_running
 
+    def monitor_time_limit(self) -> None:
+        """Continuously monitor the time limit in a separate thread.
+
+        This method runs in a dedicated thread and checks if program limits are met,
+        ensuring timely stopping even when no serial data is received.
+        """
+        while self.time_check_flag.is_set():
+            if not self.program_flag.is_set():  # Program is running
+                self.check_limit_met()
+            time.sleep(0.1)  # Check every 100ms for responsiveness
+
     def check_limit_met(self) -> None:
         """Check if program limits have been met and stop if necessary.
 
@@ -501,26 +523,26 @@ class REACHER:
             return  # No limits to check if program hasn't started or type unset
 
         elapsed_time = current_time - self.program_start_time - self.paused_time
-        infusion_count = sum(1 for entry in self.behavior_data if entry['Component'] == 'PUMP' and entry['Action'] == 'INFUSION')
-        logger.debug(f"Checking limits: elapsed_time={elapsed_time:.2f}, time_limit={self.time_limit}, infusion_count={infusion_count}, infusion_limit={self.infusion_limit}")
+        infusion_count = sum(1 for entry in self.behavior_data if entry['device'] == 'PUMP' and entry['event'] == 'INFUSION')
+        self.logger.debug(f"Checking limits: elapsed_time={elapsed_time:.2f}, time_limit={self.time_limit}, infusion_count={infusion_count}, infusion_limit={self.infusion_limit}")
 
         if self.limit_type == "Time":
             if elapsed_time >= self.time_limit:
-                logger.info("Time limit met, stopping program")
+                self.logger.info("Time limit met, stopping program")
                 self.stop_program()
         elif self.limit_type == "Infusion":
             if infusion_count >= self.infusion_limit:
                 if self.last_infusion_time is None:
                     self.last_infusion_time = current_time
                 if self.last_infusion_time and (current_time - self.last_infusion_time >= self.stop_delay):
-                    logger.info("Infusion limit met and stop delay elapsed, stopping program")
+                    self.logger.info("Infusion limit met and stop delay elapsed, stopping program")
                     self.stop_program()
         elif self.limit_type == "Both":
             if infusion_count >= self.infusion_limit:
                 if self.last_infusion_time is None:
                     self.last_infusion_time = current_time
             if (self.last_infusion_time and (current_time - self.last_infusion_time) >= self.stop_delay) or (elapsed_time >= self.time_limit):
-                logger.info("Either infusion limit with stop delay or time limit met, stopping program")
+                self.logger.info("Either infusion limit with stop delay or time limit met, stopping program")
                 self.stop_program()
 
     def set_data_destination(self, folder: str) -> None:
@@ -558,7 +580,7 @@ class REACHER:
         """
         if not self.behavior_filename and not self.data_destination:
             self.data_destination = os.path.expanduser(r'~/REACHER/DATA')
-            self.behavior_filename = f"{self.get_time()}.csv"
+            self.behavior_filename = f"{self.get_time()}"
         containing_folder = os.path.join(self.data_destination, self.behavior_filename.split('.')[0])
         if os.path.exists(containing_folder):
             data_folder_path = os.path.join(self.data_destination, f"{self.behavior_filename.split('.')[0]}-{time.time():.4f}")
@@ -599,17 +621,6 @@ class REACHER:
         - `Optional[str]`: The filename or None if not set.
         """
         return self.behavior_filename
-    
-    def set_logging_stream_destination(self, path: str) -> None:
-        """Set the destination for the logging stream CSV file.
-
-        **Description:**
-        - Specifies the location for the CSV log file.
-
-        **Args:**
-        - `path (str)`: The destination path.
-        """
-        self.logging_stream_file = os.path.join(path, self.logging_stream_file)
 
     def get_behavior_data(self) -> List[Dict[str, Union[str, int]]]:
         """Get the collected behavioral data.
@@ -633,7 +644,10 @@ class REACHER:
         """
         return self.frame_data
     
-    def get_arduino_configuration(self) -> Dict:
+    def get_frame_timestamps_count(self) -> int:
+        return len(self.frame_data) if self.frame_data else 0
+    
+    def get_firmware_information(self) -> Dict:
         """Get the current Arduino configuration.
 
         **Description:**
@@ -643,7 +657,10 @@ class REACHER:
         **Returns:**
         - `Dict`: The configuration dictionary.
         """
-        return self.arduino_configuration
+        return self.firmware_information
+    
+    def get_hardware_settings(self) -> List:
+        return self.hardware_settings
     
     def get_box_name(self) -> Optional[str]:
         """Get the name of the box.

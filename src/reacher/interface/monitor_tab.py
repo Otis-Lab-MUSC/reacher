@@ -3,12 +3,14 @@ import matplotlib
 from matplotlib import pyplot as plt
 matplotlib.use('QtAgg') 
 import panel as pn
+pn.extension('modal', 'tabulator')
 import os
+from pathlib import Path
+import urllib.parse
 import sys
 import time
 import datetime
 import pandas as pd
-import openpyxl
 import plotly.graph_objects as go
 import requests
 from typing import Optional, Any
@@ -18,8 +20,8 @@ from reacher.interface import Dashboard
 class MonitorTab(Dashboard):
     """A class to manage the Monitor tab UI for real-time experiment monitoring, inheriting from Dashboard."""
 
-    def __init__(self, reacher: REACHER, program_tab: Any, hardware_tab: Any, response_textarea: pn.pane.HTML, header: pn.pane.Alert) -> None:
-        from reacher.interface import ProgramTab, HardwareTab
+    def __init__(self, reacher: REACHER, program_tab: Any, hardware_tab: Any, schedule_tab: Any, response_textarea: pn.pane.HTML, header: pn.pane.Alert) -> None:
+        from reacher.interface import ProgramTab, HardwareTab, ScheduleTab
         """Initialize the MonitorTab with inherited Dashboard components and tab-specific UI.
 
         **Description:**
@@ -39,10 +41,9 @@ class MonitorTab(Dashboard):
         self.animation_image: pn.pane.Image = pn.pane.Image(self.img_path, width=200)
         self.animation_markdown: pn.pane.Markdown = pn.pane.Markdown("`Waiting...`")
         self.df: pd.DataFrame = pd.DataFrame()
-        self.plotly_pane: pn.pane.Plotly = pn.pane.Plotly(sizing_mode="stretch_width", height=600)
+        self.callback_time: int = 5000
+        self.plotly_pane: pn.pane.Plotly = pn.pane.Plotly(sizing_mode="stretch_width", height=500, width=500)
         self.summary_pane: pn.pane.DataFrame = pn.pane.DataFrame(index=False, max_rows=10, styles={"background-color": "#1e1e1e", "color": "white"})
-        self.start_program_button: pn.widgets.Button = pn.widgets.Button(icon="player-play")
-        self.start_program_button.on_click(self.start)
         self.pause_program_button: pn.widgets.Button = pn.widgets.Button(icon="player-pause")
         self.pause_program_button.on_click(self.pause)
         self.stop_program_button: pn.widgets.Button = pn.widgets.Button(icon="player-stop")
@@ -52,6 +53,39 @@ class MonitorTab(Dashboard):
         self.periodic_callback: Optional[Any] = None
         self.program_tab: ProgramTab = program_tab
         self.hardware_tab: HardwareTab = hardware_tab
+        self.schedule_tab: ScheduleTab = schedule_tab
+        self.confirm_start_button: pn.widgets.Button = pn.widgets.Button(name="Ready to run?", icon="player-play", button_type="primary")
+        self.confirm_start_button.on_click(self.start)
+        self.confirm_start_settings: pn.pane.HTML = pn.pane.HTML()
+        self.confirm_start_modal = pn.Modal(
+            self.confirm_start_settings,
+            self.confirm_start_button,
+            background_close=True,
+            show_close_button=False
+        )
+        self.start_program_button = self.confirm_start_modal.create_button("toggle", icon="player-play")
+        self.start_program_button.on_click(self.get_session_setting)
+        
+    def get_session_setting(self, _: Any):
+        styles = {
+            'background-color': '#F6F6F6',
+            'color': "black", 
+            'border': '2px solid black',
+            'border-radius': '5px', 
+            'padding': '10px'
+        }
+        text = f"""
+        <h5 style='color: black;'><u>Settings Overview</u></h5><br>
+        <p>Schedule: {self.reacher.get_firmware_information().get("desc")}</p>
+        <p>Ratio or Interval: {self.schedule_tab.fixed_ratio_intslider.value} (active presses or s)</p>
+        <p>Active Lever Timeout: {self.schedule_tab.timeout_intslider.value} (s)</p>
+        <p>Armed devices: {self.program_tab.get_hardware()}</p>
+        <p>Limiter: {self.program_tab.limit_type_radiobutton.value}</p>
+        <p>Time Limit: {self.program_tab.get_formatted_time() if self.program_tab.limit_type_radiobutton.value == "Time" or self.program_tab.limit_type_radiobutton.value == "Both" else "N/A"}</p>
+        <p>Infusion Limit: {self.program_tab.infusion_limit_intslider.value if self.program_tab.limit_type_radiobutton.value == "Infusion" or self.program_tab.limit_type_radiobutton.value == "Both" else "N/A"}</p>
+        """        
+        self.confirm_start_settings.object = text
+        self.confirm_start_settings.styles = styles
 
     def fetch_data(self) -> pd.DataFrame:
         """Fetch behavioral data from the REACHER instance.
@@ -85,13 +119,22 @@ class MonitorTab(Dashboard):
         """
         if df.empty:
             self.add_response("No data available to summarize.")
-            return pd.DataFrame(columns=["Action", "Component", "Count"])
+            return pd.DataFrame(columns=["device", "event", "count"])
         try:
-            summary = df[df["Action"] != "ORIGIN"].groupby(["Action", "Component"]).size().reset_index(name="Count")
+            summary = df[df["event"] != "START"].groupby(["device", "event"]).size().reset_index(name="count")
+            
+            timestamp_count = self.reacher.get_frame_timestamps_count()
+            timestamp_row = pd.DataFrame({
+                "device": ["MICROSCOPE"],
+                "event": ["FRAME"],
+                "count": [timestamp_count]
+            })
+            summary = pd.concat([summary, timestamp_row], ignore_index=True)
+            
             return summary
         except KeyError as e:
             self.add_error("KeyError: Missing column(s) in DataFrame.", str(e))
-            return pd.DataFrame(columns=["Action", "Component", "Count"])
+            return pd.DataFrame(columns=["device", "event", "count"])
 
     def generate_plotly_plot(self) -> go.Figure:
         """Generate a Plotly plot of the behavioral events.
@@ -106,7 +149,7 @@ class MonitorTab(Dashboard):
             fig = go.Figure()
             fig.add_annotation(text="No data available", showarrow=False, x=0.5, y=0.5, xref="paper", yref="paper")
             return fig
-        components = self.df['Component'].unique()
+        components = self.df['device'].unique()
         y_positions = {component: i for i, component in enumerate(components)}
         colors = {
             'ACTIVE_PRESS': 'red',
@@ -115,17 +158,17 @@ class MonitorTab(Dashboard):
             'LICK': 'pink',
             'INFUSION': 'red',
             'STIM': 'green',
-            'ORIGIN': 'red'
+            'START': 'red'
         }
         fig = go.Figure(layout=dict(height=600))
         for _, row in self.df.iterrows():
-            component = row['Component']
-            action = row['Action']
-            start = row['Start Timestamp']
-            end = row['End Timestamp']
+            component = row['device']
+            action = row['event']
+            start = row['start_timestamp']
+            end = row['end_timestamp']
             y_pos = y_positions[component]
 
-            if action == 'ORIGIN':
+            if action == 'START':
                 fig.add_vline(
                     x=start,
                     line=dict(color=colors.get(action, 'grey'), width=2, dash='dash'),
@@ -150,7 +193,7 @@ class MonitorTab(Dashboard):
                     name=component
                 ))
         fig.update_layout(
-            title="Event Timeline",
+            title=f"Event Timeline (refresh rate: {self.callback_time}ms)",
             xaxis_title="Timestamp",
             yaxis=dict(
                 title="Components",
@@ -200,12 +243,13 @@ class MonitorTab(Dashboard):
         preset_action = self.program_tab.presets_dict.get(self.preset_name)
         if preset_action:
             preset_action()
-
+        
     def start(self, _: Any) -> None:
-        """Start the experimental program.
+        """Start the experimental program after confirmation.
 
         **Description:**
         - Initiates the experiment, arms devices, and starts periodic updates.
+        - Closes the confirmation modal.
 
         **Args:**
         - `_ (Any)`: Unused event argument.
@@ -213,16 +257,8 @@ class MonitorTab(Dashboard):
         **Note:**
         - Requires `program_tab` and `hardware_tab` to be set by a parent class.
         """
-        if self.program_tab is None or self.hardware_tab is None:
-            self.add_error("Dependencies not set", "ProgramTab or HardwareTab not initialized.")
-            return
         try:
-            reacher_log_path = os.path.expanduser(r'~/REACHER/LOG')
-            if os.path.exists(reacher_log_path):
-                self.reacher.set_logging_stream_destination(reacher_log_path)
-            else:
-                os.makedirs(reacher_log_path, exist_ok=True)
-                self.reacher.set_logging_stream_destination(reacher_log_path)
+            self.confirm_start_modal.hide()
             if not self.reacher.ser.is_open:
                 self.add_error("Serial port is not open", "Please connect to the microcontroller first.")
                 return
@@ -232,7 +268,7 @@ class MonitorTab(Dashboard):
             self.add_response(f"Started program at {formatted_time}")
             if pn.state.curdoc:
                 if self.periodic_callback is None:
-                    self.periodic_callback = pn.state.add_periodic_callback(self.update_plot, period=5000)
+                    self.periodic_callback = pn.state.add_periodic_callback(self.update_plot, period=self.callback_time)
             self.animation_image.object = self.gif_path
             self.apply_preset()
             self.hardware_tab.arm_devices(self.program_tab.get_hardware())
@@ -289,61 +325,65 @@ class MonitorTab(Dashboard):
             self.header.object = "Program finished."
         except Exception as e:
             self.add_error("Failed to end program", str(e))
-
+            
     def download(self, _: Any) -> None:
         """Download experiment data to files.
 
         **Description:**
         - Exports behavioral data, frame timestamps, and summaries to CSV files.
+        - Dynamically summarizes counts of all device and event combinations.
 
         **Args:**
         - `_ (Any)`: Unused event argument.
         """
         try:
-            start_time = datetime.datetime.fromtimestamp(self.reacher.get_start_time()).strftime('%H:%M:%S') if self.reacher.get_start_time() else "N/A"
-            end_time = datetime.datetime.fromtimestamp(self.reacher.get_end_time()).strftime('%H:%M:%S') if self.reacher.get_end_time() else "N/A"
-            arduino_configuration_summary = pd.Series(self.reacher.get_arduino_configuration())
+            start_time = (datetime.datetime.fromtimestamp(self.reacher.get_start_time())
+                        .strftime('%H:%M:%S') if self.reacher.get_start_time() else "N/A")
+            end_time = (datetime.datetime.fromtimestamp(self.reacher.get_end_time())
+                        .strftime('%H:%M:%S') if self.reacher.get_end_time() else "N/A")
+
+            firmware_information = pd.Series(self.reacher.get_firmware_information())
+            hardware_settings = pd.json_normalize(self.reacher.get_hardware_settings(), sep=' | ')
             data = self.reacher.get_behavior_data()
             frames = self.reacher.get_frame_data()
-            df = pd.DataFrame.from_records(data, columns=['Component', 'Action', 'Start Timestamp', 'End Timestamp'])
-            series = pd.Series(frames)
-            rh_active_data = df[(df['Component'] == 'RH_LEVER') & (df['Action'] == 'ACTIVE_PRESS')]
-            rh_timeout_data = df[(df['Component'] == 'RH_LEVER') & (df['Action'] == 'TIMEOUT_PRESS')]
-            rh_inactive_data = df[(df['Component'] == 'RH_LEVER') & (df['Action'] == 'INACTIVE_PRESS')]
-            lh_active_data = df[(df['Component'] == 'LH_LEVER') & (df['Action'] == 'ACTIVE_PRESS')]
-            lh_timeout_data = df[(df['Component'] == 'LH_LEVER') & (df['Action'] == 'TIMEOUT_PRESS')]
-            lh_inactive_data = df[(df['Component'] == 'LH_LEVER') & (df['Action'] == 'INACTIVE_PRESS')]
-            pump_data = df[df['Component'] == 'PUMP']
-            lick_data = df[df['Component'] == 'LICK_CIRCUIT']
-            laser_data = df[df['Component'] == 'LASER']
+
+            df = pd.DataFrame.from_records(data, columns=['device', 'event', 'start_timestamp', 'end_timestamp'])
+
+            event_counts = df.groupby(['device', 'event']).size().unstack(fill_value=0)
             summary_dict = {
                 'Start Time': start_time,
                 'End Time': end_time,
                 'Behavior Chamber': self.reacher.get_box_name(),
-                'RH Active Presses': len(rh_active_data) if not rh_active_data.empty else 0,
-                'RH Timeout Presses': len(rh_timeout_data) if not rh_timeout_data.empty else 0,
-                'RH Inactive Presses': len(rh_inactive_data) if not rh_inactive_data.empty else 0,
-                'LH Active Presses': len(lh_active_data) if not lh_active_data.empty else 0,
-                'LH Timeout Presses': len(lh_timeout_data) if not lh_timeout_data.empty else 0,
-                'LH Inactive Presses': len(lh_inactive_data) if not lh_inactive_data.empty else 0,
-                'Infusions': len(pump_data[pump_data['Action'] == 'INFUSION']) if not pump_data.empty else 0,
-                'Licks': len(lick_data[lick_data['Action'] == 'LICK']) if not lick_data.empty else 0,
-                'Stims': len(laser_data[laser_data['Action'] == 'STIM']) if not laser_data.empty else 0,
                 'Frames Collected': len(frames)
             }
+
+            for device in event_counts.index:
+                for event in event_counts.columns:
+                    count = event_counts.loc[device, event]
+                    if count > 0:  # only include non-zero counts
+                        summary_dict[f"{device} {event}"] = count
+
             summary = pd.Series(summary_dict)
+            series = pd.Series(frames)
+
             destination = self.reacher.make_destination_folder()
             output = os.path.join(destination, f'{self.reacher.get_filename()}.xlsx')
+            file_url = Path(os.path.join(destination, output))
+            
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 summary.to_excel(writer, sheet_name='Session Summary')
                 df.to_excel(writer, sheet_name='Behavior Data')
-                arduino_configuration_summary.to_excel(writer, sheet_name='Arduino Configuration')
+                firmware_information.to_excel(writer, sheet_name='Firmware Information')
+                hardware_settings.to_excel(writer, 'Hardware Settings')
                 series.to_excel(writer, sheet_name='Frame Timestamps')
-            # df.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_behavior-data.csv"))
-            # series.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_frame-timestamps.csv"))
-            # summary.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_session-summary.csv"))
-            # arduino_configuration_summary.to_csv(os.path.join(destination, f"{self.reacher.get_filename()}_arduino-configuration.csv"))
-            self.add_response(f"Data saved successfully at '{destination}'")
+
+            link_id = f"copy_link_{id(self)}_{self.get_time().replace(':', '-')}"
+            file_path_str = str(file_url).replace('\\', '\\\\') 
+
+            js_copy = """
+            <a href='#' id='{link_id}' onclick="navigator.clipboard.writeText('{file_path}').then(() => alert('File path copied to clipboard: {file_path}'))">{file_path}</a>
+            """
+            self.add_response(f"Data saved successfully at {js_copy.format(link_id=link_id, file_path=file_path_str)}")
         except Exception as e:
             self.add_error("Failed to save data", str(e))
 
@@ -384,7 +424,7 @@ class MonitorTab(Dashboard):
         """
         program_control_area = pn.Column(
             pn.pane.Markdown("### Program Controls"),
-            pn.Row(self.start_program_button, self.pause_program_button, self.stop_program_button, self.download_button)
+            pn.Row(self.start_program_button, self.confirm_start_modal, self.pause_program_button, self.stop_program_button, self.download_button)
         )
         plot_area = pn.Row(
             self.plotly_pane,

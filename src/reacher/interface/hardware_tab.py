@@ -27,10 +27,13 @@ class HardwareTab(Dashboard):
             "Pump": self.arm_pump,
             "Lick Circuit": self.arm_lick_circuit,
             "Laser": self.arm_laser,
-            "Imaging Timestamp Receptor": self.arm_frames
+            "Imaging Microscope": self.arm_frames
         }
         self.active_lever_button: pn.widgets.MenuButton = pn.widgets.MenuButton(
-            name="Active Lever", items=[("LH Lever", "LH Lever"), ("RH Lever", "RH Lever")], button_type="primary"
+            name="Active Lever", 
+            items=[("LH Lever", "LH Lever"), 
+                   ("RH Lever", "RH Lever")], 
+            button_type="primary"
         )
         self.active_lever_button.on_click(self.set_active_lever)
         self.rh_lever_armed: bool = False
@@ -110,24 +113,31 @@ class HardwareTab(Dashboard):
             disabled=False
         )
         self.arm_laser_button.param.watch(self.arm_laser, 'value')
-        self.stim_mode_widget: pn.widgets.Select = pn.widgets.Select(
+        self.test_laser_button: pn.widgets.Button = pn.widgets.Button(
+            name="Test Laser",
+            button_type="danger",
+            disabled=False
+        )
+        self.test_laser_button.on_click(self.test_laser)
+        self.stim_mode_widget: pn.widgets.ToggleGroup = pn.widgets.ToggleGroup(
             name="Stim Mode",
             options=["Cycle", "Active-Press"],
-            value="Cycle"
+            behavior="radio",
+            value="Active-Press"
         )
         self.stim_frequency_slider: pn.widgets.IntInput = pn.widgets.IntInput(
             name="Frequency (Hz)",
             start=1,
             end=100,
             step=1,
-            value=20
+            value=40
         )
         self.stim_duration_slider: pn.widgets.IntInput = pn.widgets.IntInput(
             name="Stim Duration (s)",
             start=1,
             end=60,
             step=5,
-            value=30
+            value=5
         )
         self.send_laser_config_button: pn.widgets.Button = pn.widgets.Button(
             name="Send",
@@ -151,9 +161,11 @@ class HardwareTab(Dashboard):
         - `event (Any)`: The event object containing the new lever selection.
         """
         if event.new == "LH Lever":
-            self.reacher.send_serial_command("ACTIVE_LEVER_LH")
+            self.reacher.send_serial_command({"cmd": 1381})
+            self.reacher.send_serial_command({"cmd": 1080})
         elif event.new == "RH Lever":
-            self.reacher.send_serial_command("ACTIVE_LEVER_RH")
+            self.reacher.send_serial_command({"cmd": 1081})
+            self.reacher.send_serial_command({"cmd": 1380})
 
     def arm_rh_lever(self, _: Any) -> None:
         """Arm or disarm the right-hand lever.
@@ -166,11 +178,11 @@ class HardwareTab(Dashboard):
         """
         try:
             if not self.rh_lever_armed:
-                self.reacher.send_serial_command("ARM_LEVER_RH")
+                self.reacher.send_serial_command({"cmd": 1001})
                 self.rh_lever_armed = True
                 self.arm_rh_lever_button.icon = "unlock"
             else:
-                self.reacher.send_serial_command("DISARM_LEVER_RH")
+                self.reacher.send_serial_command({"cmd": 1000})
                 self.rh_lever_armed = False
                 self.arm_rh_lever_button.icon = "lock"
         except Exception as e:
@@ -187,11 +199,11 @@ class HardwareTab(Dashboard):
         """
         try:
             if not self.lh_lever_armed:
-                self.reacher.send_serial_command("ARM_LEVER_LH")
+                self.reacher.send_serial_command({"cmd": 1301})
                 self.lh_lever_armed = True
                 self.arm_lh_lever_button.icon = "unlock"
             else:
-                self.reacher.send_serial_command("DISARM_LEVER_LH")
+                self.reacher.send_serial_command({"cmd": 1300})
                 self.lh_lever_armed = False
                 self.arm_lh_lever_button.icon = "lock"
         except Exception as e:
@@ -208,11 +220,11 @@ class HardwareTab(Dashboard):
         """
         try:
             if not self.cue_armed:
-                self.reacher.send_serial_command("ARM_CS")
+                self.reacher.send_serial_command({"cmd": 301})
                 self.cue_armed = True
                 self.arm_cue_button.icon = "unlock"
             else:
-                self.reacher.send_serial_command("DISARM_CS")
+                self.reacher.send_serial_command({"cmd": 300})
                 self.cue_armed = False
                 self.arm_cue_button.icon = "lock"
         except Exception as e:
@@ -227,8 +239,8 @@ class HardwareTab(Dashboard):
         **Args:**
         - `_ (Any)`: Unused event argument.
         """
-        self.reacher.send_serial_command(f"SET_FREQUENCY_CS:{self.cue_frequency_intslider.value}")
-        self.reacher.send_serial_command(f"SET_DURATION_CS:{self.cue_duration_intslider.value}")
+        self.reacher.send_serial_command({"cmd": 371, "frequency": self.cue_frequency_intslider.value})
+        self.reacher.send_serial_command({"cmd": 372, "duration": self.cue_duration_intslider.value})
 
     def arm_pump(self, _: Any) -> None:
         """Arm or disarm the pump.
@@ -241,11 +253,11 @@ class HardwareTab(Dashboard):
         """
         try:
             if not self.pump_armed:
-                self.reacher.send_serial_command("ARM_PUMP")
+                self.reacher.send_serial_command({"cmd": 401})
                 self.pump_armed = True
                 self.arm_pump_button.icon = "unlock"
             else:
-                self.reacher.send_serial_command("DISARM_PUMP")
+                self.reacher.send_serial_command({"cmd": 400})
                 self.pump_armed = False
                 self.arm_pump_button.icon = "lock"
         except Exception as e:
@@ -262,11 +274,11 @@ class HardwareTab(Dashboard):
         """
         try:
             if not self.lick_circuit_armed:
-                self.reacher.send_serial_command("ARM_LICK_CIRCUIT")
+                self.reacher.send_serial_command({"cmd": 501})
                 self.lick_circuit_armed = True
                 self.arm_lick_circuit_button.icon = "unlock"
             else:
-                self.reacher.send_serial_command("DISARM_LICK_CIRCUIT")
+                self.reacher.send_serial_command({"cmd": 500})
                 self.lick_circuit_armed = False
                 self.arm_lick_circuit_button.icon = "lock"
         except Exception as e:
@@ -283,11 +295,11 @@ class HardwareTab(Dashboard):
         """
         try:
             if not self.microscope_armed:
-                self.reacher.send_serial_command("ARM_FRAME")
+                self.reacher.send_serial_command({"cmd": 901})
                 self.microscope_armed = True
                 self.arm_microscope_button.icon = "unlock"
             else:
-                self.reacher.send_serial_command("DISARM_FRAME")
+                self.reacher.send_serial_command({"cmd": 900})
                 self.microscope_armed = False
                 self.arm_microscope_button.icon = "lock"
         except Exception as e:
@@ -304,13 +316,19 @@ class HardwareTab(Dashboard):
         """
         try:
             if not self.laser_armed:
-                self.reacher.send_serial_command("ARM_LASER")
+                self.reacher.send_serial_command({"cmd": 601})
                 self.laser_armed = True
                 self.arm_laser_button.icon = "unlock"
             else:
-                self.reacher.send_serial_command("DISARM_LASER")
+                self.reacher.send_serial_command({"cmd": 600})
                 self.laser_armed = False
                 self.arm_laser_button.icon = "lock"
+        except Exception as e:
+            self.add_error(f"{e}", str(e))
+    
+    def test_laser(self, _: Any) -> None:
+        try:
+            self.reacher.send_serial_command({"cmd":603})
         except Exception as e:
             self.add_error(f"{e}", str(e))
 
@@ -324,9 +342,12 @@ class HardwareTab(Dashboard):
         - `_ (Any)`: Unused event argument.
         """
         try:
-            self.reacher.send_serial_command(f"LASER_STIM_MODE_{str(self.stim_mode_widget.value).upper()}")
-            self.reacher.send_serial_command(f"LASER_DURATION:{str(self.stim_duration_slider.value)}")
-            self.reacher.send_serial_command(f"LASER_FREQUENCY:{str(self.stim_frequency_slider.value)}")
+            self.reacher.send_serial_command({"cmd": (681 if self.stim_mode_widget.value == "Active-Press" else 682)}) 
+            self.reacher.send_serial_command({"cmd": 672, "duration": self.stim_duration_slider.value * 1000}) # converted to milliseconds
+            self.reacher.send_serial_command({"cmd": 671, "frequency": self.stim_frequency_slider.value})
+            
+            self.reacher.logger.info(f"Setting laser duration to {self.stim_duration_slider.value}s")
+            self.reacher.logger.info(f"Setting laser frequency to {self.stim_frequency_slider.value}Hz")
         except Exception as e:
             self.add_error("Failed to send laser configuration", str(e))
 
@@ -342,24 +363,28 @@ class HardwareTab(Dashboard):
         **Returns:**
         - `plt.Figure`: The matplotlib figure object.
         """
-        total_duration = 1
-        t = np.linspace(0, total_duration, 1000)
-        square_wave = np.zeros_like(t)
-        if frequency == 1:
-            square_wave[1:999] = 1
-        else:
-            period = 1 / frequency
-            for i, time_point in enumerate(t):
-                if (time_point % period) < (period / 2):
-                    square_wave[i] = 1
-        plt.figure(figsize=(5, 2))
-        plt.plot(t, square_wave, drawstyle='steps-pre')
-        plt.title(f'Square Wave - {frequency} Hz')
-        plt.xlabel('Time [s]')
-        plt.ylabel('Amplitude')
-        plt.ylim([-0.1, 1.1])
-        plt.grid(True)
-        return plt.gcf()
+        try:
+            total_duration = 1
+            t = np.linspace(0, total_duration, 1000)
+            square_wave = np.zeros_like(t)
+            if frequency == 1:
+                square_wave[1:999] = 1
+            else:
+                if frequency > 0:
+                    period = 1 / frequency
+                    for i, time_point in enumerate(t):
+                        if (time_point % period) < (period / 2):
+                            square_wave[i] = 1
+            plt.figure(figsize=(5, 2))
+            plt.plot(t, square_wave, drawstyle='steps-pre')
+            plt.title(f'Square Wave - {frequency} Hz')
+            plt.xlabel('Time [s]')
+            plt.ylabel('Amplitude')
+            plt.ylim([-0.1, 1.1])
+            plt.grid(True)
+            return plt.gcf()
+        except Exception as e:
+            self.add_error(f"Failed to plot laser frequency model", e)
 
     def arm_devices(self, devices: List[str]) -> None:
         """Arm the specified devices.
@@ -373,8 +398,8 @@ class HardwareTab(Dashboard):
         for device in devices:
             arm_device = self.hardware_components.get(device)
             if arm_device:
-                arm_device(None)
-
+                arm_device(None)              
+            
     def layout(self) -> pn.Row:
         """Construct the layout for the HardwareTab.
 
@@ -410,6 +435,7 @@ class HardwareTab(Dashboard):
             pn.Spacer(height=50),
             pn.pane.Markdown("### Laser"),
             self.arm_laser_button,
+            self.test_laser_button,
             self.stim_mode_widget,
             self.stim_frequency_slider,
             self.stim_duration_slider,

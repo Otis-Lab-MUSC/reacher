@@ -16,26 +16,62 @@ class ScheduleTab(Dashboard):
         super().__init__()
         self.reacher = reacher
         self.response_textarea = response_textarea
-        self.timeout_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(name="Timeout Duration(s)", value=20, start=0, end=600, step=5)
-        self.send_timeout_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
-        self.send_timeout_button.on_click(self.send_timeout)
-        self.trace_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(name="Trace Duration(s)", value=0, start=0, end=60, step=1)
+        self.timeout_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(
+            name="Timeout Duration(s)", 
+            value=20, 
+            start=0, 
+            end=600, 
+            step=5
+        )
+        self.send_rh_timeout_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
+        self.send_rh_timeout_button.on_click(self.send_rh_timeout)
+        self.trace_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(
+            name="Trace Duration(s)", 
+            value=0, 
+            start=0, 
+            end=60, 
+            step=1
+        )
         self.send_trace_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
         self.send_trace_button.on_click(self.send_trace)
-        self.fixed_ratio_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(name="Fixed Ratio Interval", value=1, start=1, end=50, step=1)
+        self.fixed_ratio_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(
+            name="Fixed Ratio Interval", 
+            value=1, 
+            start=1, 
+            end=50, 
+            step=1
+        )
         self.send_fixed_ratio_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
         self.send_fixed_ratio_button.on_click(self.send_fixed_ratio)
-        self.progressive_ratio_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(name="Progressive Ratio", value=2, start=1, end=50, step=1)
+        self.progressive_ratio_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(
+            name="Progressive Ratio", 
+            value=1, 
+            start=1, 
+            end=50, 
+            step=1
+        )
         self.send_progressive_ratio_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
         self.send_progressive_ratio_button.on_click(self.send_progressive_ratio)
-        self.variable_interval_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(name="Variable Interval", value=15, start=1, end=100, step=1)
+        self.variable_interval_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(
+            name="Variable Interval", 
+            value=15, 
+            start=1, 
+            end=100, 
+            step=1
+        )
         self.send_variable_interval_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
         self.send_variable_interval_button.on_click(self.send_variable_interval)
-        self.omission_interval_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(name="Omission Interval", value=20, start=1, end=100, step=1)
+        self.omission_interval_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(
+            name="Omission Interval", 
+            value=20, 
+            start=1, 
+            end=100, 
+            step=1
+        )
         self.send_omission_interval_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
         self.send_omission_interval_button.on_click(self.send_omission_interval)
 
-    def send_timeout(self, _: Any) -> None:
+    def send_rh_timeout(self, _: Any) -> None:
         """Send the timeout duration to the Arduino.
 
         **Description:**
@@ -45,7 +81,7 @@ class ScheduleTab(Dashboard):
         - `_ (Any)`: Unused event argument.
         """
         try:
-            self.reacher.send_serial_command(f"SET_TIMEOUT_PERIOD_LENGTH:{self.timeout_intslider.value * 1000}")
+            self.reacher.send_serial_command({"cmd": 1074, "timeout": self.timeout_intslider.value * 1000})
             self.add_response(f"Set timeout period to {self.timeout_intslider.value * 1000}")
         except Exception as e:
             self.add_error("Failed to send timeout interval", str(e))
@@ -60,7 +96,7 @@ class ScheduleTab(Dashboard):
         - `_ (Any)`: Unused event argument.
         """
         try:
-            self.reacher.send_serial_command(f"SET_TRACE_INTERVAL:{self.trace_intslider.value * 1000}")
+            self.reacher.send_serial_command({"cmd": 373, "trace": self.trace_intslider.value * 1000})
             self.add_response(f"Set trace interval to {self.trace_intslider.value * 1000}")
         except Exception as e:
             self.add_error("Failed to send trace interval", str(e))
@@ -75,12 +111,12 @@ class ScheduleTab(Dashboard):
         - `_ (Any)`: Unused event argument.
         """
         try:
-            self.reacher.send_serial_command(f"SET_RATIO:{self.fixed_ratio_intslider.value}")
+            self.reacher.send_serial_command({"cmd": 201, "ratio": self.fixed_ratio_intslider.value})
             self.add_response(f"Set fixed ratio to {self.fixed_ratio_intslider.value}")
         except Exception as e:
             self.add_error("Failed to send fixed ratio interval", str(e))
 
-    def send_progressive_ratio(self, _: Any) -> None:
+    def send_progressive_ratio(self, _: Any) -> None: #FIXME: add JSON code
         """Send the progressive ratio interval to the Arduino.
 
         **Description:**
@@ -95,7 +131,7 @@ class ScheduleTab(Dashboard):
         except Exception as e:
             self.add_error("Failed to send progressive ratio interval", str(e))
 
-    def send_variable_interval(self, _: Any) -> None:
+    def send_variable_interval(self, _: Any) -> None: #FIXME: add JSON code
         """Send the variable interval to the Arduino.
 
         **Description:**
@@ -110,7 +146,7 @@ class ScheduleTab(Dashboard):
         except Exception as e:
             self.add_error("Failed to send variable interval", str(e))
 
-    def send_omission_interval(self, _: Any) -> None:
+    def send_omission_interval(self, _: Any) -> None: #FIXME: add JSON code
         """Send the omission interval to the Arduino.
 
         **Description:**
@@ -138,7 +174,7 @@ class ScheduleTab(Dashboard):
         self.progressive_ratio_intslider.value = 2
         self.variable_interval_intslider.value = 15
         self.omission_interval_intslider.value = 20
-
+        
     def layout(self) -> pn.Row:
         """Construct the layout for the ScheduleTab.
 
@@ -150,7 +186,7 @@ class ScheduleTab(Dashboard):
         """
         within_trial_dynamics_area = pn.Column(
             pn.pane.Markdown("### Within-Trial Dynamics"),
-            pn.Row(self.timeout_intslider, self.send_timeout_button),
+            pn.Row(self.timeout_intslider, self.send_rh_timeout_button),
             pn.Row(self.trace_intslider, self.send_trace_button)
         )
         training_schedule_area = pn.Column(

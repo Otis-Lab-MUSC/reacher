@@ -19,7 +19,6 @@ class ProgramTab(Dashboard):
         self.hardware_checkbuttongroup: pn.widgets.CheckButtonGroup = pn.widgets.CheckButtonGroup(
             name="Select hardware to use:",
             options=["LH Lever", "RH Lever", "Cue", "Pump", "Lick Circuit", "Laser", "Imaging Microscope"],
-            value=["LH Lever", "RH Lever", "Cue", "Pump"],
             orientation='vertical',
             button_style="outline"
         )
@@ -115,6 +114,15 @@ class ProgramTab(Dashboard):
         **Returns:**
         - `str`: Formatted time string (e.g., "1hr 30min 45s").
         """
+        total_minutes = minutes
+        extra_hours, minutes = divmod(total_minutes, 60)
+        hours += extra_hours
+        return f"{hours}hr {minutes}min {seconds}s"
+    
+    def get_formatted_time(self) -> str:
+        hours = self.time_limit_hour.value
+        minutes = self.time_limit_min.value
+        seconds = self.time_limit_sec.value
         total_minutes = minutes
         extra_hours, minutes = divmod(total_minutes, 60)
         hours += extra_hours

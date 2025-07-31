@@ -2,6 +2,7 @@ import panel as pn
 from typing import Any
 from .dashboard import Dashboard
 from reacher.kernel import REACHER
+import time
 
 class HomeTab(Dashboard):
     """A class to manage the Home tab UI for REACHER experiments."""
@@ -17,6 +18,7 @@ class HomeTab(Dashboard):
         - `reacher (REACHER)`: The REACHER instance.
         - `response_textarea (pn.pane.HTML)`: The shared response terminal pane.
         """
+        from reacher.interface import ProgramTab, HardwareTab, ScheduleTab
         super().__init__(reacher=reacher)
         self.response_textarea = response_textarea
         self.search_microcontrollers_button = pn.widgets.Button(name="Search Microcontrollers", icon="search")
@@ -26,6 +28,9 @@ class HomeTab(Dashboard):
         self.serial_connect_button.on_click(self.connect_to_microcontroller)
         self.serial_disconnect_button = pn.widgets.Button(name="Disconnect")
         self.serial_disconnect_button.on_click(self.disconnect_from_microcontroller)
+        self.sketch_name_textbox = pn.widgets.StaticText(name="File", value="(none loaded)")
+        self.sketch_version_textbox = pn.widgets.StaticText(name="Version", value="(none loaded)")
+        self.sketch_schedule_textbox = pn.widgets.StaticText(name="Schedule", value="(none loaded)")
 
     def search_for_microcontrollers(self, _: Any) -> None:
         """Search for available microcontrollers and update the menu."""
@@ -50,7 +55,23 @@ class HomeTab(Dashboard):
         try:
             self.set_COM()
             self.reacher.open_serial()
+            time.sleep(1)  # brief pause to allow serial connection to open up
             self.add_response("Opened serial connection")
+            
+            controller_config = self.reacher.get_firmware_information()
+            
+            if controller_config.get("sketch"):
+                sketch_name = controller_config.get("sketch", "None specified")
+                version = controller_config.get("version", "None specified")
+                schedule = controller_config.get("schedule", "None specified")
+                
+                self.sketch_name_textbox.value = sketch_name
+                self.sketch_version_textbox.value = version
+                self.sketch_schedule_textbox.value = schedule
+            else:
+                self.add_error("Loaded firmware is incompatible. Please upload a qualified file.", "Firmware missing valid fields.")
+                self.add_response("Closing serial connection")
+                self.reacher.close_serial()
         except Exception as e:
             self.add_error(f"Failed to connect to {self.microcontroller_menu.value}", str(e))
 
@@ -66,14 +87,21 @@ class HomeTab(Dashboard):
         """Reset the HomeTab to its initial state."""
         self.add_response("Resetting home tab")
         self.microcontroller_menu.options = []
-
+    
     def layout(self) -> pn.Column:
         """Construct the layout for the HomeTab."""
         microcontroller_layout = pn.Column(
             pn.pane.Markdown("### COM Connection"),
             self.microcontroller_menu,
             self.search_microcontrollers_button,
-            pn.Row(self.serial_connect_button, self.serial_disconnect_button)
+            pn.Row(self.serial_connect_button, self.serial_disconnect_button),
+            pn.Spacer(height=20),
+            pn.Column(
+                pn.pane.Markdown("### Firmware Information"),
+                self.sketch_name_textbox,
+                self.sketch_version_textbox,
+                self.sketch_schedule_textbox,
+            ),
         )
         return pn.Column(microcontroller_layout)
 
