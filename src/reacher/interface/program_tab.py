@@ -37,6 +37,7 @@ class ProgramTab(Dashboard):
         self.limit_type_radiobutton: pn.widgets.RadioButtonGroup = pn.widgets.RadioButtonGroup(
             name="Limit Type",
             options=["Time", "Infusion", "Both"],
+            button_style="outline",
             button_type="primary"
         )
         self.time_limit_hour: pn.widgets.IntInput = pn.widgets.IntInput(name="Hour(s)", value=0, start=0, end=10, step=1)
