@@ -23,7 +23,7 @@ class ScheduleTab(Dashboard):
             end=600, 
             step=5
         )
-        self.send_rh_timeout_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
+        self.send_rh_timeout_button: pn.widgets.Button = pn.widgets.Button(icon="upload", button_type="primary")
         self.send_rh_timeout_button.on_click(self.send_rh_timeout)
         self.trace_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(
             name="Trace Duration(s)", 
@@ -32,7 +32,7 @@ class ScheduleTab(Dashboard):
             end=60, 
             step=1
         )
-        self.send_trace_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
+        self.send_trace_button: pn.widgets.Button = pn.widgets.Button(icon="upload", button_type="primary")
         self.send_trace_button.on_click(self.send_trace)
         self.fixed_ratio_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(
             name="Fixed Ratio Interval", 
@@ -41,7 +41,7 @@ class ScheduleTab(Dashboard):
             end=50, 
             step=1
         )
-        self.send_fixed_ratio_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
+        self.send_fixed_ratio_button: pn.widgets.Button = pn.widgets.Button(icon="upload", button_type="primary")
         self.send_fixed_ratio_button.on_click(self.send_fixed_ratio)
         self.progressive_ratio_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(
             name="Progressive Ratio", 
@@ -50,7 +50,7 @@ class ScheduleTab(Dashboard):
             end=50, 
             step=1
         )
-        self.send_progressive_ratio_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
+        self.send_progressive_ratio_button: pn.widgets.Button = pn.widgets.Button(icon="upload", button_type="primary")
         self.send_progressive_ratio_button.on_click(self.send_progressive_ratio)
         self.variable_interval_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(
             name="Variable Interval", 
@@ -59,7 +59,7 @@ class ScheduleTab(Dashboard):
             end=100, 
             step=1
         )
-        self.send_variable_interval_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
+        self.send_variable_interval_button: pn.widgets.Button = pn.widgets.Button(icon="upload", button_type="primary")
         self.send_variable_interval_button.on_click(self.send_variable_interval)
         self.omission_interval_intslider: pn.widgets.IntSlider = pn.widgets.IntSlider(
             name="Omission Interval", 
@@ -68,7 +68,7 @@ class ScheduleTab(Dashboard):
             end=100, 
             step=1
         )
-        self.send_omission_interval_button: pn.widgets.Button = pn.widgets.Button(icon="upload")
+        self.send_omission_interval_button: pn.widgets.Button = pn.widgets.Button(icon="upload", button_type="primary")
         self.send_omission_interval_button.on_click(self.send_omission_interval)
 
     def send_rh_timeout(self, _: Any) -> None:

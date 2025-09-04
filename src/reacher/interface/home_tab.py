@@ -21,12 +21,12 @@ class HomeTab(Dashboard):
         from reacher.interface import ProgramTab, HardwareTab, ScheduleTab
         super().__init__(reacher=reacher)
         self.response_textarea = response_textarea
-        self.search_microcontrollers_button = pn.widgets.Button(name="Search Microcontrollers", icon="search")
+        self.search_microcontrollers_button = pn.widgets.Button(name="Search Microcontrollers", icon="search", button_type="primary")
         self.search_microcontrollers_button.on_click(self.search_for_microcontrollers)
         self.microcontroller_menu = pn.widgets.Select(name="Microcontroller", options=[])
-        self.serial_connect_button = pn.widgets.Button(name="Connect", icon="plug")
+        self.serial_connect_button = pn.widgets.Button(name="Connect", icon="plug", button_type="success")
         self.serial_connect_button.on_click(self.connect_to_microcontroller)
-        self.serial_disconnect_button = pn.widgets.Button(name="Disconnect")
+        self.serial_disconnect_button = pn.widgets.Button(name="Disconnect", button_type="danger", icon="plug-circle-xmark")
         self.serial_disconnect_button.on_click(self.disconnect_from_microcontroller)
         self.sketch_name_textbox = pn.widgets.StaticText(name="File", value="(none loaded)")
         self.sketch_version_textbox = pn.widgets.StaticText(name="Version", value="(none loaded)")
