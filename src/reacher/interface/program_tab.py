@@ -20,7 +20,8 @@ class ProgramTab(Dashboard):
             name="Select hardware to use:",
             options=["LH Lever", "RH Lever", "Cue", "Pump", "Lick Circuit", "Laser", "Imaging Microscope"],
             orientation='vertical',
-            button_style="outline"
+            button_style="outline",
+            button_type="primary"
         )
         self.presets_dict: Dict[str, callable] = {
             "Custom": lambda: None,
@@ -35,7 +36,8 @@ class ProgramTab(Dashboard):
         )
         self.limit_type_radiobutton: pn.widgets.RadioButtonGroup = pn.widgets.RadioButtonGroup(
             name="Limit Type",
-            options=["Time", "Infusion", "Both"]
+            options=["Time", "Infusion", "Both"],
+            button_type="primary"
         )
         self.time_limit_hour: pn.widgets.IntInput = pn.widgets.IntInput(name="Hour(s)", value=0, start=0, end=10, step=1)
         self.time_limit_min: pn.widgets.IntInput = pn.widgets.IntInput(name="Minute(s)", value=0, start=0, end=59, step=1)
@@ -47,11 +49,11 @@ class ProgramTab(Dashboard):
         )
         self.infusion_limit_intslider: pn.widgets.IntInput = pn.widgets.IntInput(name="Infusion(s)", value=0, start=0, end=100, step=1)
         self.stop_delay_intslider: pn.widgets.IntInput = pn.widgets.IntInput(name="Stop Delay (s)", value=0, start=0, end=59, step=1)
-        self.set_program_limit_button: pn.widgets.Button = pn.widgets.Button(name="Set Program Limit", icon="gear")
+        self.set_program_limit_button: pn.widgets.Button = pn.widgets.Button(name="Set Program Limit", icon="gear", button_type="primary")
         self.set_program_limit_button.on_click(self.set_program_limit)
         self.filename_textinput: pn.widgets.TextInput = pn.widgets.TextInput(name="File name:", placeholder="e.g., experiment1.csv")
         self.file_destination_textinput: pn.widgets.TextInput = pn.widgets.TextInput(name="Folder name:", placeholder="e.g., ~/REACHER/DATA")
-        self.set_file_config_button: pn.widgets.Button = pn.widgets.Button(name="Set File Configuration", icon="file")
+        self.set_file_config_button: pn.widgets.Button = pn.widgets.Button(name="Set File Configuration", icon="file", button_type="primary")
         self.set_file_config_button.on_click(self.set_file_configuration)
 
     def set_preset(self, limit_type: str, infusion_limit: int, time_limit: int, stop_delay: int) -> None:

@@ -44,11 +44,11 @@ class MonitorTab(Dashboard):
         self.callback_time: int = 5000
         self.plotly_pane: pn.pane.Plotly = pn.pane.Plotly(sizing_mode="stretch_width", height=500, width=500)
         self.summary_pane: pn.pane.DataFrame = pn.pane.DataFrame(index=False, max_rows=10, styles={"background-color": "#1e1e1e", "color": "white"})
-        self.pause_program_button: pn.widgets.Button = pn.widgets.Button(icon="player-pause")
+        self.pause_program_button: pn.widgets.Button = pn.widgets.Button(icon="player-pause", button_type="warning")
         self.pause_program_button.on_click(self.pause)
-        self.stop_program_button: pn.widgets.Button = pn.widgets.Button(icon="player-stop")
+        self.stop_program_button: pn.widgets.Button = pn.widgets.Button(icon="player-stop", button_type="danger")
         self.stop_program_button.on_click(self.stop)
-        self.download_button: pn.widgets.Button = pn.widgets.Button(name="Export data", icon="download")
+        self.download_button: pn.widgets.Button = pn.widgets.Button(name="Export data", icon="download", button_type="primary")
         self.download_button.on_click(self.download)
         self.periodic_callback: Optional[Any] = None
         self.program_tab: ProgramTab = program_tab
@@ -63,7 +63,7 @@ class MonitorTab(Dashboard):
             background_close=True,
             show_close_button=False
         )
-        self.start_program_button = self.confirm_start_modal.create_button("toggle", icon="player-play")
+        self.start_program_button = self.confirm_start_modal.create_button("toggle", icon="player-play", button_type="success")
         self.start_program_button.on_click(self.get_session_setting)
         
     def get_session_setting(self, _: Any):

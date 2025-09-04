@@ -61,7 +61,6 @@ class HardwareTab(Dashboard):
         )
         self.arm_cue_button.param.watch(self.arm_cs, 'value')
         self.send_cue_configuration_button: pn.widgets.Button = pn.widgets.Button(
-            name="Send",
             icon="upload",
             button_type="primary"
         )
@@ -123,7 +122,8 @@ class HardwareTab(Dashboard):
             name="Stim Mode",
             options=["Cycle", "Active-Press"],
             behavior="radio",
-            value="Active-Press"
+            value="Active-Press",
+            button_type="primary"
         )
         self.stim_frequency_slider: pn.widgets.IntInput = pn.widgets.IntInput(
             name="Frequency (Hz)",
@@ -140,7 +140,6 @@ class HardwareTab(Dashboard):
             value=5
         )
         self.send_laser_config_button: pn.widgets.Button = pn.widgets.Button(
-            name="Send",
             button_type="primary",
             icon="upload",
             disabled=False
