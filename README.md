@@ -29,7 +29,7 @@ python -m pip install reacher-1.1.1-py3-none-any.whl
 ```
 ### Using `wget`
 ```python
-wget https://github.com/Otis-Lab-MUSC/REACHER/releases/download/v1.1.1-beta/reacher-1.1.1-py3-none-any.whl
+wget https://github.com/Otis-Lab-MUSC/REACHER/releases/download/v1.1.1/reacher-1.1.1-py3-none-any.whl
 python -m pip install reacher-1.1.1-py3-none-any.whl
 ```
 
