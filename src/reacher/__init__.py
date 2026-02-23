@@ -1,5 +1,11 @@
 from .kernel.reacher import REACHER
-from .interface import Interface, Dashboard, HomeTab, ProgramTab, HardwareTab, MonitorTab, ScheduleTab
-from .remote import Interface, Dashboard, HomeTab, ProgramTab, HardwareTab, MonitorTab, ScheduleTab
+from .kernel.commands import (
+    COMMAND_REGISTRY,
+    CommandCode,
+    CommandSpec,
+    PARADIGMS,
+    get_commands_for_paradigm,
+    build_command_payload,
+)
 
-__version__ = "0.1"
+__version__ = "2.0.0"

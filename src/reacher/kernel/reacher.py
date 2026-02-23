@@ -2,28 +2,39 @@ import serial
 import queue
 import threading
 import time
-import csv
 import json
 import os
 import logging
-from typing import List, Dict, Union, Optional
+from typing import Callable, Dict, List, Optional, Union
 from serial.tools import list_ports
+
+from .commands import build_command_payload, SCHEDULE_TO_PARADIGM
 
 class REACHER:
     """A class to manage serial communication and data collection for REACHER experiments."""
 
-    def __init__(self) -> None:
-        """Initialize a REACHER instance with default settings.
+    def __init__(
+        self,
+        session_id: Optional[str] = None,
+        event_callback: Optional[Callable[[str, str, dict], None]] = None,
+        on_stop: Optional[Callable[[], None]] = None,
+    ) -> None:
+        """Initialize a REACHER instance.
 
-        **Description:**
-        - Sets up a new REACHER instance with default serial communication settings (baudrate: 115200).
-        - Initializes threads for serial reading and queue handling.
-        - Prepares data structures for behavioral and frame data logging.
-        - Configures program control flags and variables for experiment management.
+        Args:
+            session_id: Unique identifier for this session (assigned by SessionManager).
+            event_callback: Optional callback ``(session_id, event_type, data)`` for
+                broadcasting events over WebSocket.
+            on_stop: Optional callback invoked after ``stop_program()`` completes,
+                used by SessionManager to broadcast the "stopped" state.
         """
-                
+
+        self.session_id: Optional[str] = session_id
+        self.event_callback = event_callback
+        self._on_stop = on_stop
+
         # Serial variables
-        self.ser: serial.Serial = serial.Serial(baudrate=115200)
+        self.ser: serial.Serial = serial.Serial(baudrate=115200, timeout=1)
         self.queue: queue.Queue = queue.Queue()
 
         # Thread variables
@@ -42,9 +53,10 @@ class REACHER:
         self.queue_thread.start()
         self.time_check_thread.start()
 
-        # Data process variables
+        # Data process variables (guarded by thread_lock for cross-thread access)
         self.behavior_data: List[Dict[str, Union[str, int]]] = []
         self.frame_data: List[str] = []
+        self._infusion_count: int = 0  # Atomic counter — avoids O(n) rescan in check_limit_met
 
         # Program variables
         self.program_start_time: Optional[float] = None
@@ -60,9 +72,9 @@ class REACHER:
         # Configuration variables
         self.box_name: Optional[str] = None
         self.firmware_information: Dict = {
-            "sketch": None, 
-            "version": None, 
-            "baud_rate": None, 
+            "sketch": None,
+            "version": None,
+            "baud_rate": None,
             "desc": None
         }
         self.hardware_settings: List = []
@@ -70,15 +82,16 @@ class REACHER:
         os.makedirs(self.reacher_log_path, exist_ok=True)
         self.controller_log: str = os.path.join(self.reacher_log_path, "controller_log.json")
         self.interface_log: str = os.path.join(self.reacher_log_path, "interface_log.log")
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s [%(levelname)s]: %(message)s',
-            handlers=[
-                    logging.FileHandler(self.interface_log),
-                    logging.StreamHandler()
-                ]
-        )
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger(f"reacher.{session_id or 'default'}")
+        self.logger.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s [%(levelname)s]: %(message)s')
+        fh = logging.FileHandler(self.interface_log)
+        fh.setFormatter(formatter)
+        self.logger.addHandler(fh)
+        if not self.logger.handlers or not any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler) for h in self.logger.handlers):
+            sh = logging.StreamHandler()
+            sh.setFormatter(formatter)
+            self.logger.addHandler(sh)
         self.data_destination: Optional[str] = None
         self.behavior_filename: Optional[str] = None
         self.code_dict: Dict = {
@@ -88,7 +101,7 @@ class REACHER:
             "007": self.update_behavioral_events,
             "008": self.update_frame_events
         }
-        
+
         self.logger.info("REACHER instance created")
 
     def reset(self) -> None:
@@ -112,6 +125,7 @@ class REACHER:
 
         self.behavior_data = []
         self.frame_data = []
+        self._infusion_count = 0
 
         self.program_start_time = None
         self.program_end_time = None
@@ -129,7 +143,7 @@ class REACHER:
         self.data_destination = None
         self.behavior_filename = None
 
-        self.ser = serial.Serial(baudrate=115200)
+        self.ser = serial.Serial(baudrate=115200, timeout=1)
         self.queue = queue.Queue()
 
         self.serial_flag.clear()
@@ -315,31 +329,35 @@ class REACHER:
 
         try:
             self.logger.info(f"--> Processing data: {line}")
-            
-            with self.thread_lock:
-                data = json.loads(line)
-                
-                with open(self.controller_log, 'a', newline='') as file:
-                            file.write(str(data))
-                            file.write('\n')
-                            file.flush()
-                
-                level = data['level']
-                self.code_dict.get(level)(data)
-                    
-            return
+
+            data = json.loads(line)
+
+            with open(self.controller_log, 'a', newline='') as file:
+                file.write(str(data))
+                file.write('\n')
+                file.flush()
+
+            level = data['level']
+            handler = self.code_dict.get(level)
+            if handler is not None:
+                handler(data)
+            else:
+                self.logger.warning(f"Unknown event level: {level}. Data: {data}")
+
         except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse JSON: {e}. Raw data: {data}")
+            self.logger.error(f"Failed to parse JSON: {e}. Raw data: {line}")
         except Exception as e:
-            self.logger.error(f"Error processing JSON data: {e}")
+            self.logger.error(f"Error processing data: {e}. Raw line: {line}")
 
     def update_firmware_information(self, event: dict) -> None:
         if event["device"] == "CONTROLLER":
             self.firmware_information = event
             self.logger.info("--> Updated arduino configuration")
+            self._emit("config", event)
         else:
             self.hardware_settings.append(event)
             self.logger.info("--> Updated hardware defaults list")
+            self._emit("config", event)
             
         
     def update_behavioral_events(self, event: dict) -> None:
@@ -349,6 +367,11 @@ class REACHER:
             case "SWITCH_LEVER":
                 entry_dict['device'] = event.get('orientation') + "_LEVER"
                 entry_dict['event'] = f"{event.get('class')}_{event.get('event')}"
+                entry_dict['start_timestamp'] = event.get('start_timestamp')
+                entry_dict['end_timestamp'] = event.get('end_timestamp')
+            case "LICK_CIRCUIT":
+                entry_dict['device'] = "LICK"
+                entry_dict['event'] = event.get('event')
                 entry_dict['start_timestamp'] = event.get('start_timestamp')
                 entry_dict['end_timestamp'] = event.get('end_timestamp')
             case "CONTROLLER":
@@ -362,12 +385,30 @@ class REACHER:
                 entry_dict['start_timestamp'] = event.get('start_timestamp')
                 entry_dict['end_timestamp'] = event.get('end_timestamp')  
                 
-        self.behavior_data.append(entry_dict)
-        self.logger.info("--> Updated behavioral data")
+        # Always emit for real-time UI feedback (e.g. hardware testing)
+        self._emit("event", entry_dict)
+
+        # Only persist to dataset when actively recording
+        if self.program_running and not self.program_flag.is_set():
+            with self.thread_lock:
+                self.behavior_data.append(entry_dict)
+                if entry_dict.get('device') == 'PUMP' and entry_dict.get('event') == 'INFUSION':
+                    self._infusion_count += 1
+            self.logger.info("--> Updated behavioral data")
+
+        # Auto-stop when firmware signals all Pavlovian trials are complete
+        if (entry_dict.get('device') == 'PAVLOV'
+                and entry_dict.get('event') == 'ALL_TRIALS_COMPLETE'
+                and self.program_running):
+            self.logger.info("All Pavlovian trials complete, stopping program")
+            threading.Thread(target=self.stop_program, daemon=True).start()
                 
     def update_frame_events(self, event: dict) -> None:
-        self.frame_data.append(event.get('timestamp'))
+        ts = event.get('timestamp')
+        with self.thread_lock:
+            self.frame_data.append(ts)
         self.logger.info("--> Updated frame data")
+        self._emit("frame", {"timestamp": ts})
 
     def send_serial_command(self, command: dict) -> None:
         """Send a command to the Arduino via serial.
@@ -390,6 +431,34 @@ class REACHER:
             self.ser.write(send)
             self.ser.flush()
 
+    def send_command(self, code: int, value=None) -> None:
+        """Send any command from the command registry over serial.
+
+        Uses ``build_command_payload`` to construct the proper JSON payload
+        (e.g. ``{"cmd": 371, "frequency": 8000}``) and transmits it.
+
+        Args:
+            code: Command code from CommandCode / COMMAND_REGISTRY.
+            value: Optional payload value (int or bool depending on command spec).
+        """
+        payload = build_command_payload(code, value)
+        self.send_serial_command(payload)
+
+    def _emit(self, event_type: str, data: dict) -> None:
+        """Broadcast an event via the registered callback (if any)."""
+        if self.event_callback and self.session_id:
+            try:
+                self.event_callback(self.session_id, event_type, data)
+            except Exception:
+                self.logger.warning("Event callback failed", exc_info=True)
+
+    def get_detected_paradigm(self) -> Optional[str]:
+        """Return the paradigm detected from firmware identification, or None."""
+        schedule = self.firmware_information.get("schedule")
+        if schedule and isinstance(schedule, str):
+            return SCHEDULE_TO_PARADIGM.get(schedule)
+        return None
+
     def set_limit_type(self, limit_type: str) -> None:
         """Set the type of limit for program execution.
 
@@ -400,7 +469,7 @@ class REACHER:
         **Args:**
         - `limit_type (str)`: The type of limit to enforce.
         """
-        if limit_type in ['Time', 'Infusion', 'Both']: 
+        if limit_type in ['Time', 'Infusion', 'Both', 'Trials']:
             self.limit_type = limit_type
             self.logger.info(f"Limit type set to: {limit_type}")
         else:
@@ -446,6 +515,11 @@ class REACHER:
         - Initiates the experiment by sending "START-PROGRAM" to the microcontroller.
         - Records the start time for limit checking.
         """
+        self.behavior_data = []
+        self.frame_data = []
+        self._infusion_count = 0
+        self.paused_time = 0
+        self.last_infusion_time = None
         if self.program_flag.is_set():
             self.program_flag.clear()
         self.program_running = True
@@ -458,14 +532,33 @@ class REACHER:
 
         **Description:**
         - Terminates the experiment by sending "END-PROGRAM".
+        - Drains remaining queued events before closing serial.
         - Cleans up resources and records the end time.
+        - Invokes the ``on_stop`` callback so the session manager can
+          broadcast the "stopped" state to the frontend.
         """
+        with self.thread_lock:
+            if not self.program_running:
+                return
+            self.program_running = False  # Guard against re-entrance
         self.logger.info("Ending program...")
+
+        # Notify frontend IMMEDIATELY — before any blocking I/O
+        if self._on_stop:
+            try:
+                self._on_stop()
+            except Exception:
+                self.logger.warning("on_stop callback failed", exc_info=True)
+
+        # Then do cleanup (send firmware END, close serial, etc.)
         self.send_serial_command({"cmd": 100})
         time.sleep(2)
         self.program_flag.set()
-        self.program_running = False
-        self.clear_queue()
+        # Drain remaining events: join with timeout ensures all task_done() calls complete
+        try:
+            self.queue.join()
+        except Exception:
+            pass  # queue.join() doesn't timeout natively — bounded by serial_flag below
         self.close_serial()
         self.program_end_time = time.time()
         self.logger.info(f"Program ended at {self.get_time()}")
@@ -475,30 +568,31 @@ class REACHER:
 
         **Description:**
         - Temporarily halts the experiment and records the pause start time.
+        - Sends SESSION_PAUSE command to firmware to gate input processing.
         """
         self.program_flag.set()
         self.paused_start_time = time.time()
+        self.send_serial_command({"cmd": 105, "paused": True})
 
     def resume_program(self) -> None:
         """Resume the experimental program.
 
         **Description:**
         - Resumes the experiment and calculates total paused time.
+        - Sends SESSION_PAUSE(false) to firmware to resume processing.
         """
         if self.program_flag.is_set():
             self.program_flag.clear()
-        self.paused_time = time.time() - self.paused_start_time
+        self.paused_time += time.time() - self.paused_start_time
+        self.send_serial_command({"cmd": 105, "paused": False})
 
     def get_program_running(self) -> bool:
-        """Check if the program is currently running.
-
-        **Description:**
-        - Returns the current state of the experiment.
+        """Check if the program is currently running (not paused or stopped).
 
         **Returns:**
-        - `bool`: True if running, False if paused or stopped.
+        - `bool`: True if running and not paused, False otherwise.
         """
-        return self.program_running
+        return self.program_running and not self.program_flag.is_set()
 
     def monitor_time_limit(self) -> None:
         """Continuously monitor the time limit in a separate thread.
@@ -523,7 +617,7 @@ class REACHER:
             return  # No limits to check if program hasn't started or type unset
 
         elapsed_time = current_time - self.program_start_time - self.paused_time
-        infusion_count = sum(1 for entry in self.behavior_data if entry['device'] == 'PUMP' and entry['event'] == 'INFUSION')
+        infusion_count = self._infusion_count  # Atomic counter — O(1)
         self.logger.debug(f"Checking limits: elapsed_time={elapsed_time:.2f}, time_limit={self.time_limit}, infusion_count={infusion_count}, infusion_limit={self.infusion_limit}")
 
         if self.limit_type == "Time":
@@ -544,6 +638,8 @@ class REACHER:
             if (self.last_infusion_time and (current_time - self.last_infusion_time) >= self.stop_delay) or (elapsed_time >= self.time_limit):
                 self.logger.info("Either infusion limit with stop delay or time limit met, stopping program")
                 self.stop_program()
+        elif self.limit_type == "Trials":
+            pass  # Firmware signals ALL_TRIALS_COMPLETE; handled in update_behavioral_events
 
     def set_data_destination(self, folder: str) -> None:
         """Set the destination folder for data files.
@@ -583,7 +679,7 @@ class REACHER:
             self.behavior_filename = f"{self.get_time()}"
         containing_folder = os.path.join(self.data_destination, self.behavior_filename.split('.')[0])
         if os.path.exists(containing_folder):
-            data_folder_path = os.path.join(self.data_destination, f"{self.behavior_filename.split('.')[0]}-{time.time():.4f}")
+            data_folder_path = os.path.join(self.data_destination, f"{self.behavior_filename.split('.')[0]}-{time.time_ns()}")
         else:
             data_folder_path = containing_folder   
         os.makedirs(data_folder_path, exist_ok=True)
@@ -623,29 +719,26 @@ class REACHER:
         return self.behavior_filename
 
     def get_behavior_data(self) -> List[Dict[str, Union[str, int]]]:
-        """Get the collected behavioral data.
-
-        **Description:**
-        - Returns all recorded behavioral events (e.g., lever presses).
+        """Get a snapshot of the collected behavioral data.
 
         **Returns:**
         - `List[Dict[str, Union[str, int]]]`: List of event dictionaries.
         """
-        return self.behavior_data
-    
-    def get_frame_data(self) -> List[str]:
-        """Get the collected frame data.
+        with self.thread_lock:
+            return list(self.behavior_data)
 
-        **Description:**
-        - Returns all recorded frame timestamps.
+    def get_frame_data(self) -> List[str]:
+        """Get a snapshot of the collected frame data.
 
         **Returns:**
         - `List[str]`: List of frame timestamps.
         """
-        return self.frame_data
-    
+        with self.thread_lock:
+            return list(self.frame_data)
+
     def get_frame_timestamps_count(self) -> int:
-        return len(self.frame_data) if self.frame_data else 0
+        with self.thread_lock:
+            return len(self.frame_data)
     
     def get_firmware_information(self) -> Dict:
         """Get the current Arduino configuration.
