@@ -97,7 +97,7 @@ class REACHER:
         self.code_dict: Dict = {
             "000": self.update_firmware_information,
             "001": self.logger.info,
-            "006": self.logger.error,
+            "006": self.handle_firmware_error,
             "007": self.update_behavioral_events,
             "008": self.update_frame_events
         }
@@ -349,6 +349,16 @@ class REACHER:
         except Exception as e:
             self.logger.error(f"Error processing data: {e}. Raw line: {line}")
 
+    def handle_firmware_error(self, event: dict) -> None:
+        """Handle firmware error events (level 006).
+
+        Args:
+            event: Parsed JSON event dict from firmware containing 'desc' key.
+        """
+        desc = event.get("desc", "Unknown")
+        self.logger.error(f"Firmware error: {desc}")
+        self._emit("error", event)
+
     def update_firmware_information(self, event: dict) -> None:
         if event["device"] == "CONTROLLER":
             self.firmware_information = event
@@ -427,9 +437,10 @@ class REACHER:
             if not self.ser.is_open:
                 raise Exception("Serial port is not open.")
             send = json.dumps(command).encode() + b'\n'
-            self.logger.debug(f"Sending command '{send}' to Arduino.")
+            self.logger.info(f"Sending command '{send}' to Arduino.")
             self.ser.write(send)
             self.ser.flush()
+            time.sleep(0.05)
 
     def send_command(self, code: int, value=None) -> None:
         """Send any command from the command registry over serial.
