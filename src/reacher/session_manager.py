@@ -24,6 +24,7 @@ class SessionInfo:
     port: str
     paradigm: Optional[str]
     instance: REACHER
+    board: Optional[str] = None
     state: str = "idle"  # idle | uploading | connected | running | paused | stopped
 
 
@@ -130,6 +131,7 @@ class SessionManager:
                 "session_id": info.session_id,
                 "port": info.port,
                 "paradigm": info.paradigm,
+                "board": info.board,
                 "state": info.state,
             }
             for info in self._sessions.values()
@@ -147,6 +149,10 @@ class SessionManager:
     def set_paradigm(self, session_id: str, paradigm: str) -> None:
         info = self.get_session(session_id)
         info.paradigm = paradigm
+
+    def set_board(self, session_id: str, board: str) -> None:
+        info = self.get_session(session_id)
+        info.board = board
 
     def destroy_all(self) -> None:
         """Tear down every active session (used during app shutdown)."""

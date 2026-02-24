@@ -10,14 +10,14 @@ import os
 import re
 import shutil
 import sys
-from typing import Callable, List, Optional
+import warnings
+from typing import Callable, Dict, List, Optional
+
+from .boards import BOARD_PROFILES, DEFAULT_BOARD, get_board_profile
 
 logger = logging.getLogger(__name__)
 
 PARADIGMS = ("fr", "pr", "vi", "omission", "pavlovian")
-
-# avrdude flags for Arduino Uno (ATmega328P)
-_FQBN_ARGS = ["-p", "atmega328p", "-c", "arduino", "-b", "115200"]
 
 
 def _frozen_base() -> Optional[str]:
@@ -72,34 +72,68 @@ class FirmwareUploader:
     # Public API
     # ------------------------------------------------------------------
 
-    def get_hex_path(self, paradigm: str) -> str:
-        """Return the absolute path to the .hex file for *paradigm*.
+    def get_hex_path(self, paradigm: str, board: str = DEFAULT_BOARD) -> str:
+        """Return the absolute path to the .hex file for *paradigm* and *board*.
 
-        Raises ``FileNotFoundError`` if the hex file does not exist.
+        Looks for ``hex/{board}/{paradigm}.hex`` first.  Falls back to the
+        flat ``hex/{paradigm}.hex`` layout only when *board* is ``"uno"``
+        (backwards compatibility with pre-board-aware hex directories).
+
+        Raises:
+            ValueError: If *paradigm* is unknown or *board* is unsupported.
+            FileNotFoundError: If the hex file does not exist.
         """
         paradigm = paradigm.lower()
         if paradigm not in PARADIGMS:
             raise ValueError(f"Unknown paradigm: {paradigm!r}. Must be one of {PARADIGMS}")
-        path = os.path.join(self.hex_dir, f"{paradigm}.hex")
-        if not os.path.isfile(path):
-            raise FileNotFoundError(f"Hex file not found: {path}")
-        return path
+        get_board_profile(board)  # validates board
 
-    def list_available(self) -> List[str]:
-        """Return paradigms whose hex files are present on disk."""
+        # Preferred: board-specific subdirectory
+        board_path = os.path.join(self.hex_dir, board.lower(), f"{paradigm}.hex")
+        if os.path.isfile(board_path):
+            return board_path
+
+        # Fallback: flat layout (uno only, for backwards compat)
+        if board.lower() == "uno":
+            flat_path = os.path.join(self.hex_dir, f"{paradigm}.hex")
+            if os.path.isfile(flat_path):
+                warnings.warn(
+                    f"Using flat hex layout ({flat_path}). "
+                    "Migrate to hex/uno/{paradigm}.hex.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                return flat_path
+
+        raise FileNotFoundError(
+            f"Hex file not found for board={board!r}, paradigm={paradigm!r}. "
+            f"Expected: {board_path}"
+        )
+
+    def list_available(self, board: str = DEFAULT_BOARD) -> List[str]:
+        """Return paradigms whose hex files are present on disk for *board*."""
         available = []
         for p in PARADIGMS:
             try:
-                self.get_hex_path(p)
+                self.get_hex_path(p, board)
                 available.append(p)
             except (FileNotFoundError, ValueError):
                 pass
         return available
 
+    @staticmethod
+    def list_boards() -> List[Dict[str, str]]:
+        """Return supported board types as a list of dicts."""
+        return [
+            {"id": profile.board_id, "name": profile.display_name}
+            for profile in BOARD_PROFILES.values()
+        ]
+
     async def upload(
         self,
         paradigm: str,
         port: str,
+        board: str = DEFAULT_BOARD,
         progress_callback: Optional[Callable[[int, str], None]] = None,
     ) -> bool:
         """Upload firmware asynchronously.
@@ -107,16 +141,18 @@ class FirmwareUploader:
         Args:
             paradigm: One of PARADIGMS.
             port: Serial port (e.g. ``/dev/ttyUSB0`` or ``COM3``).
+            board: Board identifier (e.g. ``"uno"``, ``"mega"``).
             progress_callback: Optional ``(percent, stage_message)`` callable.
 
         Returns:
             True on success, False on failure.
         """
-        hex_path = self.get_hex_path(paradigm)
+        hex_path = self.get_hex_path(paradigm, board)
+        profile = get_board_profile(board)
 
         cmd = [
             self.avrdude_path,
-            *_FQBN_ARGS,
+            *profile.avrdude_args,
             "-P", port,
             "-U", f"flash:w:{hex_path}:i",
         ]
