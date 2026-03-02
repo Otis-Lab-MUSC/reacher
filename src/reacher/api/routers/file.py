@@ -125,6 +125,12 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
         now = time.time()
         export_date = time.strftime("%Y-%m-%d", time.localtime(now))
         export_time = time.strftime("%H:%M:%S", time.localtime(now))
+        program_start_str = None
+        if body.program_start_time is not None:
+            program_start_str = time.strftime(
+                "%H:%M:%S",
+                time.localtime(body.program_start_time / 1000),
+            )
         zf.writestr(
             "metadata.json",
             json.dumps(
@@ -135,7 +141,7 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
                     "paradigm": info.paradigm,
                     "export_date": export_date,
                     "export_time": export_time,
-                    "program_start_time": body.program_start_time,
+                    "program_start_time": program_start_str,
                     "behavior_event_count": len(behavior),
                     "frame_count": frame_count,
                     "infusion_count": body.infusion_count,
