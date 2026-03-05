@@ -6,6 +6,8 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from serial.tools import list_ports
 
+from ...uploader.boards import detect_board_from_port
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -14,7 +16,8 @@ router = APIRouter()
 @router.get("/ports")
 async def get_ports():
     ports = [p.device for p in list_ports.comports() if p.vid and p.pid]
-    return {"ports": ports if ports else []}
+    ports.append("SIMULATOR")
+    return {"ports": ports}
 
 
 @router.post("/{session_id}/connect")
@@ -46,7 +49,17 @@ async def connect_serial(session_id: str, request: Request):
     except Exception as e:
         logger.warning("Firmware detection failed on session %s: %s", session_id, e)
 
-    return {"status": "connected", "port": info.port, "detected_paradigm": detected_paradigm}
+    # --- Non-fatal board detection via USB VID/PID ---
+    detected_board = None
+    try:
+        detected_board = detect_board_from_port(info.port)
+        if detected_board:
+            sm.set_board(session_id, detected_board)
+            logger.info("Auto-detected board '%s' on session %s", detected_board, session_id)
+    except Exception as e:
+        logger.warning("Board detection failed on session %s: %s", session_id, e)
+
+    return {"status": "connected", "port": info.port, "detected_paradigm": detected_paradigm, "detected_board": detected_board}
 
 
 @router.post("/{session_id}/disconnect")

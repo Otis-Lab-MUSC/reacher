@@ -47,6 +47,7 @@ async def get_session(session_id: str, request: Request):
         "session_id": info.session_id,
         "port": info.port,
         "paradigm": info.paradigm,
+        "board": info.board,
         "state": info.state,
         "program_running": instance.get_program_running(),
         "firmware_info": instance.get_firmware_information(),

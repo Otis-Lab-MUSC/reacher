@@ -1,5 +1,6 @@
 """File configuration endpoints (filename, destination, folder creation, ZIP export)."""
 
+import bisect
 import csv
 import io
 import json
@@ -13,6 +14,16 @@ from typing import Optional
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _find_frame_index(frame_timestamps: list[int], event_ts: int) -> int | None:
+    """Return the index of the last frame at or before *event_ts*, or None."""
+    if not frame_timestamps:
+        return None
+    idx = bisect.bisect_right(frame_timestamps, event_ts) - 1
+    if idx < 0:
+        return None
+    return idx
 
 
 class FileConfigRequest(BaseModel):
@@ -98,19 +109,36 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
     behavior = instance.get_behavior_data()
     firmware_info = instance.get_firmware_information()
     hardware_settings = instance.get_hardware_settings()
-    frame_count = instance.get_frame_timestamps_count()
+    frame_data = instance.get_frame_data()
+    frame_timestamps = sorted(int(ts) for ts in frame_data if ts)
+    frame_count = len(frame_data)
 
     # Build ZIP in memory
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         # behavior_events.csv
         csv_buf = io.StringIO()
-        fieldnames = ["device", "event", "start_timestamp", "end_timestamp"]
+        fieldnames = ["device", "event", "start_timestamp", "end_timestamp", "start_frame_index", "end_frame_index"]
         writer = csv.DictWriter(csv_buf, fieldnames=fieldnames)
         writer.writeheader()
         for row in behavior:
-            writer.writerow({k: row.get(k, "") for k in fieldnames})
+            start_ts = row.get("start_timestamp")
+            end_ts = row.get("end_timestamp")
+            start_fi = _find_frame_index(frame_timestamps, int(start_ts)) if start_ts not in (None, "") else None
+            end_fi = _find_frame_index(frame_timestamps, int(end_ts)) if end_ts not in (None, "") else None
+            out = {k: row.get(k, "") for k in ("device", "event", "start_timestamp", "end_timestamp")}
+            out["start_frame_index"] = start_fi if start_fi is not None else ""
+            out["end_frame_index"] = end_fi if end_fi is not None else ""
+            writer.writerow(out)
         zf.writestr("behavior_events.csv", csv_buf.getvalue())
+
+        # frame_timestamps.csv
+        ft_buf = io.StringIO()
+        ft_writer = csv.DictWriter(ft_buf, fieldnames=["frame_index", "timestamp_ms"])
+        ft_writer.writeheader()
+        for i, ts in enumerate(frame_timestamps):
+            ft_writer.writerow({"frame_index": i, "timestamp_ms": ts})
+        zf.writestr("frame_timestamps.csv", ft_buf.getvalue())
 
         # arduino_config.json
         zf.writestr(
@@ -139,6 +167,8 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
                     "session_name": body.session_name or None,
                     "port": info.port,
                     "paradigm": info.paradigm,
+                    "firmware_sketch": f"{firmware_info.get('sketch', 'unknown')}.ino",
+                    "firmware_version": firmware_info.get("version", "unknown"),
                     "export_date": export_date,
                     "export_time": export_time,
                     "program_start_time": program_start_str,

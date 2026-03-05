@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from .. import __version__
 from ..session_manager import SessionManager
 from .routers import data, file, firmware, hardware, lifecycle, program, serial, session, websocket
 
@@ -62,7 +63,7 @@ async def lifespan(app: FastAPI):
     """Manage application startup/shutdown."""
     sm = SessionManager(event_callback=broadcast_event)
     app.state.session_manager = sm
-    logger.info("REACHER API v2.0.0 starting on port %d", PORT)
+    logger.info("REACHER API v%s starting on port %d", __version__, PORT)
     yield
     logger.info("Shutting down — destroying all sessions")
     sm.destroy_all()
@@ -71,7 +72,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="REACHER API",
-        version="2.0.0",
+        version=__version__,
         lifespan=lifespan,
     )
 
@@ -89,7 +90,7 @@ def create_app() -> FastAPI:
         sessions = sm.list_sessions()
         return {
             "status": "ok",
-            "version": "2.0.0",
+            "version": __version__,
             "active_sessions": len(sessions),
         }
 

@@ -5,7 +5,9 @@ Adding a new board requires only a new entry in BOARD_PROFILES.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
+
+from serial.tools import list_ports
 
 
 @dataclass(frozen=True)
@@ -33,8 +35,31 @@ BOARD_PROFILES: Dict[str, BoardProfile] = {
     ),
 }
 
+_USB_ID_MAP: Dict[Tuple[int, int], str] = {
+    (0x2341, 0x0043): "uno",
+    (0x2341, 0x0001): "uno",
+    (0x2A03, 0x0043): "uno",
+    (0x2341, 0x0042): "mega",
+    (0x2341, 0x0010): "mega",
+    (0x2A03, 0x0042): "mega",
+}
+
 DEFAULT_BOARD = "uno"
 SUPPORTED_BOARDS: Tuple[str, ...] = tuple(BOARD_PROFILES.keys())
+
+
+def detect_board_from_port(port_device: str) -> Optional[str]:
+    """Detect the board type from a serial port's USB VID/PID.
+
+    Returns the board identifier (e.g. ``"uno"``) or ``None`` if the
+    port is a simulator, uses a clone chip, or is unrecognized.
+    """
+    if port_device == "SIMULATOR":
+        return None
+    for port_info in list_ports.comports():
+        if port_info.device == port_device and port_info.vid and port_info.pid:
+            return _USB_ID_MAP.get((port_info.vid, port_info.pid))
+    return None
 
 
 def get_board_profile(board: str) -> BoardProfile:

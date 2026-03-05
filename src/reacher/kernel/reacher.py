@@ -34,6 +34,7 @@ class REACHER:
         self._on_stop = on_stop
 
         # Serial variables
+        self._is_simulated: bool = False
         self.ser: serial.Serial = serial.Serial(baudrate=115200, timeout=1)
         self.queue: queue.Queue = queue.Queue()
 
@@ -55,7 +56,7 @@ class REACHER:
 
         # Data process variables (guarded by thread_lock for cross-thread access)
         self.behavior_data: List[Dict[str, Union[str, int]]] = []
-        self.frame_data: List[str] = []
+        self.frame_data: List[int] = []
         self._infusion_count: int = 0  # Atomic counter — avoids O(n) rescan in check_limit_met
 
         # Program variables
@@ -143,7 +144,12 @@ class REACHER:
         self.data_destination = None
         self.behavior_filename = None
 
-        self.ser = serial.Serial(baudrate=115200, timeout=1)
+        if self._is_simulated:
+            from .simulator import SimulatedSerial
+            self.ser = SimulatedSerial(baudrate=115200, timeout=1)
+            self.ser.port = "SIMULATOR"
+        else:
+            self.ser = serial.Serial(baudrate=115200, timeout=1)
         self.queue = queue.Queue()
 
         self.serial_flag.clear()
@@ -173,10 +179,11 @@ class REACHER:
         self.logger.info("Accessing available COM ports")
         
         available_ports = [p.device for p in list_ports.comports() if p.vid and p.pid]
-        
+        available_ports.append("SIMULATOR")
+
         self.logger.info("COM ports successfully accessed")
-        
-        return ["No available ports"] if len(available_ports) == 0 else available_ports
+
+        return available_ports
     
     def set_COM_port(self, port: str) -> None:
         """Set the COM port for serial communication.
@@ -190,10 +197,16 @@ class REACHER:
         """
         
         self.logger.info("Setting COM port")
-        
-        if port in [p.device for p in list_ports.comports() if p.vid and p.pid]:
+
+        if port == "SIMULATOR":
+            from .simulator import SimulatedSerial
+            self.ser = SimulatedSerial(baudrate=115200, timeout=1)
+            self.ser.port = "SIMULATOR"
+            self._is_simulated = True
+        elif port in [p.device for p in list_ports.comports() if p.vid and p.pid]:
             self.ser.port = port
-            
+            self._is_simulated = False
+
         self.logger.info(f"Set COM port to {port}")
 
     def open_serial(self) -> None:
@@ -414,7 +427,7 @@ class REACHER:
             threading.Thread(target=self.stop_program, daemon=True).start()
                 
     def update_frame_events(self, event: dict) -> None:
-        ts = event.get('timestamp')
+        ts = int(event.get('timestamp'))
         with self.thread_lock:
             self.frame_data.append(ts)
         self.logger.info("--> Updated frame data")
@@ -738,11 +751,11 @@ class REACHER:
         with self.thread_lock:
             return list(self.behavior_data)
 
-    def get_frame_data(self) -> List[str]:
+    def get_frame_data(self) -> List[int]:
         """Get a snapshot of the collected frame data.
 
         **Returns:**
-        - `List[str]`: List of frame timestamps.
+        - `List[int]`: List of frame timestamps in milliseconds.
         """
         with self.thread_lock:
             return list(self.frame_data)

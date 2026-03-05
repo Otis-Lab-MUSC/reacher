@@ -145,7 +145,7 @@ def test_send_command_no_value(reacher, mock_serial):
 def test_handle_data_json_config(reacher, mocker):
     """Test that handle_data processes JSON firmware configuration."""
     mocker.patch("builtins.open", mocker.mock_open())
-    config = {"level": "000", "device": "CONTROLLER", "sketch": "fr", "version": "1.0"}
+    config = {"level": "000", "device": "CONTROLLER", "sketch": "fr", "version": "v2.0.0"}
     reacher.handle_data(json.dumps(config))
     assert reacher.firmware_information == config
 

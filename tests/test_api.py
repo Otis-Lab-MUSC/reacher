@@ -1,5 +1,7 @@
 """FastAPI integration tests using TestClient."""
 
+import csv
+import io
 import json
 import os
 import zipfile
@@ -19,10 +21,9 @@ def client():
         mock_instance.program_running = False
         mock_instance.ser = Mock()
         mock_instance.ser.is_open = False
-        mock_instance.get_firmware_information.return_value = {"sketch": "fr", "version": "1.0"}
+        mock_instance.get_firmware_information.return_value = {"sketch": "fr", "version": "v2.0.0"}
         mock_instance.get_behavior_data.return_value = []
         mock_instance.get_frame_data.return_value = []
-        mock_instance.get_frame_timestamps_count.return_value = 0
         mock_instance.get_hardware_settings.return_value = []
         mock_instance.get_program_running.return_value = False
         mock_instance.get_filename.return_value = None
@@ -164,9 +165,9 @@ class TestFileEndpoints:
         instance.get_behavior_data.return_value = [
             {"device": "lever", "event": "press", "start_timestamp": 100, "end_timestamp": 200}
         ]
-        instance.get_firmware_information.return_value = {"sketch": "fr", "version": "1.0"}
+        instance.get_firmware_information.return_value = {"sketch": "fr", "version": "v2.0.0"}
         instance.get_hardware_settings.return_value = [{"baud_rate": 9600}]
-        instance.get_frame_timestamps_count.return_value = 5
+        instance.get_frame_data.return_value = [50, 150, 250, 350, 450]
 
         resp = client.post(
             f"/api/file/{sid}/export/zip",
@@ -193,7 +194,29 @@ class TestFileEndpoints:
             assert "arduino_config.json" in names
             assert "metadata.json" in names
             assert "notes.txt" in names
+            assert "frame_timestamps.csv" in names
 
             meta = json.loads(zf.read("metadata.json"))
             assert meta["session_name"] == "my_session"
             assert meta["infusion_count"] == 3
+            assert meta["firmware_sketch"] == "fr.ino"
+            assert meta["firmware_version"] == "v2.0.0"
+            assert meta["frame_count"] == 5
+
+            # Verify behavior_events.csv has frame index columns
+            behavior_csv = zf.read("behavior_events.csv").decode()
+            reader = csv.DictReader(io.StringIO(behavior_csv))
+            rows = list(reader)
+            assert len(rows) == 1
+            assert "start_frame_index" in reader.fieldnames
+            assert "end_frame_index" in reader.fieldnames
+            assert rows[0]["start_frame_index"] == "0"
+            assert rows[0]["end_frame_index"] == "1"
+
+            # Verify frame_timestamps.csv
+            ft_csv = zf.read("frame_timestamps.csv").decode()
+            ft_reader = csv.DictReader(io.StringIO(ft_csv))
+            ft_rows = list(ft_reader)
+            assert len(ft_rows) == 5
+            assert ft_rows[0] == {"frame_index": "0", "timestamp_ms": "50"}
+            assert ft_rows[4] == {"frame_index": "4", "timestamp_ms": "450"}
