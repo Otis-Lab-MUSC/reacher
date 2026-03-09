@@ -5,6 +5,7 @@
 [![Version](https://img.shields.io/badge/version-2.0.0-blue)](https://github.com/Otis-Lab-MUSC/REACHER)
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.13-blue)](https://www.python.org)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![REACHER Suite](https://img.shields.io/badge/REACHER_Suite-member-orange)](https://github.com/Otis-Lab-MUSC)
 
 *Written by*: Joshua Boquiren
 
