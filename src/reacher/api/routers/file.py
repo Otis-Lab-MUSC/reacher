@@ -97,11 +97,12 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
     filename = instance.get_filename()
     destination = instance.get_data_destination()
 
-    if not filename or not destination:
-        raise HTTPException(
-            status_code=400,
-            detail="Filename and destination must be configured before exporting",
-        )
+    if not filename:
+        filename = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
+        instance.set_filename(filename)
+    if not destination:
+        destination = os.path.expanduser("~/Downloads")
+        instance.set_data_destination(destination)
 
     folder_path = instance.make_destination_folder()
 

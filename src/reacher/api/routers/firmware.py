@@ -1,6 +1,7 @@
 """Firmware upload endpoints."""
 
 import asyncio
+import logging
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
@@ -9,6 +10,7 @@ from ...uploader.uploader import FirmwareUploader
 from . import websocket as ws_mod
 
 router = APIRouter()
+_logger = logging.getLogger(__name__)
 _uploader = FirmwareUploader()
 
 
@@ -65,11 +67,13 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
     try:
         success = await _uploader.upload(body.paradigm, info.port, body.board, progress_cb)
     except FileNotFoundError as e:
+        _logger.error("Firmware file not found for session %s: %s", session_id, e)
         sm.set_state(session_id, "idle")
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail="Firmware file not found")
     except Exception as e:
+        _logger.error("Firmware upload failed for session %s: %s", session_id, e, exc_info=True)
         sm.set_state(session_id, "idle")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Firmware upload failed")
 
     if not success:
         sm.set_state(session_id, "idle")
@@ -83,8 +87,9 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
         # Request firmware identification
         instance.send_command(102)  # IDENTIFY
     except Exception as e:
+        _logger.error("Post-upload reconnect failed for session %s: %s", session_id, e, exc_info=True)
         sm.set_state(session_id, "idle")
-        raise HTTPException(status_code=500, detail=f"Post-upload reconnect failed: {e}")
+        raise HTTPException(status_code=500, detail="Post-upload reconnect failed")
 
     sm.set_paradigm(session_id, body.paradigm)
     sm.set_board(session_id, body.board)

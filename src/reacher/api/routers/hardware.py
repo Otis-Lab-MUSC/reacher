@@ -1,6 +1,8 @@
 """Generic hardware command dispatch endpoint."""
 
 import logging
+import time
+from collections import defaultdict, deque
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -10,6 +12,11 @@ from ...kernel.commands import COMMAND_REGISTRY, get_commands_for_paradigm
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Sliding-window rate limiter: max 20 commands/second per session
+_RATE_LIMIT = 20
+_RATE_WINDOW = 1.0  # seconds
+_command_timestamps: dict[str, deque] = defaultdict(deque)
 
 # Hardware-safe value ranges per payload_key
 _VALUE_RANGES = {
@@ -39,6 +46,15 @@ async def send_command(session_id: str, body: CommandRequest, request: Request):
         info = sm.get_session(session_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    # Sliding-window rate limit
+    now = time.monotonic()
+    window = _command_timestamps[session_id]
+    while window and window[0] <= now - _RATE_WINDOW:
+        window.popleft()
+    if len(window) >= _RATE_LIMIT:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded (20 commands/second)")
+    window.append(now)
 
     if body.code not in COMMAND_REGISTRY:
         raise HTTPException(status_code=400, detail=f"Unknown command code: {body.code}")
