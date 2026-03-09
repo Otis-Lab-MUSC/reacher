@@ -11,17 +11,19 @@ import webbrowser
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
 from ..session_manager import SessionManager
+from .middleware.auth import require_api_key, API_KEY
 from .routers import data, file, firmware, hardware, lifecycle, program, serial, session, websocket
 
 logger = logging.getLogger(__name__)
 
 PORT = int(os.getenv("REACHER_PORT", "6229"))
+HOST = os.getenv("REACHER_HOST", "127.0.0.1")
 
 
 def _is_already_running() -> bool:
@@ -79,9 +81,8 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[f"http://localhost:{PORT}", f"http://127.0.0.1:{PORT}"],
-        allow_credentials=True,
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Accept"],
+        allow_headers=["Content-Type", "Accept", "Authorization"],
     )
 
     @app.get("/health", tags=["health"])
@@ -92,18 +93,25 @@ def create_app() -> FastAPI:
             "status": "ok",
             "version": __version__,
             "active_sessions": len(sessions),
+            "dropped_events": websocket.dropped_events(),
         }
 
-    # Register routers
-    app.include_router(session.router, prefix="/api/sessions", tags=["sessions"])
-    app.include_router(serial.router, prefix="/api/serial", tags=["serial"])
-    app.include_router(firmware.router, prefix="/api/firmware", tags=["firmware"])
-    app.include_router(hardware.router, prefix="/api/hardware", tags=["hardware"])
-    app.include_router(program.router, prefix="/api/program", tags=["program"])
-    app.include_router(data.router, prefix="/api/data", tags=["data"])
-    app.include_router(file.router, prefix="/api/file", tags=["file"])
+    # Localhost-only token endpoint (for same-origin web frontend)
+    @app.get("/api/auth/token", tags=["auth"])
+    async def get_auth_token():
+        return {"token": API_KEY}
+
+    # Register routers — all /api/* routes require auth
+    api_deps = [Depends(require_api_key)]
+    app.include_router(session.router, prefix="/api/sessions", tags=["sessions"], dependencies=api_deps)
+    app.include_router(serial.router, prefix="/api/serial", tags=["serial"], dependencies=api_deps)
+    app.include_router(firmware.router, prefix="/api/firmware", tags=["firmware"], dependencies=api_deps)
+    app.include_router(hardware.router, prefix="/api/hardware", tags=["hardware"], dependencies=api_deps)
+    app.include_router(program.router, prefix="/api/program", tags=["program"], dependencies=api_deps)
+    app.include_router(data.router, prefix="/api/data", tags=["data"], dependencies=api_deps)
+    app.include_router(file.router, prefix="/api/file", tags=["file"], dependencies=api_deps)
     app.include_router(websocket.router, tags=["websocket"])
-    app.include_router(lifecycle.router, prefix="/api/lifecycle", tags=["lifecycle"])
+    app.include_router(lifecycle.router, prefix="/api/lifecycle", tags=["lifecycle"], dependencies=api_deps)
 
     # Serve built React frontend at /
     static_dir = _resolve_static_dir()
@@ -126,7 +134,7 @@ def main():
     webbrowser.open(f"http://localhost:{PORT}")
     uvicorn.run(
         "reacher.api.app:app",
-        host="0.0.0.0",
+        host=HOST,
         port=PORT,
         log_level="info",
         ws_ping_interval=15,

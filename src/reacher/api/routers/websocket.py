@@ -12,6 +12,8 @@ from typing import Dict, Set
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from ..middleware.auth import verify_ws_token
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,9 @@ _connections: Dict[str, Set[WebSocket]] = defaultdict(set)
 # Thread-safe stdlib queue (safe to call from background REACHER threads)
 _EVENT_QUEUE_MAX = 10000
 _event_queue: queue.Queue = queue.Queue(maxsize=_EVENT_QUEUE_MAX)
+
+# Dropped event counter for diagnostics
+_dropped_events: int = 0
 
 # Async event loop + notification event (set lazily on first WS connect)
 _loop: asyncio.AbstractEventLoop | None = None
@@ -37,6 +42,11 @@ _WATCHDOG_TIMEOUT = 120  # seconds with 0 connections before auto-shutdown
 def total_connections() -> int:
     """Return the total number of active WebSocket connections across all sessions."""
     return sum(len(ws_set) for ws_set in _connections.values())
+
+
+def dropped_events() -> int:
+    """Return the total number of events dropped due to a full queue."""
+    return _dropped_events
 
 
 def _trigger_shutdown():
@@ -73,9 +83,11 @@ def enqueue_event(session_id: str, event_type: str, data: dict):
         "session_id": session_id,
         "data": data,
     }
+    global _dropped_events
     try:
         _event_queue.put_nowait(msg)
     except queue.Full:
+        _dropped_events += 1
         # Drop oldest to make room
         try:
             _event_queue.get_nowait()
@@ -137,6 +149,7 @@ def _ensure_broadcast_worker():
 # Per-session last-disconnect timestamps for orphan cleanup
 _session_disconnect_times: Dict[str, float] = {}
 _SESSION_ORPHAN_TIMEOUT = 60  # seconds with 0 WS clients before destroying a session
+_SESSION_ORPHAN_TIMEOUT_ACTIVE = 600  # extended timeout for running/paused sessions
 _orphan_task = None
 
 
@@ -145,10 +158,22 @@ async def _orphan_cleanup():
     while True:
         await asyncio.sleep(15)
         now = time.monotonic()
-        orphans = [
-            sid for sid, ts in list(_session_disconnect_times.items())
-            if sid not in _connections and (now - ts) >= _SESSION_ORPHAN_TIMEOUT
-        ]
+        orphans = []
+        for sid, ts in list(_session_disconnect_times.items()):
+            if sid in _connections:
+                continue
+            # Use extended timeout for running/paused sessions
+            timeout = _SESSION_ORPHAN_TIMEOUT
+            if _app_ref is not None:
+                try:
+                    sm = _app_ref.state.session_manager
+                    info = sm._sessions.get(sid)
+                    if info and info.state in ("running", "paused"):
+                        timeout = _SESSION_ORPHAN_TIMEOUT_ACTIVE
+                except Exception:
+                    pass
+            if (now - ts) >= timeout:
+                orphans.append(sid)
         for sid in orphans:
             _session_disconnect_times.pop(sid, None)
             # Access session manager via the app state if available
@@ -172,6 +197,9 @@ _app_ref = None
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     global _had_connections, _last_connection_time, _app_ref, _orphan_task
 
+    if not verify_ws_token(websocket):
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
     await websocket.accept()
     _connections[session_id].add(websocket)
     _had_connections = True
@@ -185,9 +213,20 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
     try:
         while True:
-            # Keep the connection alive; client can send pings or commands
+            # Keep the connection alive; validate input
             data = await websocket.receive_text()
-            logger.debug("WS recv from %s: %s", session_id, data)
+            if len(data) > 1024:
+                logger.warning("WS message too large from %s (%d bytes), discarding", session_id, len(data))
+                continue
+            try:
+                parsed = json.loads(data)
+            except (json.JSONDecodeError, ValueError):
+                logger.warning("WS non-JSON from %s, discarding", session_id)
+                continue
+            if not isinstance(parsed, dict) or parsed.get("type") != "ping":
+                logger.debug("WS unknown message type from %s: %s", session_id, parsed.get("type"))
+                continue
+            logger.debug("WS ping from %s", session_id)
     except WebSocketDisconnect:
         pass
     finally:
