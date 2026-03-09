@@ -142,7 +142,9 @@ class SessionManager:
     # ------------------------------------------------------------------
 
     def set_state(self, session_id: str, state: str) -> None:
-        info = self.get_session(session_id)
+        info = self._sessions.get(session_id)
+        if info is None:
+            return  # Session already destroyed
         info.state = state
         self._broadcast_state(session_id, state)
 
