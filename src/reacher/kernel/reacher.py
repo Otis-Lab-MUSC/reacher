@@ -1,8 +1,11 @@
+import bisect
+import csv
 import serial
 import queue
 import threading
 import time
 import json
+import io
 import os
 import logging
 from typing import Callable, Dict, List, Optional, Union
@@ -346,9 +349,10 @@ class REACHER:
             data = json.loads(line)
 
             with open(self.controller_log, 'a', newline='') as file:
-                file.write(str(data))
+                file.write(json.dumps(data))
                 file.write('\n')
                 file.flush()
+                os.fsync(file.fileno())
 
             level = data['level']
             handler = self.code_dict.get(level)
@@ -408,6 +412,9 @@ class REACHER:
                 entry_dict['start_timestamp'] = event.get('start_timestamp')
                 entry_dict['end_timestamp'] = event.get('end_timestamp')  
                 
+        # Append-only event log (written before program_running guard)
+        self._write_event_log({"type": "behavior", **entry_dict})
+
         # Always emit for real-time UI feedback (e.g. hardware testing)
         self._emit("event", entry_dict)
 
@@ -428,6 +435,7 @@ class REACHER:
                 
     def update_frame_events(self, event: dict) -> None:
         ts = int(event.get('timestamp'))
+        self._write_event_log({"type": "frame", "timestamp": ts})
         with self.thread_lock:
             self.frame_data.append(ts)
         self.logger.info("--> Updated frame data")
@@ -475,6 +483,81 @@ class REACHER:
                 self.event_callback(self.session_id, event_type, data)
             except Exception:
                 self.logger.warning("Event callback failed", exc_info=True)
+
+    def _write_event_log(self, entry: dict) -> None:
+        """Append a JSON line to the append-only event log, fsynced to disk."""
+        try:
+            path = os.path.join(self.reacher_log_path, "event_log.jsonl")
+            with open(path, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+        except Exception:
+            self.logger.warning("Failed to write event log entry", exc_info=True)
+
+    def _auto_export(self) -> None:
+        """Write behavior_events.csv and frame_timestamps.csv to the session log directory.
+
+        Called automatically on stop_program(). Failure never blocks shutdown.
+        """
+        try:
+            behavior = self.get_behavior_data()
+            frame_data = self.get_frame_data()
+            frame_timestamps = sorted(int(ts) for ts in frame_data if ts)
+
+            # behavior_events.csv
+            csv_buf = io.StringIO()
+            fieldnames = ["device", "event", "start_timestamp", "end_timestamp", "start_frame_index", "end_frame_index"]
+            writer = csv.DictWriter(csv_buf, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in behavior:
+                start_ts = row.get("start_timestamp")
+                end_ts = row.get("end_timestamp")
+                start_fi = self._find_frame_index(frame_timestamps, int(start_ts)) if start_ts not in (None, "") else None
+                end_fi = self._find_frame_index(frame_timestamps, int(end_ts)) if end_ts not in (None, "") else None
+                out = {k: row.get(k, "") for k in ("device", "event", "start_timestamp", "end_timestamp")}
+                out["start_frame_index"] = start_fi if start_fi is not None else ""
+                out["end_frame_index"] = end_fi if end_fi is not None else ""
+                writer.writerow(out)
+            path = os.path.join(self.reacher_log_path, "behavior_events.csv")
+            with open(path, "w", newline="") as f:
+                f.write(csv_buf.getvalue())
+                f.flush()
+                os.fsync(f.fileno())
+
+            # frame_timestamps.csv
+            ft_buf = io.StringIO()
+            ft_writer = csv.DictWriter(ft_buf, fieldnames=["frame_index", "timestamp_ms"])
+            ft_writer.writeheader()
+            for i, ts in enumerate(frame_timestamps):
+                ft_writer.writerow({"frame_index": i, "timestamp_ms": ts})
+            path = os.path.join(self.reacher_log_path, "frame_timestamps.csv")
+            with open(path, "w", newline="") as f:
+                f.write(ft_buf.getvalue())
+                f.flush()
+                os.fsync(f.fileno())
+
+            self.logger.info("Auto-export complete: behavior_events.csv + frame_timestamps.csv")
+        except Exception:
+            self.logger.warning("Auto-export failed", exc_info=True)
+
+    @staticmethod
+    def _find_frame_index(frame_timestamps: list, event_ts: int):
+        """Return the index of the last frame at or before *event_ts*, or None."""
+        if not frame_timestamps:
+            return None
+        idx = bisect.bisect_right(frame_timestamps, event_ts) - 1
+        if idx < 0:
+            return None
+        return idx
+
+    def _join_queue_with_timeout(self, timeout: float = 5.0) -> None:
+        """Wait for all queued items to finish, with a timeout to avoid hanging."""
+        with self.queue.all_tasks_done:
+            while self.queue.unfinished_tasks:
+                if not self.queue.all_tasks_done.wait(timeout=timeout):
+                    self.logger.warning("Queue drain timed out after %.1fs", timeout)
+                    break
 
     def get_detected_paradigm(self) -> Optional[str]:
         """Return the paradigm detected from firmware identification, or None."""
@@ -549,6 +632,7 @@ class REACHER:
         self.program_running = True
         self.send_serial_command({"cmd": 101})
         self.program_start_time = time.time()
+        self._write_event_log({"type": "SESSION_START", "timestamp": self.program_start_time})
         self.logger.info(f"Program started at {self.get_time()}")
 
     def stop_program(self) -> None:
@@ -578,13 +662,12 @@ class REACHER:
         self.send_serial_command({"cmd": 100})
         time.sleep(2)
         self.program_flag.set()
-        # Drain remaining events: join with timeout ensures all task_done() calls complete
-        try:
-            self.queue.join()
-        except Exception:
-            pass  # queue.join() doesn't timeout natively — bounded by serial_flag below
+        # Drain remaining events with timeout to avoid indefinite hang
+        self._join_queue_with_timeout(5.0)
         self.close_serial()
         self.program_end_time = time.time()
+        self._write_event_log({"type": "SESSION_END", "timestamp": self.program_end_time})
+        self._auto_export()
         self.logger.info(f"Program ended at {self.get_time()}")
 
     def pause_program(self) -> None:
