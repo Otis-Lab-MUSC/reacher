@@ -22,10 +22,11 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "pyserial>=3.5",
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.29",
-    "websockets>=12.0",
+    # Fix: PY-003 — Upper bounds to prevent breaking changes
+    "pyserial>=3.5,<4.0",
+    "fastapi>=0.110,<1.0",
+    "uvicorn[standard]>=0.29,<1.0",
+    "websockets>=12.0,<15.0",
 ]
 
 [project.optional-dependencies]

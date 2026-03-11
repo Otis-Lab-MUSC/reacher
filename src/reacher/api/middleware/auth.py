@@ -60,6 +60,12 @@ async def require_api_key(
 
 
 def verify_ws_token(websocket: WebSocket) -> bool:
-    """Check the ?token= query param on WebSocket upgrade requests."""
+    """Check the ?token= query param on WebSocket upgrade requests.
+
+    Fix: PY-005 — The token is passed via URL query parameter because the
+    WebSocket API does not support custom headers on the upgrade request.
+    This is acceptable for localhost-only usage; the token may appear in
+    server access logs but REACHER is not exposed to the network.
+    """
     token = websocket.query_params.get("token")
     return token == API_KEY

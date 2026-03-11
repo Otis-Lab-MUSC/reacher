@@ -270,9 +270,38 @@ class FirmwareSimulator:
         self._send_device_test("CUE", 8, "TONE", self.cue_duration)
         self._send_device_test("PUMP", 9, "INFUSION", self.pump_duration)
 
+    def _capture_arm_state(self) -> dict:
+        """Snapshot all device arm states."""
+        return {
+            "lever_rh_armed": self.lever_rh_armed,
+            "lever_lh_armed": self.lever_lh_armed,
+            "cue_armed": self.cue_armed,
+            "cue2_armed": self.cue2_armed,
+            "pump_armed": self.pump_armed,
+            "pump2_armed": self.pump2_armed,
+            "lick_armed": self.lick_armed,
+            "laser_armed": self.laser_armed,
+            "microscope_armed": self.microscope_armed,
+        }
+
+    def _restore_arm_state(self, snap: dict):
+        """Restore previously captured arm states."""
+        self.lever_rh_armed = snap.get("lever_rh_armed", self.lever_rh_armed)
+        self.lever_lh_armed = snap.get("lever_lh_armed", self.lever_lh_armed)
+        self.cue_armed = snap.get("cue_armed", self.cue_armed)
+        self.cue2_armed = snap.get("cue2_armed", self.cue2_armed)
+        self.pump_armed = snap.get("pump_armed", self.pump_armed)
+        self.pump2_armed = snap.get("pump2_armed", self.pump2_armed)
+        self.lick_armed = snap.get("lick_armed", self.lick_armed)
+        self.laser_armed = snap.get("laser_armed", self.laser_armed)
+        self.microscope_armed = snap.get("microscope_armed", self.microscope_armed)
+
     def start(self):
         if self._running:
             return
+        # Restore arm states captured at previous session end
+        if hasattr(self, "_saved_arm_state"):
+            self._restore_arm_state(self._saved_arm_state)
         self._running = True
         self._stop_event.clear()
         self._clock = 0
@@ -280,6 +309,8 @@ class FirmwareSimulator:
         self._thread.start()
 
     def stop(self):
+        # Capture arm states before disarming (mirrors firmware behavior)
+        self._saved_arm_state = self._capture_arm_state()
         self._running = False
         self._stop_event.set()
         if self._thread and self._thread.is_alive():

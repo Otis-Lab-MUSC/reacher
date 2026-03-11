@@ -69,9 +69,16 @@ class SessionManager:
             def _on_program_stopped():
                 self.set_state(session_id, "stopped")
 
+            # Fix: XL-003 — Wrap event callback to intercept disconnect events
+            def _event_callback_wrapper(sid: str, event_type: str, data: dict):
+                if event_type == "disconnect":
+                    self.handle_disconnect(sid, data.get("reason", "unknown"))
+                if self._event_callback:
+                    self._event_callback(sid, event_type, data)
+
             instance = REACHER(
                 session_id=session_id,
-                event_callback=self._event_callback,
+                event_callback=_event_callback_wrapper,
                 on_stop=_on_program_stopped,
             )
             info = SessionInfo(
@@ -164,6 +171,18 @@ class SessionManager:
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    def handle_disconnect(self, session_id: str, reason: str) -> None:
+        """Handle a serial disconnect event from the kernel.
+
+        Fix: XL-003 — Transition session to 'disconnected' state and broadcast.
+        """
+        info = self._sessions.get(session_id)
+        if info is None:
+            return
+        info.state = "disconnected"
+        self._broadcast_state(session_id, "disconnected")
+        logger.warning("Session %s disconnected: %s", session_id, reason)
 
     def _broadcast_state(self, session_id: str, state: str) -> None:
         if self._event_callback:

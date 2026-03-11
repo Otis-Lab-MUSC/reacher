@@ -32,8 +32,13 @@ async def connect_serial(session_id: str, request: Request):
     try:
         instance.set_COM_port(info.port)
         instance.open_serial()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as e:
+        # Fix: PY-002 — Surface validation errors without leaking internals
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        # Fix: PY-002 — Generic message; details logged server-side
+        logger.exception("Serial connect failed for session %s", session_id)
+        raise HTTPException(status_code=500, detail="Failed to open serial connection")
 
     sm.set_state(session_id, "connected")
 
@@ -72,8 +77,10 @@ async def disconnect_serial(session_id: str, request: Request):
 
     try:
         info.instance.close_serial()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        # Fix: PY-002 — Generic message; details logged server-side
+        logger.exception("Serial disconnect failed for session %s", session_id)
+        raise HTTPException(status_code=500, detail="Failed to close serial connection")
 
     sm.set_state(session_id, "idle")
     return {"status": "disconnected"}

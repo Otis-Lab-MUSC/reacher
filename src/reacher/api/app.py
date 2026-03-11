@@ -11,7 +11,7 @@ import webbrowser
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -66,6 +66,7 @@ async def lifespan(app: FastAPI):
     sm = SessionManager(event_callback=broadcast_event)
     app.state.session_manager = sm
     logger.info("REACHER API v%s starting on port %d", __version__, PORT)
+    webbrowser.open(f"http://localhost:{PORT}")
     yield
     logger.info("Shutting down — destroying all sessions")
     sm.destroy_all()
@@ -78,9 +79,15 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Fix: PY-008 — Allow additional CORS origins via env var
+    cors_origins = [f"http://localhost:{PORT}", f"http://127.0.0.1:{PORT}"]
+    extra_origins = os.getenv("REACHER_CORS_ORIGINS", "")
+    if extra_origins:
+        cors_origins.extend(o.strip() for o in extra_origins.split(",") if o.strip())
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[f"http://localhost:{PORT}", f"http://127.0.0.1:{PORT}"],
+        allow_origins=cors_origins,
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "Accept", "Authorization"],
     )
@@ -96,9 +103,14 @@ def create_app() -> FastAPI:
             "dropped_events": websocket.dropped_events(),
         }
 
-    # Localhost-only token endpoint (for same-origin web frontend)
+    # Fix: PY-001 — Restrict token endpoint to same-origin requests
+    _allowed_origins = set(cors_origins)
+
     @app.get("/api/auth/token", tags=["auth"])
-    async def get_auth_token():
+    async def get_auth_token(request: Request):
+        origin = request.headers.get("origin")
+        if origin is not None and origin not in _allowed_origins:
+            raise HTTPException(status_code=403, detail="Forbidden")
         return {"token": API_KEY}
 
     # Register routers — all /api/* routes require auth
@@ -130,8 +142,8 @@ def main():
     if _is_already_running():
         print(f"REACHER is already running on port {PORT}.")
         print(f"Visit http://localhost:{PORT} in your browser.")
+        webbrowser.open(f"http://localhost:{PORT}")
         return
-    webbrowser.open(f"http://localhost:{PORT}")
     uvicorn.run(
         "reacher.api.app:app",
         host=HOST,

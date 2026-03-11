@@ -6,6 +6,7 @@ import logging
 import os
 import queue
 import signal
+import threading
 import time
 from collections import defaultdict
 from typing import Dict, Set
@@ -24,7 +25,8 @@ _connections: Dict[str, Set[WebSocket]] = defaultdict(set)
 _EVENT_QUEUE_MAX = 10000
 _event_queue: queue.Queue = queue.Queue(maxsize=_EVENT_QUEUE_MAX)
 
-# Dropped event counter for diagnostics
+# Fix: PY-004 — Thread-safe dropped event counter
+_dropped_events_lock = threading.Lock()
 _dropped_events: int = 0
 
 # Async event loop + notification event (set lazily on first WS connect)
@@ -46,7 +48,8 @@ def total_connections() -> int:
 
 def dropped_events() -> int:
     """Return the total number of events dropped due to a full queue."""
-    return _dropped_events
+    with _dropped_events_lock:
+        return _dropped_events
 
 
 def _trigger_shutdown():
@@ -87,7 +90,8 @@ def enqueue_event(session_id: str, event_type: str, data: dict):
     try:
         _event_queue.put_nowait(msg)
     except queue.Full:
-        _dropped_events += 1
+        with _dropped_events_lock:
+            _dropped_events += 1
         # Drop oldest to make room
         try:
             _event_queue.get_nowait()

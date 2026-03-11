@@ -42,6 +42,7 @@ class REACHER:
         self.queue: queue.Queue = queue.Queue()
 
         # Thread variables
+        # Fix: PY-007 — Threads created here but started lazily in open_serial()
         self.serial_thread: threading.Thread = threading.Thread(target=self.read_serial, daemon=True)
         self.queue_thread: threading.Thread = threading.Thread(target=self.handle_queue, daemon=True)
         self.time_check_thread: threading.Thread = threading.Thread(target=self.monitor_time_limit, daemon=True)
@@ -53,9 +54,6 @@ class REACHER:
         self.serial_flag.set()
         self.program_flag.set()
         self.time_check_flag.set()
-        self.serial_thread.start()
-        self.queue_thread.start()
-        self.time_check_thread.start()
 
         # Data process variables (guarded by thread_lock for cross-thread access)
         self.behavior_data: List[Dict[str, Union[str, int]]] = []
@@ -193,12 +191,15 @@ class REACHER:
 
         **Description:**
         - Configures the serial port to the specified name (e.g., "COM3").
-        - Only applies if the port is valid and exists in the system.
+        - Raises ValueError if port is not valid or not found in the system.
 
         **Args:**
         - `port (str)`: The name of the COM port to use.
+
+        **Raises:**
+        - `ValueError`: If the port is not available.
         """
-        
+
         self.logger.info("Setting COM port")
 
         if port == "SIMULATOR":
@@ -209,6 +210,9 @@ class REACHER:
         elif port in [p.device for p in list_ports.comports() if p.vid and p.pid]:
             self.ser.port = port
             self._is_simulated = False
+        else:
+            # Fix: SER-003 — Raise on invalid port instead of silently ignoring
+            raise ValueError(f"Port {port!r} is not available")
 
         self.logger.info(f"Set COM port to {port}")
 
@@ -237,6 +241,11 @@ class REACHER:
             self.logger.info("--> Starting queue thread")
             self.queue_thread = threading.Thread(target=self.handle_queue, daemon=True)
             self.queue_thread.start()
+        # Fix: PY-007 — Start time-check thread on connection (deferred from __init__)
+        if not self.time_check_thread.is_alive():
+            self.logger.info("--> Starting time check thread")
+            self.time_check_thread = threading.Thread(target=self.monitor_time_limit, daemon=True)
+            self.time_check_thread.start()
         time.sleep(2)
         self.ser.reset_input_buffer()
         
@@ -300,13 +309,31 @@ class REACHER:
         - Uses a lock to ensure thread-safe operations.
         """
         while not self.serial_flag.is_set():
-            if self.ser.is_open and self.ser.in_waiting > 0:
-                with self.thread_lock:
-                    data = self.ser.readline().decode(encoding='utf-8', errors='replace').strip()
-                    self.logger.info(f"Serial data received: {data}")
-                    self.queue.put(data)
-            else:
-                time.sleep(0.1)
+            try:
+                if self.ser.is_open and self.ser.in_waiting > 0:
+                    # Fix: SER-004 — Read outside lock, only queue inside lock
+                    data = self.ser.readline()
+                    # Fix: SER-001 — Strict UTF-8 decode; discard corrupt lines
+                    try:
+                        decoded = data.decode(encoding='utf-8', errors='strict').strip()
+                    except UnicodeDecodeError:
+                        self.logger.warning("Corrupt serial data (non-UTF-8), discarding: %s", data.hex())
+                        continue
+                    self.logger.info(f"Serial data received: {decoded}")
+                    self.queue.put(decoded)
+                else:
+                    time.sleep(0.1)
+            except (serial.SerialException, OSError) as e:
+                # Fix: SER-005 — Handle unexpected serial disconnect
+                self.logger.error("Serial disconnect detected", exc_info=True)
+                self._emit("disconnect", {"reason": str(e)})
+                self.serial_flag.set()
+                if self.program_running:
+                    try:
+                        self.stop_program()
+                    except Exception:
+                        self.logger.warning("Failed to stop program after disconnect", exc_info=True)
+                break
 
     def handle_queue(self) -> None:
         """Process data from the queue.
@@ -372,14 +399,62 @@ class REACHER:
         Args:
             event: Parsed JSON event dict from firmware containing 'desc' key.
         """
+        # Fix: XL-002 — Log error_code when present
+        error_code = event.get("error_code", "UNKNOWN")
         desc = event.get("desc", "Unknown")
-        self.logger.error(f"Firmware error: {desc}")
+        self.logger.error(f"Firmware error [{error_code}]: {desc}")
         self._emit("error", event)
+
+    # Fix: XL-001 — Minimum firmware version check
+    MIN_FIRMWARE_VERSION = "v2.0.0"
+
+    @staticmethod
+    def _parse_version(version_str: str) -> tuple:
+        """Parse a version string like 'v2.0.0' into a comparable tuple."""
+        clean = version_str.lstrip("vV")
+        parts = []
+        for p in clean.split("."):
+            try:
+                parts.append(int(p))
+            except ValueError:
+                parts.append(0)
+        return tuple(parts)
 
     def update_firmware_information(self, event: dict) -> None:
         if event["device"] == "CONTROLLER":
             self.firmware_information = event
             self.logger.info("--> Updated arduino configuration")
+            # Fix: XL-001 — Warn on firmware version mismatch
+            fw_version = event.get("version", "")
+            if fw_version:
+                try:
+                    if self._parse_version(fw_version) < self._parse_version(self.MIN_FIRMWARE_VERSION):
+                        self.logger.warning(
+                            "Firmware version %s is below minimum %s",
+                            fw_version, self.MIN_FIRMWARE_VERSION,
+                        )
+                        self._emit("error", {
+                            "level": "006",
+                            "error_code": "E_FW_VERSION",
+                            "desc": f"Firmware {fw_version} is below minimum {self.MIN_FIRMWARE_VERSION}",
+                            "device": "CONTROLLER",
+                        })
+                except Exception:
+                    self.logger.debug("Could not parse firmware version %r", fw_version)
+            # Fix: SER-002 — Verify baud rate matches after firmware identification
+            fw_baud = event.get("baud_rate")
+            if fw_baud is not None and self.ser.is_open:
+                if int(fw_baud) != self.ser.baudrate:
+                    self.logger.warning(
+                        "Baud rate mismatch: firmware reports %s, serial configured %s",
+                        fw_baud, self.ser.baudrate,
+                    )
+                    self._emit("error", {
+                        "level": "006",
+                        "error_code": "E_BAUD_MISMATCH",
+                        "desc": f"Baud mismatch: firmware={fw_baud}, host={self.ser.baudrate}",
+                        "device": "CONTROLLER",
+                    })
             self._emit("config", event)
         else:
             self.hardware_settings.append(event)
@@ -907,6 +982,28 @@ class REACHER:
         local_time = time.localtime()
         formatted_time = time.strftime("%Y-%m-%d_%H-%M-%S", local_time)
         return formatted_time
+
+    @staticmethod
+    def prune_logs(days: int = 30) -> int:
+        """Remove log directories older than *days* from ~/REACHER/LOG.
+
+        Fix: PY-006 — CLI maintenance command support.
+
+        Returns:
+            Number of directories removed.
+        """
+        import shutil
+        log_root = os.path.expanduser("~/REACHER/LOG")
+        if not os.path.isdir(log_root):
+            return 0
+        cutoff = time.time() - (days * 86400)
+        removed = 0
+        for entry in os.listdir(log_root):
+            path = os.path.join(log_root, entry)
+            if os.path.isdir(path) and os.stat(path).st_mtime < cutoff:
+                shutil.rmtree(path, ignore_errors=True)
+                removed += 1
+        return removed
 
     """
     **Contact:**
