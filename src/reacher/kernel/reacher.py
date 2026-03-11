@@ -13,6 +13,50 @@ from serial.tools import list_ports
 
 from .commands import build_command_payload, SCHEDULE_TO_PARADIGM
 
+_USE_VALUE = object()  # sentinel: use the `value` arg from send_command()
+
+# Maps command codes to (device_name, field_name, value_or_sentinel)
+# _USE_VALUE means the value is taken from the `value` arg passed to send_command().
+_COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
+    # --- Arm/Disarm ---
+    300: ("CUE", "armed", False),
+    301: ("CUE", "armed", True),
+    310: ("CUE2", "armed", False),
+    311: ("CUE2", "armed", True),
+    400: ("PUMP", "armed", False),
+    401: ("PUMP", "armed", True),
+    410: ("PUMP2", "armed", False),
+    411: ("PUMP2", "armed", True),
+    500: ("LICK_CIRCUIT", "armed", False),
+    501: ("LICK_CIRCUIT", "armed", True),
+    600: ("LASER", "armed", False),
+    601: ("LASER", "armed", True),
+    900: ("MICROSCOPE", "armed", False),
+    901: ("MICROSCOPE", "armed", True),
+    1000: ("SWITCH_LEVER_RH", "armed", False),
+    1001: ("SWITCH_LEVER_RH", "armed", True),
+    1300: ("SWITCH_LEVER_LH", "armed", False),
+    1301: ("SWITCH_LEVER_LH", "armed", True),
+    # --- Cue parameters ---
+    371: ("CUE", "frequency", _USE_VALUE),
+    372: ("CUE", "duration", _USE_VALUE),
+    381: ("CUE2", "frequency", _USE_VALUE),
+    382: ("CUE2", "duration", _USE_VALUE),
+    # --- Pump parameters ---
+    472: ("PUMP", "duration", _USE_VALUE),
+    482: ("PUMP2", "duration", _USE_VALUE),
+    # --- Laser parameters ---
+    671: ("LASER", "frequency", _USE_VALUE),
+    672: ("LASER", "duration", _USE_VALUE),
+    681: ("LASER", "mode", "contingent"),
+    682: ("LASER", "mode", "independent"),
+    # --- Lever parameters ---
+    1074: ("SWITCH_LEVER_RH", "timeout", _USE_VALUE),
+    1075: ("SWITCH_LEVER_RH", "ratio", _USE_VALUE),
+    1374: ("SWITCH_LEVER_LH", "timeout", _USE_VALUE),
+    1375: ("SWITCH_LEVER_LH", "ratio", _USE_VALUE),
+}
+
 class REACHER:
     """A class to manage serial communication and data collection for REACHER experiments."""
 
@@ -466,8 +510,18 @@ class REACHER:
                 self.hardware_settings.append(event)
             self.logger.info("--> Updated hardware defaults list")
             self._emit("config", event)
-            
-        
+
+    def _update_hardware_setting(self, device: str, updates: dict) -> None:
+        """Update a device entry in hardware_settings in-place and emit a config event."""
+        for entry in self.hardware_settings:
+            if entry.get("device") == device:
+                entry.update(updates)
+                self._emit("config", entry)
+                return
+        new_entry = {"device": device, **updates}
+        self.hardware_settings.append(new_entry)
+        self._emit("config", new_entry)
+
     def update_behavioral_events(self, event: dict) -> None:
         entry_dict: Dict[str, Union[str, int]] = {}
         
@@ -556,6 +610,10 @@ class REACHER:
         """
         payload = build_command_payload(code, value)
         self.send_serial_command(payload)
+        if code in _COMMAND_STATE_MAP:
+            device, field, mapped = _COMMAND_STATE_MAP[code]
+            effective = value if mapped is _USE_VALUE else mapped
+            self._update_hardware_setting(device, {field: effective})
 
     def _emit(self, event_type: str, data: dict) -> None:
         """Broadcast an event via the registered callback (if any)."""
