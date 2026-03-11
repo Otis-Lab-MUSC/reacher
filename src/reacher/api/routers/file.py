@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+import re
 import time
 import zipfile
 from fastapi import APIRouter, HTTPException, Request
@@ -14,6 +15,14 @@ from typing import Optional
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_for_path(name: str) -> str:
+    """Replace characters unsafe for directory/file names with underscores."""
+    sanitized = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name)
+    sanitized = sanitized.replace(' ', '_')
+    sanitized = re.sub(r'_+', '_', sanitized)
+    return sanitized.strip(' _.') or "session"
 
 
 def _find_frame_index(frame_timestamps: list[int], event_ts: int) -> int | None:
@@ -98,7 +107,18 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
     destination = instance.get_data_destination()
 
     if not filename:
-        filename = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
+        session_name = body.session_name or ""
+        default_pattern = f"{(info.paradigm or 'Session').upper()} {info.port}"
+
+        if session_name and session_name != default_pattern:
+            # Manually named session — use as-is (sanitized)
+            filename = _sanitize_for_path(session_name)
+        else:
+            # Auto-default or empty — paradigm + port + datetime
+            base = _sanitize_for_path(default_pattern)
+            timestamp = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
+            filename = f"{base}_{timestamp}"
+
         instance.set_filename(filename)
     if not destination:
         destination = os.path.expanduser("~/Downloads")
