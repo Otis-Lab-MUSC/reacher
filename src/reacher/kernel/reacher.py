@@ -422,7 +422,7 @@ class REACHER:
 
     def update_firmware_information(self, event: dict) -> None:
         if event["device"] == "CONTROLLER":
-            self.firmware_information = event
+            self.firmware_information.update(event)
             self.logger.info("--> Updated arduino configuration")
             # Fix: XL-001 — Warn on firmware version mismatch
             fw_version = event.get("version", "")
@@ -457,7 +457,13 @@ class REACHER:
                     })
             self._emit("config", event)
         else:
-            self.hardware_settings.append(event)
+            device = event.get("device")
+            for i, entry in enumerate(self.hardware_settings):
+                if entry.get("device") == device:
+                    self.hardware_settings[i] = event
+                    break
+            else:
+                self.hardware_settings.append(event)
             self.logger.info("--> Updated hardware defaults list")
             self._emit("config", event)
             

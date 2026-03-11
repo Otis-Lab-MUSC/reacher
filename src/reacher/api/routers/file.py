@@ -168,7 +168,7 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
                     "session_name": body.session_name or None,
                     "port": info.port,
                     "paradigm": info.paradigm,
-                    "firmware_sketch": f"{firmware_info.get('sketch', 'unknown')}.ino",
+                    "firmware_sketch": firmware_info.get('sketch', 'unknown.ino'),
                     "firmware_version": firmware_info.get("version", "unknown"),
                     "export_date": export_date,
                     "export_time": export_time,
