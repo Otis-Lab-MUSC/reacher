@@ -187,7 +187,16 @@ class FirmwareUploader:
                     if progress_callback:
                         progress_callback(percent, stage)
 
-        await proc.wait()
+        # Fix: F-002 — avrdude can hang indefinitely on a bad USB connection; enforce timeout
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=120.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.error("avrdude timed out after 120s — process killed")
+            if progress_callback:
+                progress_callback(percent, "Failed (timeout)")
+            return False
 
         if proc.returncode == 0:
             logger.info("Firmware upload succeeded for %s on %s", paradigm, port)

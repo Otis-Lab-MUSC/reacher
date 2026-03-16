@@ -83,7 +83,7 @@ class REACHER:
         # Serial variables
         self._is_simulated: bool = False
         self.ser: serial.Serial = serial.Serial(baudrate=115200, timeout=1)
-        self.queue: queue.Queue = queue.Queue()
+        self.queue: queue.Queue = queue.Queue(maxsize=5000)
 
         # Thread variables
         # Fix: PY-007 — Threads created here but started lazily in open_serial()
@@ -364,7 +364,11 @@ class REACHER:
                         self.logger.warning("Corrupt serial data (non-UTF-8), discarding: %s", data.hex())
                         continue
                     self.logger.info(f"Serial data received: {decoded}")
-                    self.queue.put(decoded)
+                    # Fix: F-003 — Discard if queue is full; prevents OOM on I/O lag
+                    try:
+                        self.queue.put_nowait(decoded)
+                    except queue.Full:
+                        self.logger.warning("Serial queue full — dropping line: %s", decoded)
                 else:
                     time.sleep(0.1)
             except (serial.SerialException, OSError) as e:
@@ -425,7 +429,11 @@ class REACHER:
                 file.flush()
                 os.fsync(file.fileno())
 
-            level = data['level']
+            # Fix: F-004 — Use .get() so a missing 'level' key doesn't KeyError
+            level = data.get('level')
+            if level is None:
+                self.logger.warning("Firmware event missing 'level': %s", data)
+                return
             handler = self.code_dict.get(level)
             if handler is not None:
                 handler(data)
@@ -435,7 +443,9 @@ class REACHER:
         except json.JSONDecodeError as e:
             self.logger.error(f"Failed to parse JSON: {e}. Raw data: {line}")
         except Exception as e:
+            # Fix: F-006 — Notify frontend of processing failures so events aren't silently dropped
             self.logger.error(f"Error processing data: {e}. Raw line: {line}")
+            self._emit("kernel_error", {"reason": str(e), "raw": line})
 
     def handle_firmware_error(self, event: dict) -> None:
         """Handle firmware error events (level 006).
@@ -466,7 +476,8 @@ class REACHER:
 
     def update_firmware_information(self, event: dict) -> None:
         if event["device"] == "CONTROLLER":
-            self.firmware_information.update(event)
+            with self.thread_lock:  # Fix: F-009 — guard cross-thread dict access
+                self.firmware_information.update(event)
             self.logger.info("--> Updated arduino configuration")
             # Fix: XL-001 — Warn on firmware version mismatch
             fw_version = event.get("version", "")
@@ -502,25 +513,29 @@ class REACHER:
             self._emit("config", event)
         else:
             device = event.get("device")
-            for i, entry in enumerate(self.hardware_settings):
-                if entry.get("device") == device:
-                    self.hardware_settings[i] = event
-                    break
-            else:
-                self.hardware_settings.append(event)
+            with self.thread_lock:  # Fix: F-009 — guard cross-thread list access
+                for i, entry in enumerate(self.hardware_settings):
+                    if entry.get("device") == device:
+                        self.hardware_settings[i] = event
+                        break
+                else:
+                    self.hardware_settings.append(event)
             self.logger.info("--> Updated hardware defaults list")
             self._emit("config", event)
 
     def _update_hardware_setting(self, device: str, updates: dict) -> None:
         """Update a device entry in hardware_settings in-place and emit a config event."""
-        for entry in self.hardware_settings:
-            if entry.get("device") == device:
-                entry.update(updates)
-                self._emit("config", entry)
-                return
-        new_entry = {"device": device, **updates}
-        self.hardware_settings.append(new_entry)
-        self._emit("config", new_entry)
+        with self.thread_lock:  # Fix: F-009 — guard cross-thread list access
+            for entry in self.hardware_settings:
+                if entry.get("device") == device:
+                    entry.update(updates)
+                    emit_data = dict(entry)
+                    break
+            else:
+                new_entry = {"device": device, **updates}
+                self.hardware_settings.append(new_entry)
+                emit_data = dict(new_entry)
+        self._emit("config", emit_data)
 
     def update_behavioral_events(self, event: dict) -> None:
         entry_dict: Dict[str, Union[str, int]] = {}
@@ -677,8 +692,10 @@ class REACHER:
                 os.fsync(f.fileno())
 
             self.logger.info("Auto-export complete: behavior_events.csv + frame_timestamps.csv")
-        except Exception:
+        except Exception as e:
+            # Fix: F-005 — Surface export failures to the frontend in real time
             self.logger.warning("Auto-export failed", exc_info=True)
+            self._emit("export_failed", {"reason": str(e)})
 
     @staticmethod
     def _find_frame_index(frame_timestamps: list, event_ts: int):
@@ -827,9 +844,14 @@ class REACHER:
         - Resumes the experiment and calculates total paused time.
         - Sends SESSION_PAUSE(false) to firmware to resume processing.
         """
+        # Fix: F-007 — Guard against calling resume when not paused (paused_start_time is None)
+        if self.paused_start_time is None:
+            self.logger.warning("resume_program() called but paused_start_time is None — ignoring")
+            return
         if self.program_flag.is_set():
             self.program_flag.clear()
         self.paused_time += time.time() - self.paused_start_time
+        self.paused_start_time = None
         self.send_serial_command({"cmd": 105, "paused": False})
 
     def get_program_running(self) -> bool:
@@ -996,10 +1018,12 @@ class REACHER:
         **Returns:**
         - `Dict`: The configuration dictionary.
         """
-        return self.firmware_information
-    
+        with self.thread_lock:  # Fix: F-009 — snapshot under lock
+            return dict(self.firmware_information)
+
     def get_hardware_settings(self) -> List:
-        return self.hardware_settings
+        with self.thread_lock:  # Fix: F-009 — snapshot under lock
+            return list(self.hardware_settings)
     
     def get_box_name(self) -> Optional[str]:
         """Get the name of the box.
