@@ -62,13 +62,47 @@ def _trigger_shutdown():
     os.kill(os.getpid(), signal.SIGINT)
 
 
+def _any_session_active() -> bool:
+    """Return True if any session is in 'running' or 'paused' state.
+
+    Fix: F-001 — Prevents watchdog from killing app while experiments are in progress.
+    """
+    if _app_ref is None:
+        return False
+    try:
+        sm = _app_ref.state.session_manager
+        for info in sm._sessions.values():
+            if info.state in ("running", "paused"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 async def _watchdog():
-    """Poll for 0 connections; auto-shutdown if no clients for WATCHDOG_TIMEOUT seconds."""
+    """Poll for 0 connections; auto-shutdown if no clients for WATCHDOG_TIMEOUT seconds.
+
+    Fix: F-001 — Defers shutdown while any session is running or paused, using the
+    orphan cleanup's extended timeout (600s) instead of the default 120s.
+    """
     while True:
         await asyncio.sleep(_WATCHDOG_INTERVAL)
         if total_connections() == 0 and _had_connections:
             idle = time.monotonic() - _last_connection_time
-            if idle >= _WATCHDOG_TIMEOUT:
+            if _any_session_active():
+                # Use the extended orphan timeout for active sessions
+                if idle >= _SESSION_ORPHAN_TIMEOUT_ACTIVE:
+                    logger.info(
+                        "Watchdog: no connections for %.0fs with active sessions — shutting down", idle
+                    )
+                    _trigger_shutdown()
+                    return
+                elif idle >= _WATCHDOG_TIMEOUT:
+                    logger.info(
+                        "Watchdog: no connections for %.0fs but sessions still active — deferring shutdown",
+                        idle,
+                    )
+            elif idle >= _WATCHDOG_TIMEOUT:
                 logger.info("Watchdog: no connections for %.0fs — shutting down", idle)
                 _trigger_shutdown()
                 return
@@ -106,9 +140,14 @@ def enqueue_event(session_id: str, event_type: str, data: dict):
 
 
 async def _broadcast_worker():
-    """Background task that drains the event queue and sends to connected clients."""
+    """Background task that drains the event queue and sends to connected clients.
+
+    Fix: F-004 — Periodically checks for dropped events and broadcasts a warning
+    to all connected clients so they know data may be missing.
+    """
     global _notify
     _notify = asyncio.Event()
+    _last_warned_drops: int = 0
 
     while True:
         await _notify.wait()
@@ -134,6 +173,27 @@ async def _broadcast_worker():
             # Clean up disconnected clients
             if dead:
                 _connections[session_id] -= dead
+
+        # Fix: F-004 — Warn all connected clients when events are being dropped
+        current_drops = dropped_events()
+        if current_drops > _last_warned_drops:
+            _last_warned_drops = current_drops
+            warning_msg = json.dumps({
+                "type": "warning",
+                "data": {
+                    "message": "Events are being dropped due to queue overflow",
+                    "dropped_count": current_drops,
+                },
+            })
+            for session_id, ws_set in _connections.items():
+                dead: Set[WebSocket] = set()
+                for ws in ws_set:
+                    try:
+                        await ws.send_text(warning_msg)
+                    except Exception:
+                        dead.add(ws)
+                if dead:
+                    _connections[session_id] -= dead
 
 
 # Start the broadcast worker as a background task

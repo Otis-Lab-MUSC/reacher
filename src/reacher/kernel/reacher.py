@@ -84,6 +84,9 @@ class REACHER:
         self._is_simulated: bool = False
         self.ser: serial.Serial = serial.Serial(baudrate=115200, timeout=1)
         self.queue: queue.Queue = queue.Queue(maxsize=5000)
+        # Fix: F-003 — Configurable serial reconnection parameters
+        self._SERIAL_RECONNECT_RETRIES: int = 3
+        self._SERIAL_RECONNECT_DELAY: int = 3  # seconds between retry attempts
 
         # Thread variables
         # Fix: PY-007 — Threads created here but started lazily in open_serial()
@@ -103,6 +106,9 @@ class REACHER:
         self.behavior_data: List[Dict[str, Union[str, int]]] = []
         self.frame_data: List[int] = []
         self._infusion_count: int = 0  # Atomic counter — avoids O(n) rescan in check_limit_met
+        # Fix: F-002 — Memory warning thresholds for unbounded data lists
+        self._DATA_WARNING_THRESHOLD = 100_000  # Warn when lists exceed this size
+        self._data_warning_emitted: bool = False
 
         # Program variables
         self.program_start_time: Optional[float] = None
@@ -138,6 +144,12 @@ class REACHER:
             sh = logging.StreamHandler()
             sh.setFormatter(formatter)
             self.logger.addHandler(sh)
+        # Fix: F-010 — Persistent file handle for event log (avoids open/close per event)
+        self._event_log_path = os.path.join(self.reacher_log_path, "event_log.jsonl")
+        self._event_log_file: Optional[io.TextIOWrapper] = None
+        self._event_log_write_count: int = 0
+        self._EVENT_LOG_FSYNC_INTERVAL: int = 50  # fsync every N writes
+
         self.data_destination: Optional[str] = None
         self.behavior_filename: Optional[str] = None
         self.code_dict: Dict = {
@@ -172,6 +184,8 @@ class REACHER:
         self.behavior_data = []
         self.frame_data = []
         self._infusion_count = 0
+        self._data_warning_emitted = False  # Fix: F-002 — Reset warning flag
+        self._event_log_write_count = 0  # Fix: F-010 — Reset write counter
 
         self.program_start_time = None
         self.program_end_time = None
@@ -195,7 +209,7 @@ class REACHER:
             self.ser.port = "SIMULATOR"
         else:
             self.ser = serial.Serial(baudrate=115200, timeout=1)
-        self.queue = queue.Queue()
+        self.queue = queue.Queue(maxsize=5000)  # Fix: F-006 — Match __init__ maxsize
 
         self.serial_flag.clear()
         self.program_flag.set()
@@ -342,6 +356,7 @@ class REACHER:
         except Exception as e:
             self.logger.error(f"Error during closure: {e}")
         finally:
+            self._close_event_log()
             self.logger.info("--> Cleanup complete")
 
     def read_serial(self) -> None:
@@ -372,16 +387,39 @@ class REACHER:
                 else:
                     time.sleep(0.1)
             except (serial.SerialException, OSError) as e:
-                # Fix: SER-005 — Handle unexpected serial disconnect
-                self.logger.error("Serial disconnect detected", exc_info=True)
-                self._emit("disconnect", {"reason": str(e)})
-                self.serial_flag.set()
-                if self.program_running:
+                # Fix: F-003 — Attempt serial reconnection before giving up
+                self.logger.error("Serial disconnect detected: %s", e)
+                self._emit("disconnect", {"reason": str(e), "reconnecting": True})
+
+                reconnected = False
+                for attempt in range(1, self._SERIAL_RECONNECT_RETRIES + 1):
+                    self.logger.info(
+                        "Reconnection attempt %d/%d in %ds...",
+                        attempt, self._SERIAL_RECONNECT_RETRIES, self._SERIAL_RECONNECT_DELAY,
+                    )
+                    time.sleep(self._SERIAL_RECONNECT_DELAY)
                     try:
-                        self.stop_program()
-                    except Exception:
-                        self.logger.warning("Failed to stop program after disconnect", exc_info=True)
-                break
+                        if self.ser.is_open:
+                            self.ser.close()
+                        self.ser.open()
+                        self.ser.reset_input_buffer()
+                        self.logger.info("Serial reconnected on attempt %d", attempt)
+                        self._emit("reconnected", {"attempt": attempt})
+                        reconnected = True
+                        break
+                    except (serial.SerialException, OSError) as retry_err:
+                        self.logger.warning("Reconnection attempt %d failed: %s", attempt, retry_err)
+
+                if not reconnected:
+                    self.logger.error("All reconnection attempts exhausted — serial permanently lost")
+                    self._emit("disconnect", {"reason": str(e), "reconnecting": False})
+                    self.serial_flag.set()
+                    if self.program_running:
+                        try:
+                            self.stop_program()
+                        except Exception:
+                            self.logger.warning("Failed to stop program after disconnect", exc_info=True)
+                    break
 
     def handle_queue(self) -> None:
         """Process data from the queue.
@@ -574,6 +612,20 @@ class REACHER:
                 self.behavior_data.append(entry_dict)
                 if entry_dict.get('device') == 'PUMP' and entry_dict.get('event') == 'INFUSION':
                     self._infusion_count += 1
+                # Fix: F-002 — Warn when data lists grow dangerously large
+                total = len(self.behavior_data) + len(self.frame_data)
+            if total >= self._DATA_WARNING_THRESHOLD and not self._data_warning_emitted:
+                self._data_warning_emitted = True
+                self.logger.warning(
+                    "Data list size (%d) exceeds threshold (%d) — risk of OOM. "
+                    "event_log.jsonl is the durable backup.",
+                    total, self._DATA_WARNING_THRESHOLD,
+                )
+                self._emit("warning", {
+                    "message": "In-memory data lists are large. Data is safely logged to disk.",
+                    "total_entries": total,
+                    "threshold": self._DATA_WARNING_THRESHOLD,
+                })
             self.logger.info("--> Updated behavioral data")
 
         # Auto-stop when firmware signals all Pavlovian trials are complete
@@ -639,15 +691,33 @@ class REACHER:
                 self.logger.warning("Event callback failed", exc_info=True)
 
     def _write_event_log(self, entry: dict) -> None:
-        """Append a JSON line to the append-only event log, fsynced to disk."""
+        """Append a JSON line to the append-only event log.
+
+        Fix: F-010 — Keeps the file handle open for the session lifetime and
+        batches fsync calls (every _EVENT_LOG_FSYNC_INTERVAL writes) to reduce
+        I/O overhead at high event rates while maintaining durability.
+        """
         try:
-            path = os.path.join(self.reacher_log_path, "event_log.jsonl")
-            with open(path, "a") as f:
-                f.write(json.dumps(entry) + "\n")
-                f.flush()
-                os.fsync(f.fileno())
+            if self._event_log_file is None or self._event_log_file.closed:
+                self._event_log_file = open(self._event_log_path, "a")
+            self._event_log_file.write(json.dumps(entry) + "\n")
+            self._event_log_file.flush()
+            self._event_log_write_count += 1
+            if self._event_log_write_count >= self._EVENT_LOG_FSYNC_INTERVAL:
+                os.fsync(self._event_log_file.fileno())
+                self._event_log_write_count = 0
         except Exception:
             self.logger.warning("Failed to write event log entry", exc_info=True)
+
+    def _close_event_log(self) -> None:
+        """Flush and close the persistent event log file handle."""
+        if self._event_log_file is not None and not self._event_log_file.closed:
+            try:
+                self._event_log_file.flush()
+                os.fsync(self._event_log_file.fileno())
+                self._event_log_file.close()
+            except Exception:
+                self.logger.warning("Failed to close event log", exc_info=True)
 
     def _auto_export(self) -> None:
         """Write behavior_events.csv and frame_timestamps.csv to the session log directory.
@@ -823,6 +893,7 @@ class REACHER:
         self.close_serial()
         self.program_end_time = time.time()
         self._write_event_log({"type": "SESSION_END", "timestamp": self.program_end_time})
+        self._close_event_log()  # Fix: F-010 — Ensure all events flushed before export
         self._auto_export()
         self.logger.info(f"Program ended at {self.get_time()}")
 

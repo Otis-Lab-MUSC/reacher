@@ -123,6 +123,13 @@ class SessionManager:
                 info.instance.close_serial()
         except Exception:
             logger.warning("Error during session %s cleanup", session_id, exc_info=True)
+        finally:
+            # Fix: F-007 — Ensure serial port is released even if stop_program() raises
+            try:
+                if info.instance.ser.is_open:
+                    info.instance.ser.close()
+            except Exception:
+                logger.debug("Failed to force-close serial for %s", session_id, exc_info=True)
 
         # Now safe to remove
         with self._lock:
@@ -132,35 +139,50 @@ class SessionManager:
         logger.info("Destroyed session %s", session_id)
 
     def list_sessions(self) -> List[dict]:
-        """Return a serialisable summary of all sessions."""
-        return [
-            {
-                "session_id": info.session_id,
-                "port": info.port,
-                "paradigm": info.paradigm,
-                "board": info.board,
-                "state": info.state,
-            }
-            for info in self._sessions.values()
-        ]
+        """Return a serialisable summary of all sessions.
+
+        Fix: F-008 — Acquire lock to prevent inconsistent snapshots during
+        concurrent create/destroy operations.
+        """
+        with self._lock:
+            return [
+                {
+                    "session_id": info.session_id,
+                    "port": info.port,
+                    "paradigm": info.paradigm,
+                    "board": info.board,
+                    "state": info.state,
+                }
+                for info in self._sessions.values()
+            ]
 
     # ------------------------------------------------------------------
     # State helpers
     # ------------------------------------------------------------------
 
     def set_state(self, session_id: str, state: str) -> None:
-        info = self._sessions.get(session_id)
+        # Fix: F-008 — Lock protects _sessions access
+        with self._lock:
+            info = self._sessions.get(session_id)
         if info is None:
             return  # Session already destroyed
         info.state = state
         self._broadcast_state(session_id, state)
 
     def set_paradigm(self, session_id: str, paradigm: str) -> None:
-        info = self.get_session(session_id)
+        # Fix: F-008 — Lock protects _sessions access
+        with self._lock:
+            info = self._sessions.get(session_id)
+        if info is None:
+            raise KeyError(f"Session {session_id} not found")
         info.paradigm = paradigm
 
     def set_board(self, session_id: str, board: str) -> None:
-        info = self.get_session(session_id)
+        # Fix: F-008 — Lock protects _sessions access
+        with self._lock:
+            info = self._sessions.get(session_id)
+        if info is None:
+            raise KeyError(f"Session {session_id} not found")
         info.board = board
 
     def destroy_all(self) -> None:
