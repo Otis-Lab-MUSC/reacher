@@ -18,8 +18,7 @@ AUTH_HEADER = {"Authorization": f"Bearer {API_KEY}"}
 @pytest.fixture
 def client():
     """Create a TestClient with mocked REACHER instances."""
-    with patch("reacher.session_manager.REACHER") as MockReacher, \
-         patch("os.makedirs"):
+    with patch("reacher.session_manager.REACHER") as MockReacher, patch("os.makedirs"):
         mock_instance = Mock()
         mock_instance.program_running = False
         mock_instance.ser = Mock()
@@ -138,10 +137,14 @@ class TestProgramEndpoints:
     def test_set_limits(self, client):
         resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
         sid = resp.json()["session_id"]
-        resp = client.post(f"/api/program/{sid}/limit", json={
-            "type": "Time",
-            "time_limit": 3600,
-        }, headers=AUTH_HEADER)
+        resp = client.post(
+            f"/api/program/{sid}/limit",
+            json={
+                "type": "Time",
+                "time_limit": 3600,
+            },
+            headers=AUTH_HEADER,
+        )
         assert resp.status_code == 200
         assert resp.json()["type"] == "Time"
 
@@ -173,8 +176,7 @@ class TestDataEndpoints:
         sm = client.app.state.session_manager
         instance = sm.get_instance(sid)
         instance.get_behavior_data.return_value = [
-            {"device": "lever", "event": "press", "start_timestamp": i, "end_timestamp": i}
-            for i in range(10)
+            {"device": "lever", "event": "press", "start_timestamp": i, "end_timestamp": i} for i in range(10)
         ]
         resp = client.get(f"/api/data/{sid}/behavior?limit=5", headers=AUTH_HEADER)
         assert resp.status_code == 200
@@ -186,8 +188,7 @@ class TestDataEndpoints:
         sm = client.app.state.session_manager
         instance = sm.get_instance(sid)
         instance.get_behavior_data.return_value = [
-            {"device": "lever", "event": "press", "start_timestamp": i, "end_timestamp": i}
-            for i in range(10)
+            {"device": "lever", "event": "press", "start_timestamp": i, "end_timestamp": i} for i in range(10)
         ]
         resp = client.get(f"/api/data/{sid}/behavior?since=3&limit=2", headers=AUTH_HEADER)
         assert resp.status_code == 200

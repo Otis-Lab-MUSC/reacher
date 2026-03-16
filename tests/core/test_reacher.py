@@ -1,16 +1,18 @@
-import pytest
+import logging
 import queue
 import json
-import time
-from unittest.mock import Mock, patch, call
+
+import pytest
+import serial
+from unittest.mock import Mock, patch
+
 from reacher.kernel.reacher import REACHER
 
 
 @pytest.fixture
 def mock_serial():
     """Fixture providing a mocked serial connection with predefined COM ports."""
-    with patch("serial.Serial") as mock_serial_class, \
-         patch("serial.tools.list_ports.comports") as mock_comports:
+    with patch("serial.Serial") as mock_serial_class, patch("serial.tools.list_ports.comports") as mock_comports:
         mock_serial_instance = Mock()
         mock_serial_instance.baudrate = 115200
         mock_serial_class.return_value = mock_serial_instance
@@ -21,9 +23,12 @@ def mock_serial():
 @pytest.fixture
 def reacher(mock_serial):
     """Fixture providing a REACHER instance with mocked threading and logging."""
-    with patch("threading.Thread"), \
-         patch("os.makedirs"), \
-         patch("logging.basicConfig"):
+    with (
+        patch("threading.Thread"),
+        patch("os.makedirs"),
+        patch("logging.basicConfig"),
+        patch.object(logging.FileHandler, "_open", return_value=Mock()),
+    ):
         reacher_instance = REACHER()
         return reacher_instance
 
@@ -49,9 +54,12 @@ def test_reacher_init(reacher, mock_serial):
 
 def test_init_with_session_id(mock_serial):
     """Test REACHER initializes with session_id and event_callback."""
-    with patch("threading.Thread"), \
-         patch("os.makedirs"), \
-         patch("logging.basicConfig"):
+    with (
+        patch("threading.Thread"),
+        patch("os.makedirs"),
+        patch("logging.basicConfig"),
+        patch.object(logging.FileHandler, "_open", return_value=Mock()),
+    ):
         cb = Mock()
         r = REACHER(session_id="abc123", event_callback=cb)
         assert r.session_id == "abc123"
@@ -79,13 +87,13 @@ def test_reset(reacher, mocker):
 
 
 def test_get_COM_ports(reacher):
-    """Test that get_COM_ports returns available ports or a fallback message."""
+    """Test that get_COM_ports returns available ports including SIMULATOR."""
     ports = reacher.get_COM_ports()
-    assert ports == ["COM1"]
+    assert ports == ["COM1", "SIMULATOR"]
 
     with patch("serial.tools.list_ports.comports", return_value=[]):
         ports = reacher.get_COM_ports()
-        assert ports == ["No available ports"]
+        assert ports == ["SIMULATOR"]
 
 
 def test_set_COM_port(reacher):
@@ -93,8 +101,8 @@ def test_set_COM_port(reacher):
     reacher.set_COM_port("COM1")
     assert reacher.ser.port == "COM1"
 
-    reacher.set_COM_port("COM2")  # Should not change if COM2 isn't available
-    assert reacher.ser.port == "COM1"
+    with pytest.raises(ValueError, match="not available"):
+        reacher.set_COM_port("COM2")
 
 
 def test_open_serial(reacher, mock_serial):
@@ -117,7 +125,7 @@ def test_send_serial_command(reacher, mock_serial):
     """Test that send_serial_command sends JSON when port is open, raises error when closed."""
     reacher.ser.is_open = True
     reacher.send_serial_command({"cmd": 101})
-    expected = json.dumps({"cmd": 101}).encode() + b'\n'
+    expected = json.dumps({"cmd": 101}).encode() + b"\n"
     mock_serial.write.assert_called_with(expected)
     mock_serial.flush.assert_called_once()
 
@@ -130,7 +138,7 @@ def test_send_command(reacher, mock_serial):
     """Test that send_command uses the command registry to build payloads."""
     reacher.ser.is_open = True
     reacher.send_command(371, 8000)
-    expected = json.dumps({"cmd": 371, "frequency": 8000}).encode() + b'\n'
+    expected = json.dumps({"cmd": 371, "frequency": 8000}).encode() + b"\n"
     mock_serial.write.assert_called_with(expected)
 
 
@@ -138,21 +146,23 @@ def test_send_command_no_value(reacher, mock_serial):
     """Test send_command without a value."""
     reacher.ser.is_open = True
     reacher.send_command(101)
-    expected = json.dumps({"cmd": 101}).encode() + b'\n'
+    expected = json.dumps({"cmd": 101}).encode() + b"\n"
     mock_serial.write.assert_called_with(expected)
 
 
 def test_handle_data_json_config(reacher, mocker):
     """Test that handle_data processes JSON firmware configuration."""
     mocker.patch("builtins.open", mocker.mock_open())
+    mocker.patch("os.fsync")
     config = {"level": "000", "device": "CONTROLLER", "sketch": "fr", "version": "v2.0.0"}
     reacher.handle_data(json.dumps(config))
-    assert reacher.firmware_information == config
+    assert config.items() <= reacher.firmware_information.items()
 
 
 def test_handle_data_hardware_settings(reacher, mocker):
     """Test that handle_data appends hardware settings for non-controller devices."""
     mocker.patch("builtins.open", mocker.mock_open())
+    mocker.patch("os.fsync")
     hw = {"level": "000", "device": "CUE", "frequency": 2900}
     reacher.handle_data(json.dumps(hw))
     assert hw in reacher.hardware_settings
@@ -161,6 +171,9 @@ def test_handle_data_hardware_settings(reacher, mocker):
 def test_handle_behavioral_events(reacher, mocker):
     """Test that handle_data processes behavioral event data into behavior_data."""
     mocker.patch("builtins.open", mocker.mock_open())
+    mocker.patch("os.fsync")
+    reacher.program_running = True
+    reacher.program_flag.clear()
     event = {
         "level": "007",
         "device": "PUMP",
@@ -177,6 +190,7 @@ def test_handle_behavioral_events(reacher, mocker):
 def test_handle_frame_events(reacher, mocker):
     """Test that handle_data processes frame event data into frame_data."""
     mocker.patch("builtins.open", mocker.mock_open())
+    mocker.patch("os.fsync")
     event = {"level": "008", "timestamp": 54321}
     reacher.handle_data(json.dumps(event))
     assert reacher.frame_data == [54321]
@@ -188,7 +202,7 @@ def test_start_program(reacher, mock_serial):
     with patch("time.time", return_value=1000.0):
         reacher.start_program()
     assert not reacher.program_flag.is_set()
-    expected = json.dumps({"cmd": 101}).encode() + b'\n'
+    expected = json.dumps({"cmd": 101}).encode() + b"\n"
     mock_serial.write.assert_called_with(expected)
     assert reacher.program_start_time == 1000.0
 
@@ -196,14 +210,18 @@ def test_start_program(reacher, mock_serial):
 def test_stop_program(reacher, mocker, mock_serial):
     """Test that stop_program resets flags, sends command, and records end time."""
     reacher.ser.is_open = True
-    mocker.patch.object(reacher, "clear_queue")
+    reacher.program_running = True
+    mocker.patch.object(reacher, "_join_queue_with_timeout")
     mocker.patch.object(reacher, "close_serial")
+    mocker.patch.object(reacher, "_write_event_log")
+    mocker.patch.object(reacher, "_close_event_log")
+    mocker.patch.object(reacher, "_auto_export")
     with patch("time.time", return_value=2000.0):
         reacher.stop_program()
     assert reacher.program_flag.is_set()
-    expected = json.dumps({"cmd": 100}).encode() + b'\n'
+    expected = json.dumps({"cmd": 100}).encode() + b"\n"
     mock_serial.write.assert_called_with(expected)
-    reacher.clear_queue.assert_called_once()
+    reacher._join_queue_with_timeout.assert_called_once()
     reacher.close_serial.assert_called_once()
     assert reacher.program_end_time == 2000.0
 
@@ -231,8 +249,13 @@ def test_check_limit_met_infusion(reacher, mocker):
     reacher.program_start_time = 1000.0
 
     # Directly populate behavior_data with pump events
-    reacher.behavior_data.append({"device": "PUMP", "event": "INFUSION", "start_timestamp": 1005000, "end_timestamp": 1006000})
-    reacher.behavior_data.append({"device": "PUMP", "event": "INFUSION", "start_timestamp": 1010000, "end_timestamp": 1011000})
+    reacher.behavior_data.append(
+        {"device": "PUMP", "event": "INFUSION", "start_timestamp": 1005000, "end_timestamp": 1006000}
+    )
+    reacher.behavior_data.append(
+        {"device": "PUMP", "event": "INFUSION", "start_timestamp": 1010000, "end_timestamp": 1011000}
+    )
+    reacher._infusion_count = 2
 
     with patch("time.time", return_value=1010.0):
         reacher.check_limit_met()
@@ -268,9 +291,12 @@ def test_make_destination_folder(reacher, mocker):
 
 def test_event_callback_fires(mock_serial):
     """Test that _emit invokes the event_callback."""
-    with patch("threading.Thread"), \
-         patch("os.makedirs"), \
-         patch("logging.basicConfig"):
+    with (
+        patch("threading.Thread"),
+        patch("os.makedirs"),
+        patch("logging.basicConfig"),
+        patch.object(logging.FileHandler, "_open", return_value=Mock()),
+    ):
         cb = Mock()
         r = REACHER(session_id="sess1", event_callback=cb)
         r._emit("event", {"foo": "bar"})
@@ -280,5 +306,167 @@ def test_event_callback_fires(mock_serial):
 def test_get_detected_paradigm(reacher):
     """Test paradigm detection from firmware info."""
     assert reacher.get_detected_paradigm() is None
-    reacher.firmware_information = {"schedule": "FR", "device": "CONTROLLER"}
+    reacher.firmware_information = {"schedule": "FIXED_RATIO", "device": "CONTROLLER"}
     assert reacher.get_detected_paradigm() == "fr"
+
+
+# ===== New tests for security & reliability audit fixes =====
+
+
+class TestF006BoundedQueue:
+    """F-006: reset() creates a bounded queue."""
+
+    def test_reset_creates_bounded_queue(self, reacher, mocker):
+        mocker.patch.object(reacher, "stop_program")
+        mocker.patch.object(reacher, "clear_queue")
+        mocker.patch.object(reacher, "close_serial")
+        mocker.patch("threading.Thread")
+
+        reacher.program_flag.clear()
+        reacher.reset()
+
+        assert reacher.queue.maxsize == 5000
+
+
+class TestF002DataWarning:
+    """F-002: Warning emitted when in-memory data crosses threshold."""
+
+    def test_data_warning_emitted_at_threshold(self, reacher, mocker):
+        mocker.patch("builtins.open", mocker.mock_open())
+        cb = Mock()
+        reacher.event_callback = cb
+        reacher.session_id = "test-sess"
+        reacher.program_running = True
+        reacher.program_flag.clear()
+
+        # Pre-populate with 99,999 entries
+        reacher.behavior_data = [{"device": "X", "event": "Y"}] * 99_999
+        reacher.frame_data = []
+        reacher._DATA_WARNING_THRESHOLD = 100_000
+        reacher._data_warning_emitted = False
+
+        # The 100,000th entry triggers the warning
+        event = {
+            "level": "007",
+            "device": "PUMP",
+            "event": "INFUSION",
+            "start_timestamp": 1000,
+            "end_timestamp": 1001,
+        }
+        reacher.update_behavioral_events(event)
+
+        # Find the warning call
+        warning_calls = [c for c in cb.call_args_list if c[0][1] == "warning"]
+        assert len(warning_calls) == 1
+        assert warning_calls[0][0][2]["threshold"] == 100_000
+        assert reacher._data_warning_emitted is True
+
+        # Second call should NOT emit another warning
+        cb.reset_mock()
+        event2 = {
+            "level": "007",
+            "device": "PUMP",
+            "event": "INFUSION",
+            "start_timestamp": 2000,
+            "end_timestamp": 2001,
+        }
+        reacher.update_behavioral_events(event2)
+        warning_calls2 = [c for c in cb.call_args_list if c[0][1] == "warning"]
+        assert len(warning_calls2) == 0
+
+
+class TestF003SerialReconnect:
+    """F-003: Serial reconnection on disconnect."""
+
+    def test_serial_reconnect_success(self, reacher, mocker):
+        cb = Mock()
+        reacher.event_callback = cb
+        reacher.session_id = "test-sess"
+        reacher.serial_flag.clear()
+        reacher._SERIAL_RECONNECT_DELAY = 0
+        reacher._SERIAL_RECONNECT_RETRIES = 3
+
+        mock_ser = reacher.ser
+        mock_ser.is_open = True
+
+        # First in_waiting raises SerialException; after reconnect flag exits loop
+        call_count = [0]
+
+        def in_waiting_side_effect():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise serial.SerialException("USB detached")
+            return 0
+
+        type(mock_ser).in_waiting = property(lambda self: in_waiting_side_effect())
+
+        # open() succeeds on reconnect; reset_input_buffer sets serial_flag to exit
+        mock_ser.open.return_value = None
+        mock_ser.reset_input_buffer.side_effect = lambda: reacher.serial_flag.set()
+
+        mocker.patch("time.sleep")
+        reacher.read_serial()
+
+        disconnect_calls = [c for c in cb.call_args_list if c[0][1] == "disconnect"]
+        reconnected_calls = [c for c in cb.call_args_list if c[0][1] == "reconnected"]
+        assert len(disconnect_calls) >= 1
+        assert disconnect_calls[0][0][2]["reconnecting"] is True
+        assert len(reconnected_calls) == 1
+        assert reconnected_calls[0][0][2]["attempt"] == 1
+
+    def test_serial_reconnect_all_retries_exhausted(self, reacher, mocker):
+        cb = Mock()
+        reacher.event_callback = cb
+        reacher.session_id = "test-sess"
+        reacher.serial_flag.clear()
+        reacher._SERIAL_RECONNECT_DELAY = 0
+        reacher._SERIAL_RECONNECT_RETRIES = 3
+        reacher.program_running = False
+
+        mock_ser = reacher.ser
+        mock_ser.is_open = True
+
+        # in_waiting always raises SerialException
+        type(mock_ser).in_waiting = property(lambda self: (_ for _ in ()).throw(serial.SerialException("USB gone")))
+        # open() always fails on reconnect
+        mock_ser.open.side_effect = serial.SerialException("No device")
+
+        mocker.patch("time.sleep")
+        reacher.read_serial()
+
+        disconnect_calls = [c for c in cb.call_args_list if c[0][1] == "disconnect"]
+        final = disconnect_calls[-1]
+        assert final[0][2]["reconnecting"] is False
+        assert reacher.serial_flag.is_set()
+
+
+class TestF010EventLogFsync:
+    """F-010: Event log fsync batching and cleanup on close_serial."""
+
+    def test_event_log_fsync_batching(self, reacher, mocker):
+        reacher._EVENT_LOG_FSYNC_INTERVAL = 3
+
+        mock_file = Mock()
+        mock_file.closed = False
+        mock_file.fileno.return_value = 99
+
+        opener = mocker.patch("builtins.open", return_value=mock_file)
+        fsync = mocker.patch("os.fsync")
+
+        # Reset write counter
+        reacher._event_log_file = None
+        reacher._event_log_write_count = 0
+
+        for i in range(4):
+            reacher._write_event_log({"i": i})
+
+        # File opened once and reused
+        opener.assert_called_once()
+        # fsync at write 3 (counter hits interval), counter resets, write 4 doesn't trigger
+        assert fsync.call_count == 1
+
+    def test_close_serial_closes_event_log(self, reacher, mocker, mock_serial):
+        mock_serial.is_open = True
+        mock_close_log = mocker.patch.object(reacher, "_close_event_log")
+        reacher.close_serial()
+        mock_close_log.assert_called_once()

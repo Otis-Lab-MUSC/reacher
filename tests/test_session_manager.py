@@ -1,15 +1,14 @@
 """Tests for the SessionManager."""
 
 import pytest
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, MagicMock
 from reacher.session_manager import SessionManager
 
 
 @pytest.fixture
 def sm():
     """SessionManager with mocked REACHER construction."""
-    with patch("reacher.session_manager.REACHER") as MockReacher, \
-         patch("os.makedirs"):
+    with patch("reacher.session_manager.REACHER") as MockReacher, patch("os.makedirs"):
         mock_instance = Mock()
         mock_instance.program_running = False
         mock_instance.ser = Mock()
@@ -22,7 +21,7 @@ class TestCreateSession:
     def test_returns_session_id(self, sm):
         sid = sm.create_session("/dev/ttyUSB0", "fr")
         assert isinstance(sid, str)
-        assert len(sid) == 12
+        assert len(sid) == 32  # uuid4().hex
 
     def test_duplicate_port_raises(self, sm):
         sm.create_session("/dev/ttyUSB0", "fr")
@@ -85,3 +84,34 @@ class TestDestroyAll:
         sm.create_session("/dev/ttyUSB1")
         sm.destroy_all()
         assert sm.list_sessions() == []
+
+
+class TestDestroySessionCleanup:
+    """F-007: destroy_session force-closes serial even if stop_program raises."""
+
+    def test_destroy_force_closes_serial_on_exception(self, sm):
+        sid = sm.create_session("/dev/ttyUSB0")
+        mock_instance = sm.get_instance(sid)
+        mock_instance.program_running = True
+        mock_instance.ser.is_open = True
+        mock_instance.stop_program.side_effect = RuntimeError("boom")
+
+        sm.destroy_session(sid)  # Should not raise
+
+        mock_instance.ser.close.assert_called_once()
+        with pytest.raises(KeyError):
+            sm.get_session(sid)
+
+
+class TestThreadSafety:
+    """F-008: list_sessions acquires the lock."""
+
+    def test_lock_acquired_during_list_sessions(self, sm):
+        real_lock = sm._lock
+        mock_lock = MagicMock(wraps=real_lock)
+        sm._lock = mock_lock
+
+        sm.create_session("/dev/ttyUSB0")
+        sm.list_sessions()
+
+        assert mock_lock.__enter__.called
