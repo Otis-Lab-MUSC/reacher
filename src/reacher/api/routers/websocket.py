@@ -184,11 +184,15 @@ async def _orphan_cleanup():
             if _loop is not None:
                 try:
                     from ...session_manager import SessionManager
+                    from .hardware import release_session
                     # The app reference is stored in the websocket router's state
                     # We'll use the global _app_ref set during first WS connect
                     if _app_ref is not None:
                         sm: SessionManager = _app_ref.state.session_manager
-                        sm.destroy_session(sid)
+                        # Fix: F-001 — destroy_session is blocking; run off the event loop
+                        await asyncio.get_event_loop().run_in_executor(None, sm.destroy_session, sid)
+                        # Fix: F-008 — clean up rate-limit timestamps
+                        release_session(sid)
                         logger.info("Orphan cleanup: destroyed session %s", sid)
                 except Exception:
                     logger.debug("Orphan cleanup failed for %s", sid, exc_info=True)

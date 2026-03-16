@@ -106,6 +106,11 @@ async def get_commands(session_id: str, request: Request):
     }
 
 
+def release_session(session_id: str) -> None:
+    """Fix: F-008 — Remove rate-limit state for a destroyed session to prevent memory leak."""
+    _command_timestamps.pop(session_id, None)
+
+
 @router.get("/{session_id}/config")
 async def get_config(session_id: str, request: Request):
     sm = request.app.state.session_manager

@@ -1,9 +1,10 @@
 """Program control endpoints (start/stop/pause/limits)."""
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional
 
 router = APIRouter()
@@ -42,6 +43,15 @@ class LimitRequest(BaseModel):
             raise ValueError(f"delay must be between 0 and {MAX_DELAY}")
         return v
 
+    # Fix: F-010 — Cross-field validation: required fields per limit type
+    @model_validator(mode="after")
+    def check_required_fields(self) -> "LimitRequest":
+        if self.type in ("Time", "Both") and self.time_limit is None:
+            raise ValueError("time_limit is required when type is 'Time' or 'Both'")
+        if self.type in ("Infusion", "Both") and self.infusion_limit is None:
+            raise ValueError("infusion_limit is required when type is 'Infusion' or 'Both'")
+        return self
+
 
 @router.post("/{session_id}/start")
 async def start_program(session_id: str, request: Request):
@@ -70,7 +80,9 @@ async def stop_program(session_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Session not found")
 
     try:
-        info.instance.stop_program()
+        # Fix: F-001 — run_in_executor so time.sleep(2) in stop_program() doesn't block the event loop
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, info.instance.stop_program)
     except Exception:
         logger.error("stop_program failed for session %s", session_id, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to stop program")
@@ -85,6 +97,13 @@ async def pause_program(session_id: str, request: Request):
         info = sm.get_session(session_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    # Fix: F-007 — Only allow pause/resume when session is running or paused
+    if info.state not in ("running", "paused"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot pause/resume a session in '{info.state}' state",
+        )
 
     instance = info.instance
     if instance.get_program_running():
