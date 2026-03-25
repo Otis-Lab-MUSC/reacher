@@ -1,8 +1,9 @@
 """Discovery and pairing endpoints for zero-config machine setup.
 
-GET  /api/discovery            — list mDNS peers + paired machines
-POST /api/discovery/manual     — store a manually-supplied credential
-POST /api/discovery/{id}/pair  — use a pairing code to pair with a peer
+GET  /api/discovery              — list mDNS peers + paired machines
+POST /api/discovery/manual       — store a manually-supplied API key
+POST /api/discovery/pair-by-url  — pair with a device at a known URL using a pairing code
+POST /api/discovery/{id}/pair    — pair with an mDNS-discovered device using a pairing code
 """
 
 import logging
@@ -18,6 +19,12 @@ logger = logging.getLogger(__name__)
 
 
 class PairRequest(BaseModel):
+    code: str
+    name: str | None = None
+
+
+class PairByUrlRequest(BaseModel):
+    url: str
     code: str
     name: str | None = None
 
@@ -87,6 +94,57 @@ async def manual_pair(body: ManualPairRequest, request: Request) -> dict:
     hostname: str = health.get("hostname", device_id)
     name = body.name or hostname
     machines.upsert(device_id, url, body.api_key, hostname, name)
+
+    return {"device_id": device_id, "hostname": hostname, "url": url, "name": name}
+
+
+@router.post("/pair-by-url")
+async def pair_by_url(body: PairByUrlRequest, request: Request) -> dict:
+    """Pair with a REACHER device at a known URL using its pairing code.
+
+    Used when the device is not visible via mDNS (different subnet, firewall,
+    or zeroconf not installed).  The caller supplies the URL directly instead of
+    relying on automatic discovery.
+    """
+    url = body.url.rstrip("/")
+    http_client: httpx.AsyncClient = request.app.state.http_client
+
+    # Probe health to obtain the device_id
+    try:
+        resp = await http_client.get(f"{url}/health", timeout=5.0)
+        health = resp.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Cannot reach device at that URL")
+
+    if health.get("service") != "reacher":
+        raise HTTPException(status_code=400, detail="No REACHER device found at that URL")
+
+    device_id: str = health["device_id"]
+    if machines.get(device_id):
+        raise HTTPException(status_code=409, detail="Machine is already paired")
+
+    # Forward pairing code to the remote device
+    try:
+        resp = await http_client.post(
+            f"{url}/api/pairing/claim",
+            json={"code": body.code},
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        raise HTTPException(status_code=400, detail="Cannot reach device")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Device did not respond in time")
+
+    if resp.status_code == 429:
+        raise HTTPException(status_code=429, detail="Too many attempts on the remote device — wait a minute")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid or expired pairing code")
+
+    remote_key: str = resp.json()["api_key"]
+    hostname: str = health.get("hostname", device_id)
+    name = body.name or hostname
+    machines.upsert(device_id, url, remote_key, hostname, name)
+    logger.info("Paired with device %s (%s) at %s via URL", device_id[:8], hostname, url)
 
     return {"device_id": device_id, "hostname": hostname, "url": url, "name": name}
 

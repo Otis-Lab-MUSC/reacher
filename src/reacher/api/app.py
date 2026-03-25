@@ -112,6 +112,9 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, discovery.start, DEVICE_ID, PORT, __version__)
 
+    # Subnet scan fallback: finds peers even when mDNS/zeroconf is unavailable
+    scan_task = asyncio.create_task(discovery.run_scan_loop(http_client, PORT, DEVICE_ID))
+
     logger.info("REACHER API v%s starting on port %d", __version__, PORT)
     webbrowser.open(f"http://localhost:{PORT}")
     yield
@@ -119,6 +122,11 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down — destroying all sessions")
     sm.destroy_all()
     pairing.stop_rotation()
+    scan_task.cancel()
+    try:
+        await scan_task
+    except asyncio.CancelledError:
+        pass
     await loop.run_in_executor(None, discovery.stop)
     await http_client.aclose()
 

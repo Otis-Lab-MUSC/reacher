@@ -7,6 +7,7 @@ Devices advertise themselves as ``_reacher._tcp.local.`` with TXT records
 containing ``device_id`` and ``version``.  No API key is ever broadcast.
 """
 
+import asyncio
 import logging
 import socket
 import threading
@@ -16,6 +17,9 @@ logger = logging.getLogger(__name__)
 _SERVICE_TYPE = "_reacher._tcp.local."
 _peers: dict[str, dict] = {}  # {device_id → {host, port, hostname}}
 _peers_lock = threading.Lock()
+
+_scanned_peers: dict[str, dict] = {}  # {device_id → {host, port, hostname}}
+_scanned_lock = threading.Lock()
 
 # Module-level zeroconf state (None when disabled or not started)
 _zeroconf = None
@@ -135,8 +139,68 @@ def stop() -> None:
 def get_peers() -> dict[str, dict]:
     """Return a point-in-time snapshot of currently visible REACHER peers.
 
+    Merges mDNS-discovered and subnet-scanned peers; mDNS takes precedence
+    when the same device_id appears in both.
+
     Returns:
         Dict mapping device_id → {host, port, hostname}.
     """
     with _peers_lock:
-        return dict(_peers)
+        mdns = dict(_peers)
+    with _scanned_lock:
+        scanned = dict(_scanned_peers)
+    return {**scanned, **mdns}
+
+
+def _get_local_ip() -> str | None:
+    """Return the primary outbound IPv4 address of this machine."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))  # no traffic is sent
+            return s.getsockname()[0]
+    except Exception:
+        return None
+
+
+async def scan_once(http_client, port: int, own_device_id: str) -> None:  # noqa: ANN001
+    """Probe every host on the local /24 subnet for REACHER devices.
+
+    Results are stored in ``_scanned_peers`` and merged into ``get_peers()``.
+    Skips ``own_device_id`` to avoid self-discovery.
+    """
+    local_ip = _get_local_ip()
+    if not local_ip:
+        return
+    prefix = ".".join(local_ip.split(".")[:3])
+    hosts = [f"{prefix}.{i}" for i in range(1, 255)]
+
+    async def probe(host: str):
+        try:
+            resp = await http_client.get(f"http://{host}:{port}/health", timeout=1.5)
+            h = resp.json()
+            if h.get("service") == "reacher" and h.get("device_id") != own_device_id:
+                return h["device_id"], {
+                    "host": host,
+                    "port": port,
+                    "hostname": h.get("hostname", host),
+                }
+        except Exception:
+            pass
+
+    results = await asyncio.gather(*[probe(h) for h in hosts])
+    found = {r[0]: r[1] for r in results if r}
+    with _scanned_lock:
+        _scanned_peers.clear()
+        _scanned_peers.update(found)
+    if found:
+        logger.debug("Subnet scan found %d REACHER peer(s)", len(found))
+
+
+async def run_scan_loop(http_client, port: int, own_device_id: str) -> None:  # noqa: ANN001
+    """Run ``scan_once`` immediately then every 30 seconds until cancelled."""
+    while True:
+        try:
+            await scan_once(http_client, port, own_device_id)
+        except Exception:
+            logger.debug("Subnet scan error", exc_info=True)
+        await asyncio.sleep(30)
