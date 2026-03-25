@@ -47,11 +47,12 @@ class TestCommandRegistry:
         assert "PUMP_SET_TRACE" in deprecated_names
         assert "LASER_SET_TRACE" in deprecated_names
 
-    def test_laser_excluded_from_pavlovian(self):
-        laser_codes = [c for c in CommandCode if 600 <= c <= 699]
-        for code in laser_codes:
+    def test_laser_included_in_pavlovian(self):
+        """Base laser commands (arm, disarm, test, freq, dur, mode) include pavlovian."""
+        base_laser = [600, 601, 603, 671, 672, 681, 682]
+        for code in base_laser:
             spec = COMMAND_REGISTRY[code]
-            assert "pavlovian" not in spec.paradigms
+            assert "pavlovian" in spec.paradigms, f"{spec.name} missing pavlovian"
 
 
 class TestGetCommandsForParadigm:
@@ -64,11 +65,11 @@ class TestGetCommandsForParadigm:
         for code in range(206, 220):
             assert code in cmds, f"PAV command {code} missing for pavlovian"
 
-    def test_pavlovian_excludes_laser(self):
+    def test_pavlovian_includes_laser(self):
+        """Pavlovian paradigm includes base laser commands and pav-specific codes."""
         cmds = get_commands_for_paradigm("pavlovian")
-        laser_codes = [c for c in CommandCode if 600 <= c <= 699]
-        for code in laser_codes:
-            assert code not in cmds
+        for code in [600, 601, 603, 671, 672, 681, 682, 691, 692, 693, 694, 695]:
+            assert code in cmds, f"Code {code} missing from pavlovian commands"
 
     def test_deprecated_excluded(self):
         for paradigm in PARADIGMS:

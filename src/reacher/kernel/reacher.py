@@ -33,15 +33,20 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     601: ("LASER", "armed", True),
     900: ("MICROSCOPE", "armed", False),
     901: ("MICROSCOPE", "armed", True),
-    1000: ("SWITCH_LEVER_RH", "armed", False),
-    1001: ("SWITCH_LEVER_RH", "armed", True),
-    1300: ("SWITCH_LEVER_LH", "armed", False),
-    1301: ("SWITCH_LEVER_LH", "armed", True),
+    1000: ("LEVER_RH", "armed", False),
+    1001: ("LEVER_RH", "armed", True),
+    1300: ("LEVER_LH", "armed", False),
+    1301: ("LEVER_LH", "armed", True),
     # --- Cue parameters ---
     371: ("CUE", "frequency", _USE_VALUE),
     372: ("CUE", "duration", _USE_VALUE),
     381: ("CUE2", "frequency", _USE_VALUE),
     382: ("CUE2", "duration", _USE_VALUE),
+    # --- Cue pulse parameters ---
+    374: ("CUE", "pulse_on", _USE_VALUE),
+    375: ("CUE", "pulse_off", _USE_VALUE),
+    384: ("CUE2", "pulse_on", _USE_VALUE),
+    385: ("CUE2", "pulse_off", _USE_VALUE),
     # --- Pump parameters ---
     472: ("PUMP", "duration", _USE_VALUE),
     482: ("PUMP2", "duration", _USE_VALUE),
@@ -51,10 +56,10 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     681: ("LASER", "mode", "contingent"),
     682: ("LASER", "mode", "independent"),
     # --- Lever parameters ---
-    1074: ("SWITCH_LEVER_RH", "timeout", _USE_VALUE),
-    1075: ("SWITCH_LEVER_RH", "ratio", _USE_VALUE),
-    1374: ("SWITCH_LEVER_LH", "timeout", _USE_VALUE),
-    1375: ("SWITCH_LEVER_LH", "ratio", _USE_VALUE),
+    1074: ("LEVER_RH", "timeout", _USE_VALUE),
+    1075: ("LEVER_RH", "ratio", _USE_VALUE),
+    1374: ("LEVER_LH", "timeout", _USE_VALUE),
+    1375: ("LEVER_LH", "ratio", _USE_VALUE),
 }
 
 class REACHER:
@@ -594,6 +599,11 @@ class REACHER:
                 entry_dict['event'] = event.get('event')
                 entry_dict['start_timestamp'] = event.get('timestamp')
                 entry_dict['end_timestamp'] = event.get('timestamp')
+            case "PAVLOV":
+                entry_dict['device'] = event.get('device')
+                entry_dict['event'] = event.get('event')
+                entry_dict['start_timestamp'] = event.get('start_timestamp') or event.get('timestamp')
+                entry_dict['end_timestamp'] = event.get('end_timestamp') or event.get('timestamp')
             case _:
                 entry_dict['device'] = event.get('device')
                 entry_dict['event'] = event.get('event')
@@ -607,7 +617,9 @@ class REACHER:
         self._emit("event", entry_dict)
 
         # Only persist to dataset when actively recording
-        if self.program_running and not self.program_flag.is_set():
+        # PAVLOV events (TRIAL_START, ALL_TRIALS_COMPLETE) are trial-structure
+        # metadata, not behavioral observations — exclude from CSV export.
+        if self.program_running and not self.program_flag.is_set() and entry_dict.get('device') != 'PAVLOV':
             with self.thread_lock:
                 self.behavior_data.append(entry_dict)
                 if entry_dict.get('device') == 'PUMP' and entry_dict.get('event') == 'INFUSION':

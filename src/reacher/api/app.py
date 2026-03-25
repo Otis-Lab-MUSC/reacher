@@ -4,26 +4,32 @@ Entry-point that wires up all routers, serves the React frontend as static
 files, and manages the application lifespan (session cleanup on shutdown).
 """
 
+import asyncio
 import logging
 import os
+import socket
 import sys
 import webbrowser
 from contextlib import asynccontextmanager
 
+import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
-from .. import __version__
+from .. import __version__, discovery, machines, pairing
+from ..device_id import DEVICE_ID
 from ..session_manager import SessionManager
 from .middleware.auth import require_api_key, API_KEY
 from .routers import data, file, firmware, hardware, lifecycle, program, serial, session, websocket
+from .routers import discovery as discovery_router, pairing as pairing_router, proxy as proxy_router
 
 logger = logging.getLogger(__name__)
 
 PORT = int(os.getenv("REACHER_PORT", "6229"))
-HOST = os.getenv("REACHER_HOST", "127.0.0.1")
+HOST = os.getenv("REACHER_HOST", "0.0.0.0")
 
 
 def _is_already_running() -> bool:
@@ -60,16 +66,61 @@ def broadcast_event(session_id: str, event_type: str, data: dict):
     websocket.enqueue_event(session_id, event_type, data)
 
 
+class _HealthCORSMiddleware(BaseHTTPMiddleware):
+    """Allow any origin to reach /health for device discovery.
+
+    All other routes keep the configured CORS policy.  The /health endpoint
+    returns only non-sensitive metadata (status, device_id, hostname) so
+    wildcard access is safe for LAN deployments.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path == "/health":
+            if request.method == "OPTIONS":
+                from starlette.responses import Response
+                return Response(
+                    status_code=200,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "GET, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type",
+                    },
+                )
+            response = await call_next(request)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return response
+        return await call_next(request)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application startup/shutdown."""
     sm = SessionManager(event_callback=broadcast_event)
     app.state.session_manager = sm
+
+    # Shared httpx client for proxy calls and pairing handshakes
+    http_client = httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0))
+    app.state.http_client = http_client
+
+    # Load previously paired machines from disk
+    machines.load()
+
+    # Start pairing code rotation (idempotent — may already be started by main())
+    pairing.start_rotation()
+
+    # Register mDNS service and start peer browser (blocking ~100ms, run off-thread)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, discovery.start, DEVICE_ID, PORT, __version__)
+
     logger.info("REACHER API v%s starting on port %d", __version__, PORT)
     webbrowser.open(f"http://localhost:{PORT}")
     yield
+
     logger.info("Shutting down — destroying all sessions")
     sm.destroy_all()
+    pairing.stop_rotation()
+    await loop.run_in_executor(None, discovery.stop)
+    await http_client.aclose()
 
 
 def create_app() -> FastAPI:
@@ -91,6 +142,9 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "Accept", "Authorization"],
     )
+    # Outermost middleware: override CORS on /health so any origin can discover
+    # this device before REACHER_CORS_ORIGINS is configured on remote machines.
+    app.add_middleware(_HealthCORSMiddleware)
 
     @app.get("/health", tags=["health"])
     async def health_check():
@@ -98,6 +152,9 @@ def create_app() -> FastAPI:
         sessions = sm.list_sessions()
         return {
             "status": "ok",
+            "service": "reacher",
+            "device_id": DEVICE_ID,
+            "hostname": socket.gethostname(),
             "version": __version__,
             "active_sessions": len(sessions),
             "dropped_events": websocket.dropped_events(),
@@ -124,6 +181,10 @@ def create_app() -> FastAPI:
     app.include_router(file.router, prefix="/api/file", tags=["file"], dependencies=api_deps)
     app.include_router(websocket.router, tags=["websocket"])
     app.include_router(lifecycle.router, prefix="/api/lifecycle", tags=["lifecycle"], dependencies=api_deps)
+    # Zero-config machine discovery: pairing endpoint is auth-free; others require auth
+    app.include_router(pairing_router.router, prefix="/api/pairing", tags=["pairing"])
+    app.include_router(discovery_router.router, prefix="/api/discovery", tags=["discovery"], dependencies=api_deps)
+    app.include_router(proxy_router.router, prefix="/api/proxy", tags=["proxy"], dependencies=api_deps)
 
     # Serve built React frontend at /
     static_dir = _resolve_static_dir()
@@ -144,6 +205,12 @@ def main():
         print(f"Visit http://localhost:{PORT} in your browser.")
         webbrowser.open(f"http://localhost:{PORT}")
         return
+    # Generate pairing code before starting the server so it's printed immediately.
+    # The lifespan start_rotation() call is idempotent and will not re-generate.
+    pairing.start_rotation()
+    code = pairing.get_current_code()
+    print(f"  Pairing code : {code[:3]}-{code[3:]}  (rotates every 5 minutes)")
+    print(f"  API key      : {API_KEY}")
     uvicorn.run(
         "reacher.api.app:app",
         host=HOST,

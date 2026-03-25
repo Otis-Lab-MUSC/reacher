@@ -27,6 +27,8 @@ dependencies = [
     "fastapi>=0.110,<1.0",
     "uvicorn[standard]>=0.29,<1.0",
     "websockets>=12.0,<15.0",
+    "httpx>=0.27,<1.0",
+    "zeroconf>=0.131,<1.0",
 ]
 
 [project.optional-dependencies]
@@ -38,7 +40,6 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-mock>=3.12",
-    "httpx>=0.27",
     "ruff>=0.4",
 ]
 

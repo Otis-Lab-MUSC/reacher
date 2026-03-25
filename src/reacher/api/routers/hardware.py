@@ -26,6 +26,8 @@ _VALUE_RANGES = {
     "ratio":     (1, 255),         # uint8_t on firmware side
     "step":      (1, 255),
     "interval":  (0, 600000),      # ms
+    "pulse_on":  (0, 60000),        # ms — 0 = continuous
+    "pulse_off": (0, 60000),        # ms
     "probability": (0, 100),       # percentage
     "count":     (0, 128),         # MAX_PAVLOV_TRIALS
     "iti_mean":  (1, 600000),

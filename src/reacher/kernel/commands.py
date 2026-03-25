@@ -55,8 +55,12 @@ class CommandCode(IntEnum):
     CUE_SET_FREQUENCY = 371
     CUE_SET_DURATION = 372
     CUE_SET_TRACE = 373  # deprecated
+    CUE_SET_PULSE_ON = 374
+    CUE_SET_PULSE_OFF = 375
     CUE2_SET_FREQUENCY = 381
     CUE2_SET_DURATION = 382
+    CUE2_SET_PULSE_ON = 384
+    CUE2_SET_PULSE_OFF = 385
 
     # --- Pump (4xx) ---
     PUMP_DISARM = 400
@@ -82,6 +86,11 @@ class CommandCode(IntEnum):
     LASER_SET_TRACE = 673  # deprecated
     LASER_MODE_CONTINGENT = 681
     LASER_MODE_INDEPENDENT = 682
+    PAV_LASER_CS_PLUS = 691
+    PAV_LASER_CS_MINUS = 692
+    PAV_LASER_CS_BOTH = 693
+    PAV_LASER_PHASE_REWARD = 694
+    PAV_LASER_PHASE_CUE = 695
 
     # --- Microscope (9xx) ---
     MICROSCOPE_DISARM = 900
@@ -327,6 +336,18 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         payload_key="interval", payload_type="int",
         deprecated=True,
     ),
+    374: CommandSpec(
+        CommandCode.CUE_SET_PULSE_ON, "CUE_SET_PULSE_ON",
+        "Set CS+ pulse ON duration (ms); 0 = continuous",
+        payload_key="pulse_on", payload_type="int",
+        paradigms=["pavlovian"],
+    ),
+    375: CommandSpec(
+        CommandCode.CUE_SET_PULSE_OFF, "CUE_SET_PULSE_OFF",
+        "Set CS+ pulse OFF duration (ms)",
+        payload_key="pulse_off", payload_type="int",
+        paradigms=["pavlovian"],
+    ),
     381: CommandSpec(
         CommandCode.CUE2_SET_FREQUENCY, "CUE2_SET_FREQUENCY",
         "Set secondary cue frequency (Hz)",
@@ -336,6 +357,18 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.CUE2_SET_DURATION, "CUE2_SET_DURATION",
         "Set secondary cue duration (ms)",
         payload_key="duration", payload_type="int",
+    ),
+    384: CommandSpec(
+        CommandCode.CUE2_SET_PULSE_ON, "CUE2_SET_PULSE_ON",
+        "Set CS- pulse ON duration (ms); 0 = continuous",
+        payload_key="pulse_on", payload_type="int",
+        paradigms=["pavlovian"],
+    ),
+    385: CommandSpec(
+        CommandCode.CUE2_SET_PULSE_OFF, "CUE2_SET_PULSE_OFF",
+        "Set CS- pulse OFF duration (ms)",
+        payload_key="pulse_off", payload_type="int",
+        paradigms=["pavlovian"],
     ),
 
     # --- Pump ---
@@ -394,29 +427,29 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     600: CommandSpec(
         CommandCode.LASER_DISARM, "LASER_DISARM",
         "Disarm optogenetic laser",
-        paradigms=["fr", "pr", "vi", "omission"],
+        paradigms=["fr", "pr", "vi", "omission", "pavlovian"],
     ),
     601: CommandSpec(
         CommandCode.LASER_ARM, "LASER_ARM",
         "Arm optogenetic laser",
-        paradigms=["fr", "pr", "vi", "omission"],
+        paradigms=["fr", "pr", "vi", "omission", "pavlovian"],
     ),
     603: CommandSpec(
         CommandCode.LASER_TEST, "LASER_TEST",
         "Test optogenetic laser",
-        paradigms=["fr", "pr", "vi", "omission"],
+        paradigms=["fr", "pr", "vi", "omission", "pavlovian"],
     ),
     671: CommandSpec(
         CommandCode.LASER_SET_FREQUENCY, "LASER_SET_FREQUENCY",
         "Set laser frequency (Hz)",
         payload_key="frequency", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission"],
+        paradigms=["fr", "pr", "vi", "omission", "pavlovian"],
     ),
     672: CommandSpec(
         CommandCode.LASER_SET_DURATION, "LASER_SET_DURATION",
         "Set laser pulse duration (ms)",
         payload_key="duration", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission"],
+        paradigms=["fr", "pr", "vi", "omission", "pavlovian"],
     ),
     673: CommandSpec(
         CommandCode.LASER_SET_TRACE, "LASER_SET_TRACE",
@@ -428,12 +461,37 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     681: CommandSpec(
         CommandCode.LASER_MODE_CONTINGENT, "LASER_MODE_CONTINGENT",
         "Set laser to contingent mode (triggered by lever press)",
-        paradigms=["fr", "pr", "vi", "omission"],
+        paradigms=["fr", "pr", "vi", "omission", "pavlovian"],
     ),
     682: CommandSpec(
         CommandCode.LASER_MODE_INDEPENDENT, "LASER_MODE_INDEPENDENT",
         "Set laser to independent mode (free-running)",
-        paradigms=["fr", "pr", "vi", "omission"],
+        paradigms=["fr", "pr", "vi", "omission", "pavlovian"],
+    ),
+    691: CommandSpec(
+        CommandCode.PAV_LASER_CS_PLUS, "PAV_LASER_CS_PLUS",
+        "Set Pavlovian laser to CS+ trials only",
+        paradigms=["pavlovian"],
+    ),
+    692: CommandSpec(
+        CommandCode.PAV_LASER_CS_MINUS, "PAV_LASER_CS_MINUS",
+        "Set Pavlovian laser to CS- trials only",
+        paradigms=["pavlovian"],
+    ),
+    693: CommandSpec(
+        CommandCode.PAV_LASER_CS_BOTH, "PAV_LASER_CS_BOTH",
+        "Set Pavlovian laser to both trial types",
+        paradigms=["pavlovian"],
+    ),
+    694: CommandSpec(
+        CommandCode.PAV_LASER_PHASE_REWARD, "PAV_LASER_PHASE_REWARD",
+        "Set Pavlovian laser to fire during reward phase",
+        paradigms=["pavlovian"],
+    ),
+    695: CommandSpec(
+        CommandCode.PAV_LASER_PHASE_CUE, "PAV_LASER_PHASE_CUE",
+        "Set Pavlovian laser to fire during cue phase",
+        paradigms=["pavlovian"],
     ),
 
     # --- Microscope ---
