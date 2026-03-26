@@ -59,7 +59,8 @@ class FirmwareUploader:
     def _resolve_avrdude() -> str:
         base = _frozen_base()
         if base:
-            bundled = os.path.join(base, "avrdude", "avrdude")
+            name = "avrdude.exe" if sys.platform == "win32" else "avrdude"
+            bundled = os.path.join(base, "avrdude", name)
             if os.path.isfile(bundled):
                 return bundled
         # Fall back to system PATH
