@@ -45,8 +45,19 @@ class FirmwareUploader:
         env_dir = os.environ.get("REACHER_HEX_DIR", "")
         if env_dir and os.path.isdir(env_dir):
             return env_dir
+
+        # Package data: hex files bundled inside the reacher package
+        pkg_hex = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hex")
+
         candidates = [
+            # CWD-relative (running from labrynth/ or a project root)
             os.path.join(os.getcwd(), "firmware", "hex"),
+            # Monorepo root (running `reacher` from REACHER/)
+            os.path.join(os.getcwd(), "labrynth", "firmware", "hex"),
+            os.path.join(os.getcwd(), "reacher-firmware", "hex"),
+            # Package data (pip-installed with hex files as package data)
+            pkg_hex,
+            # Home directory fallback
             os.path.expanduser("~/REACHER/hex"),
         ]
         for c in candidates:

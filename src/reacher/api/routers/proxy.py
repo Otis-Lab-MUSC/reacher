@@ -22,6 +22,10 @@ from ... import machines
 from ..middleware.auth import API_KEY, verify_ws_token
 
 router = APIRouter()
+# Separate router for WebSocket endpoints — must NOT have HTTP-only auth
+# dependencies (HTTPBearer fails on WebSocket upgrade requests).  Auth is
+# handled manually via verify_ws_token() inside the endpoint.
+ws_router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
@@ -45,7 +49,7 @@ async def get_ws_token(device_id: str, request: Request) -> dict:
     return {"token": API_KEY, "ws_url": ws_url}
 
 
-@router.websocket("/{device_id}/ws/{session_id}")
+@ws_router.websocket("/{device_id}/ws/{session_id}")
 async def ws_relay(ws: WebSocket, device_id: str, session_id: str):
     """Relay WebSocket messages between the browser and a remote REACHER device.
 

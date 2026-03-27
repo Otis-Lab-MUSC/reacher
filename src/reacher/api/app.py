@@ -196,6 +196,10 @@ def create_app() -> FastAPI:
     app.include_router(pairing_router.router, prefix="/api/pairing", tags=["pairing"])
     app.include_router(discovery_router.router, prefix="/api/discovery", tags=["discovery"], dependencies=api_deps)
     app.include_router(proxy_router.router, prefix="/api/proxy", tags=["proxy"], dependencies=api_deps)
+    # Proxy WebSocket relay — registered WITHOUT HTTP auth deps (WebSocket
+    # upgrades are incompatible with HTTPBearer); auth is handled via
+    # verify_ws_token() inside the endpoint.
+    app.include_router(proxy_router.ws_router, prefix="/api/proxy", tags=["proxy"])
 
     # Serve built React frontend at /
     static_dir = _resolve_static_dir()
