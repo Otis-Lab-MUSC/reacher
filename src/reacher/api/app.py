@@ -116,7 +116,10 @@ async def lifespan(app: FastAPI):
     scan_task = asyncio.create_task(discovery.run_scan_loop(http_client, PORT, DEVICE_ID))
 
     logger.info("REACHER API v%s starting on port %d", __version__, PORT)
-    webbrowser.open(f"http://localhost:{PORT}")
+    # Only open the browser if a frontend is actually available — avoids opening
+    # to a blank 404 on headless Pis running the bare API without a bundled UI.
+    if _resolve_static_dir():
+        webbrowser.open(f"http://localhost:{PORT}")
     yield
 
     logger.info("Shutting down — destroying all sessions")
@@ -211,7 +214,8 @@ def main():
     if _is_already_running():
         print(f"REACHER is already running on port {PORT}.")
         print(f"Visit http://localhost:{PORT} in your browser.")
-        webbrowser.open(f"http://localhost:{PORT}")
+        if _resolve_static_dir():
+            webbrowser.open(f"http://localhost:{PORT}")
         return
     # Generate pairing code before starting the server so it's printed immediately.
     # The lifespan start_rotation() call is idempotent and will not re-generate.

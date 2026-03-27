@@ -1,12 +1,14 @@
 """Discovery and pairing endpoints for zero-config machine setup.
 
-GET    /api/discovery              — list mDNS peers + paired machines
-POST   /api/discovery/manual       — store a manually-supplied API key
-POST   /api/discovery/pair-by-url  — pair with a device at a known URL using a pairing code
-POST   /api/discovery/{id}/pair    — pair with an mDNS-discovered device using a pairing code
-DELETE /api/discovery/{id}         — unpair and remove a previously paired machine
+GET    /api/discovery               — list mDNS peers + paired machines
+POST   /api/discovery/manual        — store a manually-supplied API key
+POST   /api/discovery/pair-by-code  — pair with any discovered device using just a pairing code
+POST   /api/discovery/pair-by-url   — pair with a device at a known URL using a pairing code
+POST   /api/discovery/{id}/pair     — pair with a specific mDNS-discovered device using a pairing code
+DELETE /api/discovery/{id}          — unpair and remove a previously paired machine
 """
 
+import asyncio
 import logging
 
 import httpx
@@ -148,6 +150,79 @@ async def pair_by_url(body: PairByUrlRequest, request: Request) -> dict:
     logger.info("Paired with device %s (%s) at %s via URL", device_id[:8], hostname, url)
 
     return {"device_id": device_id, "hostname": hostname, "url": url, "name": name}
+
+
+@router.post("/pair-by-code")
+async def pair_by_code(body: PairRequest, request: Request) -> dict:
+    """Pair with any discovered REACHER device using only a pairing code.
+
+    Tries the code against every discovered peer (mDNS + subnet scan) in
+    parallel.  The first device that accepts the code is paired.  This is
+    the simplest UX — the user only needs the code shown on the device.
+    """
+    peers = discovery.get_peers()
+    already_paired = machines.get_all()
+
+    # Filter to unpaired peers only
+    candidates = {
+        did: peer for did, peer in peers.items()
+        if did not in already_paired
+    }
+
+    if not candidates:
+        raise HTTPException(
+            status_code=404,
+            detail="No unpaired REACHER devices found on the network. "
+            "Ensure the device is running and on the same network.",
+        )
+
+    http_client: httpx.AsyncClient = request.app.state.http_client
+
+    async def try_peer(device_id: str, peer: dict) -> dict | None:
+        url = f"http://{peer['host']}:{peer['port']}"
+        try:
+            resp = await http_client.post(
+                f"{url}/api/pairing/claim",
+                json={"code": body.code},
+                timeout=5.0,
+            )
+            if resp.status_code == 200:
+                return {
+                    "device_id": device_id,
+                    "url": url,
+                    "hostname": peer["hostname"],
+                    "api_key": resp.json()["api_key"],
+                }
+        except Exception:
+            pass
+        return None
+
+    results = await asyncio.gather(*[
+        try_peer(did, peer) for did, peer in candidates.items()
+    ])
+    matched = [r for r in results if r is not None]
+
+    if not matched:
+        raise HTTPException(
+            status_code=401,
+            detail="No device accepted that pairing code. "
+            "Check the code and try again.",
+        )
+
+    # Use the first match (only one device should accept the code)
+    hit = matched[0]
+    name = body.name or hit["hostname"]
+    machines.upsert(hit["device_id"], hit["url"], hit["api_key"], hit["hostname"], name)
+    logger.info(
+        "Paired with device %s (%s) at %s via code broadcast",
+        hit["device_id"][:8], hit["hostname"], hit["url"],
+    )
+    return {
+        "device_id": hit["device_id"],
+        "hostname": hit["hostname"],
+        "url": hit["url"],
+        "name": name,
+    }
 
 
 @router.post("/{device_id}/pair")
