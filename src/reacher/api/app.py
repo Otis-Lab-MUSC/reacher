@@ -105,8 +105,10 @@ async def lifespan(app: FastAPI):
     # Load previously paired machines from disk
     machines.load()
 
-    # Start pairing code rotation (idempotent — may already be started by main())
-    pairing.start_rotation()
+    # Only start pairing code rotation on peripheral devices (no frontend bundled).
+    # The main Labrynth machine has a bundled frontend and should not show codes.
+    if not _resolve_static_dir():
+        pairing.start_rotation()
 
     # Register mDNS service and start peer browser (blocking ~100ms, run off-thread)
     loop = asyncio.get_event_loop()
@@ -221,11 +223,12 @@ def main():
         if _resolve_static_dir():
             webbrowser.open(f"http://localhost:{PORT}")
         return
-    # Generate pairing code before starting the server so it's printed immediately.
-    # The lifespan start_rotation() call is idempotent and will not re-generate.
-    pairing.start_rotation()
-    code = pairing.get_current_code()
-    print(f"  Pairing code : {code[:3]}-{code[3:]}  (rotates every 5 minutes)")
+    # Only peripheral devices (no bundled frontend) show pairing codes.
+    # The main Labrynth machine has the frontend and discovers Pis, not the reverse.
+    if not _resolve_static_dir():
+        pairing.start_rotation()
+        code = pairing.get_current_code()
+        print(f"  Pairing code : {code[:3]}-{code[3:]}  (rotates every 5 minutes)")
     print(f"  API key      : {API_KEY}")
     uvicorn.run(
         "reacher.api.app:app",

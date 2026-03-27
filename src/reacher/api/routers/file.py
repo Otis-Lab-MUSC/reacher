@@ -9,7 +9,8 @@ import os
 import re
 import time
 import zipfile
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -213,3 +214,22 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
         f.write(buf.getvalue())
 
     return {"file_path": zip_path, "folder_path": folder_path}
+
+
+@router.get("/{session_id}/export/download")
+async def download_export(session_id: str, path: str = Query(...), request: Request = None):
+    """Return a previously exported ZIP as a binary download to the browser."""
+    sm = request.app.state.session_manager
+    try:
+        sm.get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    resolved = os.path.realpath(path)
+    home = os.path.realpath(os.path.expanduser("~"))
+    if not resolved.startswith(home + os.sep):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not os.path.isfile(resolved):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(resolved, media_type="application/zip", filename=os.path.basename(resolved))
