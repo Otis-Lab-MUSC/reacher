@@ -12,10 +12,10 @@ import logging
 import time
 from collections import defaultdict, deque
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from ...api.middleware.auth import API_KEY
+from ...api.middleware.auth import API_KEY, require_api_key
 from ... import pairing
 
 router = APIRouter()
@@ -38,6 +38,9 @@ async def claim_pairing_code(body: ClaimRequest, request: Request) -> dict:
     Called by a remote REACHER server's /api/discovery/{id}/pair handler
     when a user enters the pairing code shown in this device's terminal.
     """
+    if pairing.is_paired():
+        raise HTTPException(status_code=409, detail="Device is already paired")
+
     client_ip = request.client.host if request.client else "unknown"
 
     # Sliding-window rate limit per source IP
@@ -53,5 +56,21 @@ async def claim_pairing_code(body: ClaimRequest, request: Request) -> dict:
         logger.warning("Failed pairing attempt from %s", client_ip)
         raise HTTPException(status_code=401, detail="Invalid or expired pairing code")
 
+    pairing.set_paired()
     logger.info("Pairing code accepted from %s — API key returned", client_ip)
     return {"api_key": API_KEY}
+
+
+@router.post("/unpair", dependencies=[Depends(require_api_key)])
+async def unpair(request: Request) -> dict:
+    """Clear the paired state, allowing new pairing attempts.
+
+    Requires Bearer authentication — only the paired controller (which holds
+    the API key) can unpair this device.
+    """
+    if not pairing.is_paired():
+        raise HTTPException(status_code=409, detail="Device is not currently paired")
+    pairing.set_unpaired()
+    client_ip = request.client.host if request.client else "unknown"
+    logger.info("Device unpaired by %s", client_ip)
+    return {"status": "unpaired"}

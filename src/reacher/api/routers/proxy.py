@@ -1,36 +1,107 @@
-"""Transparent HTTP proxy for paired remote REACHER machines.
+"""Transparent HTTP + WebSocket proxy for paired remote REACHER machines.
 
 All REST calls to a remote machine are routed through the local REACHER
 server via /api/proxy/{device_id}/... — the browser never talks directly to
 the remote machine, eliminating any CORS configuration requirement.
 
-WebSocket connections still connect directly to the remote machine for
-performance; the token is retrieved from GET /api/proxy/{device_id}/ws-token.
+WebSocket events are relayed through this server as well.  The browser
+connects to /api/proxy/{device_id}/ws/{session_id} on the local server,
+which opens an upstream WebSocket to the Pi and relays messages
+bidirectionally.  The token returned by GET /{device_id}/ws-token is the
+*local* API key so the browser authenticates against the local server.
 """
 
+import asyncio
 import logging
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request, Response
+import websockets
+from fastapi import APIRouter, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 
 from ... import machines
+from ..middleware.auth import API_KEY, verify_ws_token
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
 @router.get("/{device_id}/ws-token")
-async def get_ws_token(device_id: str) -> dict:
-    """Return the stored API key and WebSocket base URL for a paired machine.
+async def get_ws_token(device_id: str, request: Request) -> dict:
+    """Return the local API key and relay WebSocket base URL for a paired machine.
 
-    The browser uses this token for direct WebSocket connections to the
-    remote machine (ws://{host}:{port}/ws/{session_id}?token=...).
+    The browser uses this to connect to the local WS relay at
+    /api/proxy/{device_id}/ws/{session_id}?token=<local_key>.
+    The relay then connects upstream to the Pi using the stored Pi API key.
     """
     machine = machines.get(device_id)
     if not machine:
         raise HTTPException(status_code=404, detail="Machine not paired")
-    ws_url = machine["url"].replace("http://", "ws://").replace("https://", "wss://")
-    return {"token": machine["api_key"], "ws_url": ws_url}
+
+    # Build local relay base URL from the request's Host header
+    host = request.headers.get("host", "localhost:6229")
+    scheme = "wss" if request.headers.get("x-forwarded-proto") == "https" else "ws"
+    ws_url = f"{scheme}://{host}/api/proxy/{device_id}"
+
+    return {"token": API_KEY, "ws_url": ws_url}
+
+
+@router.websocket("/{device_id}/ws/{session_id}")
+async def ws_relay(ws: WebSocket, device_id: str, session_id: str):
+    """Relay WebSocket messages between the browser and a remote REACHER device.
+
+    Browser → local server (this endpoint) → Pi REACHER WebSocket.
+    Events flow back: Pi → local server → browser.
+    """
+    if not verify_ws_token(ws):
+        await ws.close(code=4001, reason="Unauthorized")
+        return
+
+    machine = machines.get(device_id)
+    if not machine:
+        await ws.close(code=4004, reason="Machine not paired")
+        return
+
+    upstream_base = machine["url"].replace("http://", "ws://").replace("https://", "wss://")
+    upstream_url = f"{upstream_base}/ws/{session_id}?token={machine['api_key']}"
+
+    await ws.accept()
+
+    try:
+        async with websockets.connect(upstream_url) as upstream:
+            async def browser_to_pi():
+                try:
+                    while True:
+                        data = await ws.receive_text()
+                        await upstream.send(data)
+                except WebSocketDisconnect:
+                    pass
+
+            async def pi_to_browser():
+                try:
+                    async for data in upstream:
+                        if isinstance(data, str):
+                            await ws.send_text(data)
+                        else:
+                            await ws.send_bytes(data)
+                except websockets.ConnectionClosed:
+                    pass
+
+            tasks = [
+                asyncio.create_task(browser_to_pi()),
+                asyncio.create_task(pi_to_browser()),
+            ]
+            _done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+    except websockets.exceptions.WebSocketException as exc:
+        logger.warning("WS relay upstream connection failed for %s/%s: %s", device_id[:8], session_id, exc)
+    except Exception:
+        logger.debug("WS relay error for %s/%s", device_id[:8], session_id, exc_info=True)
+    finally:
+        try:
+            await ws.close()
+        except Exception:
+            pass
 
 
 @router.api_route("/{device_id}/{rest_path:path}", methods=["GET", "POST", "DELETE"])

@@ -1,9 +1,10 @@
 """Discovery and pairing endpoints for zero-config machine setup.
 
-GET  /api/discovery              — list mDNS peers + paired machines
-POST /api/discovery/manual       — store a manually-supplied API key
-POST /api/discovery/pair-by-url  — pair with a device at a known URL using a pairing code
-POST /api/discovery/{id}/pair    — pair with an mDNS-discovered device using a pairing code
+GET    /api/discovery              — list mDNS peers + paired machines
+POST   /api/discovery/manual       — store a manually-supplied API key
+POST   /api/discovery/pair-by-url  — pair with a device at a known URL using a pairing code
+POST   /api/discovery/{id}/pair    — pair with an mDNS-discovered device using a pairing code
+DELETE /api/discovery/{id}         — unpair and remove a previously paired machine
 """
 
 import logging
@@ -191,3 +192,32 @@ async def pair_device(device_id: str, body: PairRequest, request: Request) -> di
     logger.info("Paired with device %s (%s) at %s", device_id[:8], hostname, remote_url)
 
     return {"device_id": device_id, "hostname": hostname, "url": remote_url, "name": name}
+
+
+@router.delete("/{device_id}")
+async def remove_machine(device_id: str, request: Request) -> dict:
+    """Unpair and remove a previously paired machine.
+
+    Best-effort notifies the remote device to clear its paired state so it
+    can accept new pairing attempts.  If the remote device is unreachable the
+    local entry is still removed.
+    """
+    machine = machines.get(device_id)
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not paired")
+
+    # Best-effort: tell the remote Pi to unpair
+    http_client: httpx.AsyncClient = request.app.state.http_client
+    try:
+        await http_client.post(
+            f"{machine['url']}/api/pairing/unpair",
+            headers={"Authorization": f"Bearer {machine['api_key']}"},
+            timeout=5.0,
+        )
+        logger.info("Remote device %s acknowledged unpairing", device_id[:8])
+    except Exception:
+        logger.warning("Could not notify device %s of unpairing (may be offline)", device_id[:8])
+
+    machines.remove(device_id)
+    logger.info("Removed paired machine %s", device_id[:8])
+    return {"status": "removed", "device_id": device_id}

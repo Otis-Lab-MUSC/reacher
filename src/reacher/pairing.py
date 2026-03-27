@@ -16,16 +16,21 @@ _current_code: str = ""
 _code_lock = threading.Lock()
 _timer: threading.Timer | None = None
 _started = False
+_paired = False
 
 
 def _rotate() -> None:
     """Generate a new pairing code and schedule the next rotation."""
     global _current_code, _timer
+    if _paired:
+        return
     with _code_lock:
         _current_code = str(secrets.randbelow(1_000_000)).zfill(6)
+        code = _current_code
         _timer = threading.Timer(_CODE_INTERVAL, _rotate)
         _timer.daemon = True
         _timer.start()
+    print(f"  Pairing code : {code[:3]}-{code[3:]}  (rotates every 5 minutes)")
     logger.debug("Pairing code rotated")
 
 
@@ -61,3 +66,27 @@ def verify_code(candidate: str) -> bool:
     if not current:
         return False
     return secrets.compare_digest(candidate.strip(), current)
+
+
+def is_paired() -> bool:
+    """Return True if this device is currently paired with a controller."""
+    return _paired
+
+
+def set_paired() -> None:
+    """Mark this device as paired. Stops code rotation."""
+    global _paired
+    _paired = True
+    stop_rotation()
+    print("  Paired — pairing codes disabled")
+    logger.info("Device paired — pairing codes disabled")
+
+
+def set_unpaired() -> None:
+    """Clear the paired state. Resumes code rotation."""
+    global _paired, _started
+    _paired = False
+    _started = False  # Allow start_rotation() to re-enter
+    start_rotation()
+    print("  Unpaired — pairing codes re-enabled")
+    logger.info("Device unpaired — pairing codes re-enabled")

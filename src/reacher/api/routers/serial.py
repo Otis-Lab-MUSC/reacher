@@ -35,6 +35,16 @@ async def connect_serial(session_id: str, request: Request):
     except ValueError as e:
         # Fix: PY-002 — Surface validation errors without leaking internals
         raise HTTPException(status_code=400, detail=str(e))
+    except PermissionError:
+        logger.warning("Permission denied opening serial port for session %s", session_id)
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Permission denied opening serial port. "
+                "On Linux, add the user to the 'dialout' group: "
+                "sudo usermod -a -G dialout $USER  (then log out and back in)"
+            ),
+        )
     except Exception:
         # Fix: PY-002 — Generic message; details logged server-side
         logger.exception("Serial connect failed for session %s", session_id)
