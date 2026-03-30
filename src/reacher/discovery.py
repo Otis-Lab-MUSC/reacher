@@ -21,6 +21,11 @@ _peers_lock = threading.Lock()
 _scanned_peers: dict[str, dict] = {}  # {device_id → {host, port, hostname}}
 _scanned_lock = threading.Lock()
 
+# Peers that self-registered via POST /api/discovery/register (unicast fallback for
+# networks where mDNS multicast is blocked, e.g. university managed switches).
+_registered_peers: dict[str, dict] = {}  # {device_id → {host, port, hostname}}
+_registered_lock = threading.Lock()
+
 # Module-level zeroconf state (None when disabled or not started)
 _zeroconf = None
 _browser = None
@@ -30,6 +35,9 @@ _info = None
 class _ServiceListener:
     """Handles mDNS service add/remove callbacks for the ServiceBrowser."""
 
+    def __init__(self, own_device_id: str) -> None:
+        self._own_device_id = own_device_id
+
     def add_service(self, zc, service_type: str, name: str) -> None:  # noqa: ANN001
         try:
             info = zc.get_service_info(service_type, name)
@@ -37,7 +45,10 @@ class _ServiceListener:
                 return
             props = {k.decode(): v.decode() for k, v in info.properties.items()}
             device_id = props.get("device_id")
-            if not device_id:
+            # Skip self — the machine picks up its own mDNS advertisement via ServiceBrowser.
+            # Without this guard the local device_id would appear in _peers and surface in
+            # GET /api/discovery as an unpaired "discovered" device.
+            if not device_id or device_id == self._own_device_id:
                 return
             addresses = info.parsed_addresses()
             if not addresses:
@@ -111,7 +122,7 @@ def start(device_id: str, port: int, version: str) -> None:
         _zeroconf.register_service(_info)
         logger.info("Registered mDNS service: %s", service_name)
 
-        _browser = ServiceBrowser(_zeroconf, _SERVICE_TYPE, _ServiceListener())
+        _browser = ServiceBrowser(_zeroconf, _SERVICE_TYPE, _ServiceListener(device_id))
     except Exception:
         logger.exception("Failed to start mDNS discovery")
 
@@ -140,17 +151,31 @@ def stop() -> None:
 def get_peers() -> dict[str, dict]:
     """Return a point-in-time snapshot of currently visible REACHER peers.
 
-    Merges mDNS-discovered and subnet-scanned peers; mDNS takes precedence
-    when the same device_id appears in both.
+    Merges all three discovery sources; precedence (highest wins on conflict):
+      mDNS > subnet-scan > unicast-registered
 
     Returns:
         Dict mapping device_id → {host, port, hostname}.
     """
-    with _peers_lock:
-        mdns = dict(_peers)
+    with _registered_lock:
+        registered = dict(_registered_peers)
     with _scanned_lock:
         scanned = dict(_scanned_peers)
-    return {**scanned, **mdns}
+    with _peers_lock:
+        mdns = dict(_peers)
+    return {**registered, **scanned, **mdns}
+
+
+def register_peer(device_id: str, host: str, port: int, hostname: str) -> None:
+    """Store a peer that unicast-registered via POST /api/discovery/register.
+
+    Used on networks where mDNS multicast is unavailable (e.g. university
+    managed switches with AP client isolation).  Peripheral devices call this
+    endpoint on startup when ``REACHER_BROKER_URL`` is configured.
+    """
+    with _registered_lock:
+        _registered_peers[device_id] = {"host": host, "port": port, "hostname": hostname}
+    logger.info("Registered peer via unicast: %s @ %s:%d", device_id[:8], host, port)
 
 
 def _get_local_ip() -> str | None:
