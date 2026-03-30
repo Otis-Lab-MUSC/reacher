@@ -19,6 +19,24 @@ _started = False
 _paired = False
 
 
+def _print_code(code: str) -> None:
+    """Print the pairing code with a visually prominent bordered callout."""
+    formatted = f"{code[:3]}-{code[3:]}"
+    # Use box-drawing characters when the terminal supports UTF-8, otherwise ASCII.
+    import sys
+    use_box = getattr(sys.stdout, "encoding", "ascii").lower().replace("-", "") in ("utf8", "utf16", "utf32")
+    if use_box:
+        print(f"\n  ╔══════════════════════════════════════╗")
+        print(f"  ║   PAIRING CODE :  {formatted:<18} ║")
+        print(f"  ║   Rotates every 5 minutes            ║")
+        print(f"  ╚══════════════════════════════════════╝\n")
+    else:
+        print(f"\n  +--------------------------------------+")
+        print(f"  |  PAIRING CODE :  {formatted:<19}|")
+        print(f"  |  Rotates every 5 minutes             |")
+        print(f"  +--------------------------------------+\n")
+
+
 def _rotate() -> None:
     """Generate a new pairing code and schedule the next rotation."""
     global _current_code, _timer
@@ -30,7 +48,7 @@ def _rotate() -> None:
         _timer = threading.Timer(_CODE_INTERVAL, _rotate)
         _timer.daemon = True
         _timer.start()
-    print(f"  Pairing code : {code[:3]}-{code[3:]}  (rotates every 5 minutes)")
+    _print_code(code)
     logger.debug("Pairing code rotated")
 
 
@@ -78,7 +96,7 @@ def set_paired() -> None:
     global _paired
     _paired = True
     stop_rotation()
-    print("  Paired — pairing codes disabled")
+    print("  [ PAIRED ] Pairing codes disabled.")
     logger.info("Device paired — pairing codes disabled")
 
 
@@ -88,5 +106,5 @@ def set_unpaired() -> None:
     _paired = False
     _started = False  # Allow start_rotation() to re-enter
     start_rotation()
-    print("  Unpaired — pairing codes re-enabled")
+    print("  [ UNPAIRED ] Pairing codes re-enabled.")
     logger.info("Device unpaired — pairing codes re-enabled")
