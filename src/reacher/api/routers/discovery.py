@@ -10,6 +10,7 @@ DELETE /api/discovery/{id}          — unpair and remove a previously paired ma
 
 import asyncio
 import logging
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -18,6 +19,9 @@ from pydantic import BaseModel
 from ... import discovery, machines
 
 router = APIRouter()
+# Auth-free sub-router: /register is called by peripheral devices before pairing,
+# so no API key is available yet.  Only non-sensitive metadata is accepted.
+register_router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
@@ -36,6 +40,42 @@ class ManualPairRequest(BaseModel):
     url: str
     api_key: str
     name: str | None = None
+
+
+class RegisterRequest(BaseModel):
+    device_id: str
+    url: str
+    hostname: str
+    version: str | None = None
+
+
+@register_router.post("/register")
+async def register_device(body: RegisterRequest, request: Request) -> dict:
+    """Accept a unicast self-registration from a peripheral device.
+
+    Peripheral devices POST to this endpoint on startup when
+    ``REACHER_BROKER_URL`` is configured, bypassing the need for mDNS
+    multicast routing (which is typically blocked on university networks).
+
+    The endpoint is auth-free — the device is unknown before pairing.  Only
+    non-sensitive metadata is accepted; the registration is validated by
+    probing the device's /health endpoint before storing it.
+    """
+    url = body.url.rstrip("/")
+    http_client: httpx.AsyncClient = request.app.state.http_client
+    try:
+        resp = await http_client.get(f"{url}/health", timeout=5.0)
+        health = resp.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Cannot reach device at that URL")
+    if health.get("service") != "reacher" or health.get("device_id") != body.device_id:
+        raise HTTPException(status_code=400, detail="Health check mismatch — device_id does not match")
+
+    parsed = urlparse(url)
+    host = parsed.hostname or url
+    port = parsed.port or 6229
+    discovery.register_peer(body.device_id, host, port, body.hostname)
+    return {"status": "registered", "device_id": body.device_id}
 
 
 @router.get("")

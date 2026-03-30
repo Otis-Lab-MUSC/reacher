@@ -71,6 +71,39 @@ def _open_browser(url: str) -> None:
     webbrowser.open(url)
 
 
+async def _post_broker_registration(
+    broker_url: str,
+    http_client: httpx.AsyncClient,
+    device_id: str,
+    port: int,
+    version: str,
+) -> None:
+    """POST self-registration to the broker (primary machine) on startup.
+
+    Called when ``REACHER_BROKER_URL`` is set — used on networks where mDNS
+    multicast is blocked (e.g. university managed switches).  The local
+    outbound IP is determined via the routing table so the primary can reach
+    this device even if ``REACHER_HOST`` is bound to ``0.0.0.0``.
+    """
+    from .. import discovery as _discovery
+    local_ip = _discovery._get_local_ip() or "127.0.0.1"
+    url = f"http://{local_ip}:{port}"
+    try:
+        await http_client.post(
+            f"{broker_url}/api/discovery/register",
+            json={
+                "device_id": device_id,
+                "url": url,
+                "hostname": socket.gethostname(),
+                "version": version,
+            },
+            timeout=10.0,
+        )
+        logger.info("Registered with broker at %s", broker_url)
+    except Exception as exc:
+        logger.warning("Could not register with broker %s: %s", broker_url, exc)
+
+
 def _is_already_running() -> bool:
     """Check if a REACHER server is already listening on PORT."""
     import socket
@@ -153,6 +186,12 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, discovery.start, DEVICE_ID, PORT, __version__)
 
+    # Unicast registration fallback: POST presence to a known broker when
+    # REACHER_BROKER_URL is set (e.g. on university networks where mDNS is blocked).
+    broker_url = os.getenv("REACHER_BROKER_URL", "").rstrip("/")
+    if broker_url:
+        asyncio.create_task(_post_broker_registration(broker_url, http_client, DEVICE_ID, PORT, __version__))
+
     # Subnet scan fallback: finds peers even when mDNS/zeroconf is unavailable
     scan_task = asyncio.create_task(discovery.run_scan_loop(http_client, PORT, DEVICE_ID))
 
@@ -233,8 +272,11 @@ def create_app() -> FastAPI:
     app.include_router(file.router, prefix="/api/file", tags=["file"], dependencies=api_deps)
     app.include_router(websocket.router, tags=["websocket"])
     app.include_router(lifecycle.router, prefix="/api/lifecycle", tags=["lifecycle"], dependencies=api_deps)
-    # Zero-config machine discovery: pairing endpoint is auth-free; others require auth
+    # Zero-config machine discovery: pairing + register endpoints are auth-free;
+    # other discovery routes require auth.
     app.include_router(pairing_router.router, prefix="/api/pairing", tags=["pairing"])
+    # /register is auth-free — peripheral devices call it before pairing
+    app.include_router(discovery_router.register_router, prefix="/api/discovery", tags=["discovery"])
     app.include_router(discovery_router.router, prefix="/api/discovery", tags=["discovery"], dependencies=api_deps)
     app.include_router(proxy_router.router, prefix="/api/proxy", tags=["proxy"], dependencies=api_deps)
     # Proxy WebSocket relay — registered WITHOUT HTTP auth deps (WebSocket
