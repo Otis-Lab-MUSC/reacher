@@ -104,8 +104,12 @@ class FirmwareUploader:
             pkg_hex,
             # Home directory fallback
             os.path.expanduser("~/REACHER/hex"),
-            # GitHub cache (populated by _fetch_hex_from_github on first upload)
-            _HEX_CACHE_DIR,
+            # NOTE: _HEX_CACHE_DIR intentionally excluded from candidates.
+            # _fetch_hex_from_github() creates its subdirectories via os.makedirs()
+            # even on failed downloads, so os.path.isdir(_HEX_CACHE_DIR) would
+            # return True on the next startup — masking an empty/partial cache and
+            # skipping the GitHub fetch entirely.  The fetch function populates and
+            # returns _HEX_CACHE_DIR directly; we rely on it below.
         ]
         for c in candidates:
             norm = os.path.normpath(c)
