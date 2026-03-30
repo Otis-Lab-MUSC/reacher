@@ -7,7 +7,9 @@ files, and manages the application lifespan (session cleanup on shutdown).
 import asyncio
 import logging
 import os
+import shutil
 import socket
+import subprocess
 import sys
 import webbrowser
 from contextlib import asynccontextmanager
@@ -30,6 +32,43 @@ logger = logging.getLogger(__name__)
 
 PORT = int(os.getenv("REACHER_PORT", "6229"))
 HOST = os.getenv("REACHER_HOST", "0.0.0.0")
+
+
+def _open_browser(url: str) -> None:
+    """Open *url* in a browser, using incognito/private mode when requested.
+
+    Checks the ``REACHER_INCOGNITO`` environment variable (set by launcher.py
+    when the ``--incognito`` flag is passed).  Tries known browsers with their
+    private-mode flags in order; falls back to ``webbrowser.open`` if none are
+    on PATH.
+    """
+    if not os.getenv("REACHER_INCOGNITO"):
+        webbrowser.open(url)
+        return
+
+    _INCOGNITO_BROWSERS = [
+        ("google-chrome", ["--incognito"]),
+        ("google-chrome-stable", ["--incognito"]),
+        ("chromium-browser", ["--incognito"]),
+        ("chromium", ["--incognito"]),
+        ("firefox", ["--private-window"]),
+        ("firefox-esr", ["--private-window"]),
+        ("msedge", ["--inprivate"]),
+        ("microsoft-edge", ["--inprivate"]),
+    ]
+    for binary, flags in _INCOGNITO_BROWSERS:
+        if shutil.which(binary):
+            try:
+                subprocess.Popen([binary, *flags, url],
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+                return
+            except OSError:
+                continue
+
+    # No supported browser found — fall back to default browser without incognito
+    logger.warning("No incognito-capable browser found; opening default browser")
+    webbrowser.open(url)
 
 
 def _is_already_running() -> bool:
@@ -121,7 +160,7 @@ async def lifespan(app: FastAPI):
     # Only open the browser if a frontend is actually available — avoids opening
     # to a blank 404 on headless Pis running the bare API without a bundled UI.
     if _resolve_static_dir():
-        webbrowser.open(f"http://localhost:{PORT}")
+        _open_browser(f"http://localhost:{PORT}")
     yield
 
     logger.info("Shutting down — destroying all sessions")
@@ -221,14 +260,13 @@ def main():
         print(f"REACHER is already running on port {PORT}.")
         print(f"Visit http://localhost:{PORT} in your browser.")
         if _resolve_static_dir():
-            webbrowser.open(f"http://localhost:{PORT}")
+            _open_browser(f"http://localhost:{PORT}")
         return
     # Only peripheral devices (no bundled frontend) show pairing codes.
     # The main Labrynth machine has the frontend and discovers Pis, not the reverse.
+    # start_rotation() already prints the code via _rotate(); no duplicate print needed.
     if not _resolve_static_dir():
         pairing.start_rotation()
-        code = pairing.get_current_code()
-        print(f"  Pairing code : {code[:3]}-{code[3:]}  (rotates every 5 minutes)")
     print(f"  API key      : {API_KEY}")
     uvicorn.run(
         "reacher.api.app:app",
