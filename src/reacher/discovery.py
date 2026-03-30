@@ -87,11 +87,12 @@ def start(device_id: str, port: int, version: str) -> None:
     try:
         _zeroconf = Zeroconf()
 
-        # Resolve local IP for advertisement (prefer non-loopback)
-        try:
-            local_ip = socket.gethostbyname(socket.gethostname())
-        except OSError:
-            local_ip = "127.0.0.1"
+        # Resolve local IP for advertisement (prefer non-loopback).
+        # socket.gethostbyname(socket.gethostname()) commonly returns 127.0.0.1
+        # or 127.0.1.1 on Linux/Raspberry Pi due to /etc/hosts entries, which
+        # would make the mDNS advertisement unreachable from other machines.
+        # _get_local_ip() uses the routing table (UDP socket trick) instead.
+        local_ip = _get_local_ip() or "127.0.0.1"
 
         addr_bytes = socket.inet_aton(local_ip)
         service_name = f"REACHER-{device_id[:8]}.{_SERVICE_TYPE}"
