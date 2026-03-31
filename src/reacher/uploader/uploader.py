@@ -201,12 +201,30 @@ class FirmwareUploader:
             for profile in BOARD_PROFILES.values()
         ]
 
+    @staticmethod
+    def cache_hex(paradigm: str, board: str, data: bytes) -> str:
+        """Write hex data to the local cache and return the file path.
+
+        Stores at ``~/.reacher/hex/{board}/{paradigm}.hex`` so subsequent
+        uploads can resolve the file through the normal fallback chain.
+        """
+        paradigm = paradigm.lower()
+        board = board.lower()
+        dest_dir = os.path.join(_HEX_CACHE_DIR, board)
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, f"{paradigm}.hex")
+        with open(dest, "wb") as f:
+            f.write(data)
+        logger.info("Cached firmware hex: %s/%s.hex (%d bytes)", board, paradigm, len(data))
+        return dest
+
     async def upload(
         self,
         paradigm: str,
         port: str,
         board: str = DEFAULT_BOARD,
         progress_callback: Optional[Callable[[int, str], None]] = None,
+        hex_path: Optional[str] = None,
     ) -> bool:
         """Upload firmware asynchronously.
 
@@ -215,11 +233,15 @@ class FirmwareUploader:
             port: Serial port (e.g. ``/dev/ttyUSB0`` or ``COM3``).
             board: Board identifier (e.g. ``"uno"``, ``"mega"``).
             progress_callback: Optional ``(percent, stage_message)`` callable.
+            hex_path: If provided, use this path directly instead of resolving
+                via :meth:`get_hex_path`.  Used when the client supplied inline
+                hex data that was cached to disk.
 
         Returns:
             True on success, False on failure.
         """
-        hex_path = self.get_hex_path(paradigm, board)
+        if hex_path is None:
+            hex_path = self.get_hex_path(paradigm, board)
         profile = get_board_profile(board)
 
         cmd = [

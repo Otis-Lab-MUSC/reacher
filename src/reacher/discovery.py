@@ -92,7 +92,7 @@ def start(device_id: str, port: int, version: str) -> None:
     try:
         from zeroconf import ServiceBrowser, ServiceInfo, Zeroconf
     except ImportError:
-        logger.info("zeroconf not installed — mDNS device discovery disabled")
+        logger.warning("zeroconf not installed — mDNS device discovery disabled; install with: pip install zeroconf")
         return
 
     try:

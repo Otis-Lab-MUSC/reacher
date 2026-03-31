@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ... import discovery, machines
+from ...device_id import DEVICE_ID as LOCAL_DEVICE_ID
 
 router = APIRouter()
 # Auth-free sub-router: /register is called by peripheral devices before pairing,
@@ -61,6 +62,8 @@ async def register_device(body: RegisterRequest, request: Request) -> dict:
     non-sensitive metadata is accepted; the registration is validated by
     probing the device's /health endpoint before storing it.
     """
+    if body.device_id == LOCAL_DEVICE_ID:
+        raise HTTPException(status_code=400, detail="Cannot register self")
     url = body.url.rstrip("/")
     http_client: httpx.AsyncClient = request.app.state.http_client
     try:
@@ -110,7 +113,7 @@ async def list_discovered(request: Request) -> dict:
                 "active_sessions": None,
             })
 
-    return {"devices": devices}
+    return {"devices": [d for d in devices if d["device_id"] != LOCAL_DEVICE_ID]}
 
 
 @router.post("/manual")

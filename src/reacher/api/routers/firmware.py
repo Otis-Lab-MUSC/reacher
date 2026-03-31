@@ -1,13 +1,18 @@
 """Firmware upload endpoints."""
 
 import asyncio
+import base64
 import logging
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from ...uploader.boards import DEFAULT_BOARD, SUPPORTED_BOARDS
 from ...uploader.uploader import FirmwareUploader
 from . import websocket as ws_mod
+
+_MAX_HEX_SIZE = 200 * 1024  # 200 KB — hex files are typically 15-40 KB
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
@@ -33,6 +38,7 @@ async def list_paradigms(board: str = Query(DEFAULT_BOARD)):
 class UploadRequest(BaseModel):
     paradigm: str
     board: str = DEFAULT_BOARD
+    hex_data: Optional[str] = None  # base64-encoded Intel HEX file content
 
 
 @router.post("/upload/{session_id}")
@@ -64,8 +70,24 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
             "stage": stage,
         })
 
+    # If the client supplied inline hex data, decode, validate, and cache it.
+    cached_hex_path = None
+    if body.hex_data:
+        try:
+            raw = base64.b64decode(body.hex_data, validate=True)
+        except Exception:
+            sm.set_state(session_id, "idle")
+            raise HTTPException(status_code=400, detail="Invalid base64 in hex_data")
+        if len(raw) > _MAX_HEX_SIZE:
+            sm.set_state(session_id, "idle")
+            raise HTTPException(status_code=400, detail=f"hex_data too large ({len(raw)} bytes, max {_MAX_HEX_SIZE})")
+        if not raw.lstrip(b"\xef\xbb\xbf").startswith(b":"):
+            sm.set_state(session_id, "idle")
+            raise HTTPException(status_code=400, detail="hex_data does not look like Intel HEX (must start with ':')")
+        cached_hex_path = FirmwareUploader.cache_hex(body.paradigm, body.board, raw)
+
     try:
-        success = await _uploader.upload(body.paradigm, info.port, body.board, progress_cb)
+        success = await _uploader.upload(body.paradigm, info.port, body.board, progress_cb, hex_path=cached_hex_path)
     except FileNotFoundError as e:
         _logger.error("Firmware file not found for session %s: %s", session_id, e)
         sm.set_state(session_id, "idle")

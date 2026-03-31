@@ -12,6 +12,8 @@ bidirectionally.  The token returned by GET /{device_id}/ws-token is the
 """
 
 import asyncio
+import base64
+import json
 import logging
 
 import httpx
@@ -19,6 +21,7 @@ import websockets
 from fastapi import APIRouter, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 
 from ... import machines
+from ...uploader.uploader import FirmwareUploader
 from ..middleware.auth import API_KEY, verify_ws_token
 
 router = APIRouter()
@@ -130,6 +133,29 @@ async def proxy_request(device_id: str, rest_path: str, request: Request) -> Res
         headers["Content-Type"] = ct
 
     body = await request.body()
+
+    # Enrich firmware upload requests with local hex data so the remote Pi
+    # doesn't need to have the files pre-installed.
+    if "api/firmware/upload/" in rest_path and request.method == "POST" and body:
+        try:
+            payload = json.loads(body)
+            if isinstance(payload, dict) and "hex_data" not in payload:
+                paradigm = payload.get("paradigm", "")
+                board = payload.get("board", "uno")
+                try:
+                    uploader = FirmwareUploader()
+                    hex_path = uploader.get_hex_path(paradigm, board)
+                    with open(hex_path, "rb") as f:
+                        hex_bytes = f.read()
+                    payload["hex_data"] = base64.b64encode(hex_bytes).decode("ascii")
+                    body = json.dumps(payload).encode()
+                    headers["Content-Type"] = "application/json"
+                    logger.info("Injected hex_data for %s/%s into proxied firmware upload", board, paradigm)
+                except (FileNotFoundError, ValueError):
+                    pass  # local hex not available — let remote try its own resolution
+        except (json.JSONDecodeError, KeyError):
+            pass  # not JSON or unexpected shape — forward as-is
+
     http_client: httpx.AsyncClient = request.app.state.http_client
 
     try:

@@ -53,7 +53,7 @@ reacher = "reacher.api.app:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-reacher = ["hex/*.hex"]
+reacher = ["hex/**/*.hex"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
