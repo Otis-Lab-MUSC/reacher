@@ -28,6 +28,25 @@ _FIRMWARE_RAW_BASE = f"https://raw.githubusercontent.com/{_FIRMWARE_REPO}/{_FIRM
 _HEX_CACHE_DIR = os.path.expanduser("~/.reacher/hex")
 
 
+def _dir_has_hex(path: str) -> bool:
+    """Return True if *path* contains at least one ``.hex`` file.
+
+    Checks both flat layout (``hex/fr.hex``) and board-aware subdirectories
+    (``hex/uno/fr.hex``).
+    """
+    try:
+        for entry in os.listdir(path):
+            if entry.endswith(".hex"):
+                return True
+            subdir = os.path.join(path, entry)
+            if os.path.isdir(subdir):
+                if any(f.endswith(".hex") for f in os.listdir(subdir)):
+                    return True
+    except OSError:
+        pass
+    return False
+
+
 def _frozen_base() -> Optional[str]:
     """Return the PyInstaller bundle directory, or None when running from source."""
     return getattr(sys, "_MEIPASS", None)
@@ -108,16 +127,12 @@ class FirmwareUploader:
             pkg_hex,
             # Home directory fallback
             os.path.expanduser("~/REACHER/hex"),
-            # NOTE: _HEX_CACHE_DIR intentionally excluded from candidates.
-            # _fetch_hex_from_github() creates its subdirectories via os.makedirs()
-            # even on failed downloads, so os.path.isdir(_HEX_CACHE_DIR) would
-            # return True on the next startup — masking an empty/partial cache and
-            # skipping the GitHub fetch entirely.  The fetch function populates and
-            # returns _HEX_CACHE_DIR directly; we rely on it below.
+            # GitHub-fetched cache (populated by _fetch_hex_from_github)
+            _HEX_CACHE_DIR,
         ]
         for c in candidates:
             norm = os.path.normpath(c)
-            if os.path.isdir(norm):
+            if os.path.isdir(norm) and _dir_has_hex(norm):
                 return norm
 
         # No local hex directory found — try fetching from GitHub once.
