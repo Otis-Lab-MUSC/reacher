@@ -37,10 +37,11 @@ async def claim_pairing_code(body: ClaimRequest, request: Request) -> dict:
 
     Called by a remote REACHER server's /api/discovery/{id}/pair handler
     when a user enters the pairing code shown in this device's terminal.
-    """
-    if pairing.is_paired():
-        raise HTTPException(status_code=409, detail="Device is already paired")
 
+    If the device is already paired but a valid code is provided, the device
+    is re-paired (the same API key is returned).  This handles the case where
+    the original controller lost its pairing state and needs to reconnect.
+    """
     client_ip = request.client.host if request.client else "unknown"
 
     # Sliding-window rate limit per source IP
@@ -53,11 +54,16 @@ async def claim_pairing_code(body: ClaimRequest, request: Request) -> dict:
     window.append(now)
 
     if not pairing.verify_code(body.code):
+        if pairing.is_paired():
+            logger.warning("Failed re-pairing attempt from %s (device is paired)", client_ip)
+            raise HTTPException(status_code=409, detail="Device is already paired")
         logger.warning("Failed pairing attempt from %s", client_ip)
         raise HTTPException(status_code=401, detail="Invalid or expired pairing code")
 
+    was_paired = pairing.is_paired()
     pairing.set_paired()
-    logger.info("Pairing code accepted from %s — API key returned", client_ip)
+    action = "re-paired" if was_paired else "paired"
+    logger.info("Pairing code accepted from %s — API key returned (%s)", client_ip, action)
     return {"api_key": API_KEY}
 
 

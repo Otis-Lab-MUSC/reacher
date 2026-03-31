@@ -92,13 +92,15 @@ async def list_discovered(request: Request) -> dict:
     # mDNS-visible peers (may or may not already be paired)
     for device_id, peer in peers.items():
         seen.add(device_id)
+        is_paired = device_id in paired
         devices.append({
             "device_id": device_id,
             "hostname": peer["hostname"],
             "url": f"http://{peer['host']}:{peer['port']}",
-            "paired": device_id in paired,
+            "paired": is_paired,
             "discovered": True,
             "active_sessions": None,
+            "name": paired[device_id].get("name", peer["hostname"]) if is_paired else peer["hostname"],
         })
 
     # Paired machines not currently visible via mDNS (e.g. offline but previously paired)
@@ -111,6 +113,7 @@ async def list_discovered(request: Request) -> dict:
                 "paired": True,
                 "discovered": False,
                 "active_sessions": None,
+                "name": info.get("name", info["hostname"]),
             })
 
     return {"devices": [d for d in devices if d["device_id"] != LOCAL_DEVICE_ID]}
@@ -183,6 +186,8 @@ async def pair_by_url(body: PairByUrlRequest, request: Request) -> dict:
 
     if resp.status_code == 429:
         raise HTTPException(status_code=429, detail="Too many attempts on the remote device — wait a minute")
+    if resp.status_code == 409:
+        raise HTTPException(status_code=409, detail="Device is already paired — remove it first or restart the device")
     if resp.status_code != 200:
         raise HTTPException(status_code=401, detail="Invalid or expired pairing code")
 
@@ -300,6 +305,8 @@ async def pair_device(device_id: str, body: PairRequest, request: Request) -> di
 
     if resp.status_code == 429:
         raise HTTPException(status_code=429, detail="Too many attempts on the remote device — wait a minute")
+    if resp.status_code == 409:
+        raise HTTPException(status_code=409, detail="Device is already paired — remove it first or restart the device")
     if resp.status_code != 200:
         raise HTTPException(status_code=401, detail="Invalid or expired pairing code")
 

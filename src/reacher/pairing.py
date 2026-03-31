@@ -8,15 +8,18 @@ the API key through mDNS advertisements or QR codes.
 import logging
 import secrets
 import threading
+import time
 
 logger = logging.getLogger(__name__)
 
 _CODE_INTERVAL = 300  # seconds (5 minutes)
+_STALE_TIMEOUT = 600  # seconds (10 minutes) — resume printing codes if no auth activity
 _current_code: str = ""
 _code_lock = threading.Lock()
 _timer: threading.Timer | None = None
 _started = False
 _paired = False
+_last_auth_time: float = 0.0
 
 
 def _print_code(code: str) -> None:
@@ -38,17 +41,25 @@ def _print_code(code: str) -> None:
 
 
 def _rotate() -> None:
-    """Generate a new pairing code and schedule the next rotation."""
+    """Generate a new pairing code and schedule the next rotation.
+
+    Codes are always generated (even when paired) so that re-pairing with a
+    valid code is possible.  Codes are only printed to stdout when the device
+    is unpaired or when the paired controller has gone stale (no authenticated
+    requests in ``_STALE_TIMEOUT`` seconds).
+    """
     global _current_code, _timer
-    if _paired:
-        return
     with _code_lock:
         _current_code = str(secrets.randbelow(1_000_000)).zfill(6)
         code = _current_code
         _timer = threading.Timer(_CODE_INTERVAL, _rotate)
         _timer.daemon = True
         _timer.start()
-    _print_code(code)
+    if not _paired:
+        _print_code(code)
+    elif _is_stale():
+        print("  [ STALE ] No controller activity — pairing codes resumed.")
+        _print_code(code)
     logger.debug("Pairing code rotated")
 
 
@@ -91,20 +102,36 @@ def is_paired() -> bool:
     return _paired
 
 
+def touch() -> None:
+    """Record that an authenticated request was received.
+
+    Called by the auth middleware on every successful Bearer-token validation.
+    Resets the staleness timer so the device knows its controller is still active.
+    """
+    global _last_auth_time
+    _last_auth_time = time.monotonic()
+
+
+def _is_stale() -> bool:
+    """Return True if paired but no authenticated requests in ``_STALE_TIMEOUT``."""
+    if not _paired or _last_auth_time == 0.0:
+        return False
+    return (time.monotonic() - _last_auth_time) > _STALE_TIMEOUT
+
+
 def set_paired() -> None:
-    """Mark this device as paired. Stops code rotation."""
+    """Mark this device as paired. Code rotation continues silently."""
     global _paired
     _paired = True
-    stop_rotation()
-    print("  [ PAIRED ] Pairing codes disabled.")
-    logger.info("Device paired — pairing codes disabled")
+    print("  [ PAIRED ] Pairing codes suppressed (codes still rotate internally).")
+    logger.info("Device paired — pairing code printing suppressed")
 
 
 def set_unpaired() -> None:
-    """Clear the paired state. Resumes code rotation."""
-    global _paired, _started
+    """Clear the paired state. Resumes printing codes to stdout."""
+    global _paired
     _paired = False
-    _started = False  # Allow start_rotation() to re-enter
-    start_rotation()
+    # Rotation is already running (codes rotate even when paired), so just
+    # flip the flag — the next _rotate() call will print the code.
     print("  [ UNPAIRED ] Pairing codes re-enabled.")
     logger.info("Device unpaired — pairing codes re-enabled")

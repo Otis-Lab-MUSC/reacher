@@ -55,6 +55,9 @@ async def require_api_key(
 ) -> None:
     """FastAPI dependency that enforces Bearer token auth on /api/* routes."""
     if credentials is not None and credentials.credentials == API_KEY:
+        # Record activity so the pairing module knows the controller is alive.
+        from ... import pairing
+        pairing.touch()
         return
     raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
