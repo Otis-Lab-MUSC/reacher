@@ -263,6 +263,19 @@ class FirmwareUploader:
             hex_path = self.get_hex_path(paradigm, board)
         profile = get_board_profile(board)
 
+        # Pre-flight: verify avrdude is reachable before spawning subprocess
+        if os.path.isabs(self.avrdude_path):
+            if not os.path.isfile(self.avrdude_path):
+                raise RuntimeError(
+                    f"avrdude not found at configured path: {self.avrdude_path}"
+                )
+        else:
+            if not shutil.which(self.avrdude_path):
+                raise RuntimeError(
+                    "avrdude not found in PATH. Install it with: "
+                    "sudo apt-get install avrdude"
+                )
+
         cmd = [
             self.avrdude_path,
             *profile.avrdude_args,

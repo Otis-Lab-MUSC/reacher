@@ -91,7 +91,11 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
     except FileNotFoundError as e:
         _logger.error("Firmware file not found for session %s: %s", session_id, e)
         sm.set_state(session_id, "idle")
-        raise HTTPException(status_code=404, detail="Firmware file not found")
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        _logger.error("Upload tool error for session %s: %s", session_id, e)
+        sm.set_state(session_id, "idle")
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         _logger.error("Firmware upload failed for session %s: %s", session_id, e, exc_info=True)
         sm.set_state(session_id, "idle")

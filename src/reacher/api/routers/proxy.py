@@ -151,8 +151,16 @@ async def proxy_request(device_id: str, rest_path: str, request: Request) -> Res
                     body = json.dumps(payload).encode()
                     headers["Content-Type"] = "application/json"
                     logger.info("Injected hex_data for %s/%s into proxied firmware upload", board, paradigm)
-                except (FileNotFoundError, ValueError):
-                    pass  # local hex not available — let remote try its own resolution
+                except FileNotFoundError:
+                    logger.warning(
+                        "Proxy hex enrichment skipped for %s/%s — hex file not found locally",
+                        board, paradigm,
+                    )
+                except ValueError as exc:
+                    logger.warning(
+                        "Proxy hex enrichment skipped for %s/%s — %s",
+                        board, paradigm, exc,
+                    )
         except (json.JSONDecodeError, KeyError):
             pass  # not JSON or unexpected shape — forward as-is
 
