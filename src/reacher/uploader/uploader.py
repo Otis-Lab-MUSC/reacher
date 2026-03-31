@@ -36,32 +36,36 @@ def _frozen_base() -> Optional[str]:
 def _fetch_hex_from_github() -> Optional[str]:
     """Download all hex files from GitHub and cache them in ~/.reacher/hex/.
 
+    The ``reacher-firmware`` repo uses a **flat** layout (``hex/{paradigm}.hex``)
+    and currently only compiles for UNO.  Downloaded files are stored in the
+    board-aware local cache at ``~/.reacher/hex/uno/{paradigm}.hex``.
+
     Returns the cache directory path on success, None if fetching is disabled
     (``REACHER_SKIP_HEX_FETCH=1``) or if all downloads fail.
     """
     if os.getenv("REACHER_SKIP_HEX_FETCH"):
         return None
 
-    boards = ("uno", "mega")
+    # The repo only has flat-layout UNO hex files — store into uno/ subdir.
+    board_dir = os.path.join(_HEX_CACHE_DIR, "uno")
+    os.makedirs(board_dir, exist_ok=True)
+
     failed = 0
     total = 0
 
-    for board in boards:
-        board_dir = os.path.join(_HEX_CACHE_DIR, board)
-        os.makedirs(board_dir, exist_ok=True)
-        for paradigm in PARADIGMS:
-            dest = os.path.join(board_dir, f"{paradigm}.hex")
-            if os.path.isfile(dest):
-                # Already cached — skip download
-                continue
-            url = f"{_FIRMWARE_RAW_BASE}/{board}/{paradigm}.hex"
-            total += 1
-            try:
-                urllib.request.urlretrieve(url, dest)
-                logger.info("Fetched firmware hex: %s/%s.hex", board, paradigm)
-            except Exception as exc:
-                failed += 1
-                logger.warning("Could not fetch %s/%s.hex from GitHub: %s", board, paradigm, exc)
+    for paradigm in PARADIGMS:
+        dest = os.path.join(board_dir, f"{paradigm}.hex")
+        if os.path.isfile(dest):
+            # Already cached — skip download
+            continue
+        url = f"{_FIRMWARE_RAW_BASE}/{paradigm}.hex"
+        total += 1
+        try:
+            urllib.request.urlretrieve(url, dest)
+            logger.info("Fetched firmware hex: uno/%s.hex", paradigm)
+        except Exception as exc:
+            failed += 1
+            logger.warning("Could not fetch %s.hex from GitHub: %s", paradigm, exc)
 
     if total > 0 and failed == total:
         # Every attempted download failed — don't return a broken cache dir
