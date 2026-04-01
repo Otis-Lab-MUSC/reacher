@@ -18,6 +18,7 @@ pairing and session panels are unavailable.
 
 import argparse
 import asyncio
+import logging
 import os
 import time
 from pathlib import Path
@@ -30,6 +31,9 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+logger = logging.getLogger(__name__)
+_CRASH_LOG = Path("/tmp/reacher-monitor.log")
 
 _DEFAULT_PORT = int(os.getenv("REACHER_PORT", "6229"))
 _DEFAULT_URL = f"http://localhost:{_DEFAULT_PORT}"
@@ -221,14 +225,9 @@ async def _poll(state: _State, base_url: str, api_key: str, interval: float) -> 
 
 async def _run(base_url: str, api_key: str, refresh: float) -> None:
     state = _State()
-    console = Console()
-
-    if not api_key:
-        console.print(
-            "[yellow]Warning:[/yellow] No API key found — pairing and session panels will be empty.\n"
-            f"  Set [bold]REACHER_API_KEY[/bold] or ensure [dim]{_API_KEY_FILE}[/dim] exists."
-        )
-        await asyncio.sleep(2)
+    # force_terminal=True ensures rich renders even on bare /dev/tty1 where
+    # capability detection may fail.
+    console = Console(force_terminal=True)
 
     poll_task = asyncio.create_task(_poll(state, base_url, api_key, refresh))
 
@@ -251,6 +250,11 @@ async def _run(base_url: str, api_key: str, refresh: float) -> None:
 
 
 def main() -> None:
+    # Ensure TERM is set — bare tty1 after autologin may lack it, which causes
+    # rich (and curses) to fail immediately.
+    if not os.environ.get("TERM"):
+        os.environ["TERM"] = "linux"
+
     parser = argparse.ArgumentParser(
         description="Live terminal dashboard for a REACHER API instance.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -269,10 +273,26 @@ def main() -> None:
         help="Polling interval in seconds",
     )
     args = parser.parse_args()
-    try:
-        asyncio.run(_run(args.url, _load_api_key(), args.refresh))
-    except KeyboardInterrupt:
-        pass
+
+    # Retry loop — if the dashboard crashes (e.g. terminal not ready yet after
+    # boot), log the error and retry after a delay instead of exiting
+    # immediately, which would trigger a getty restart storm.
+    while True:
+        try:
+            asyncio.run(_run(args.url, _load_api_key(), args.refresh))
+            break  # clean exit (shouldn't happen normally)
+        except KeyboardInterrupt:
+            break
+        except Exception:
+            import traceback
+
+            msg = traceback.format_exc()
+            try:
+                _CRASH_LOG.write_text(f"{time.strftime('%Y-%m-%d %H:%M:%S')}\n{msg}\n")
+            except OSError:
+                pass
+            # Wait before retrying to avoid rapid restart loops
+            time.sleep(5)
 
 
 if __name__ == "__main__":
