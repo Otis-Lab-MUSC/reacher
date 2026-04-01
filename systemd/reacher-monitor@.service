@@ -1,13 +1,15 @@
 [Unit]
 Description=REACHER Monitor (tty1 display)
-# Start after the API server is up
+# Start after the API server is up; stop any getty that owns tty1
 After=reacher@%i.service
 Requires=reacher@%i.service
+Conflicts=getty@tty1.service
 
 [Service]
 Type=simple
 User=%i
 Environment="PATH=/home/%i/.local/bin:/usr/local/bin:/usr/bin:/bin"
+SupplementaryGroups=tty
 ExecStart=reacher-monitor
 Restart=always
 RestartSec=3
