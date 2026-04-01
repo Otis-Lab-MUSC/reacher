@@ -67,6 +67,21 @@ async def claim_pairing_code(body: ClaimRequest, request: Request) -> dict:
     return {"api_key": API_KEY}
 
 
+@router.get("/status", dependencies=[Depends(require_api_key)])
+async def pairing_status() -> dict:
+    """Return the current pairing state, code, and seconds until rotation.
+
+    Intended for local monitoring tools (e.g. reacher-monitor) running on the
+    same device.  Requires Bearer authentication so the code is not exposed to
+    unauthenticated network peers.
+    """
+    return {
+        "paired": pairing.is_paired(),
+        "code": pairing.get_current_code(),
+        "seconds_until_rotation": pairing.seconds_until_rotation(),
+    }
+
+
 @router.post("/unpair", dependencies=[Depends(require_api_key)])
 async def unpair(request: Request) -> dict:
     """Clear the paired state, allowing new pairing attempts.

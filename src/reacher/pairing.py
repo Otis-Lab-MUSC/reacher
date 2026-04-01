@@ -20,6 +20,7 @@ _timer: threading.Timer | None = None
 _started = False
 _paired = False
 _last_auth_time: float = 0.0
+_rotation_start: float = 0.0
 
 
 def _print_code(code: str) -> None:
@@ -48,9 +49,10 @@ def _rotate() -> None:
     is unpaired or when the paired controller has gone stale (no authenticated
     requests in ``_STALE_TIMEOUT`` seconds).
     """
-    global _current_code, _timer
+    global _current_code, _timer, _rotation_start
     with _code_lock:
         _current_code = str(secrets.randbelow(1_000_000)).zfill(6)
+        _rotation_start = time.monotonic()
         code = _current_code
         _timer = threading.Timer(_CODE_INTERVAL, _rotate)
         _timer.daemon = True
@@ -86,6 +88,13 @@ def get_current_code() -> str:
     """Return the current pairing code (6 decimal digits, zero-padded)."""
     with _code_lock:
         return _current_code
+
+
+def seconds_until_rotation() -> float:
+    """Return the number of seconds remaining until the next code rotation."""
+    with _code_lock:
+        elapsed = time.monotonic() - _rotation_start
+    return max(0.0, _CODE_INTERVAL - elapsed)
 
 
 def verify_code(candidate: str) -> bool:
