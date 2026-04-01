@@ -52,8 +52,8 @@ _STATE_STYLES: dict[str, str] = {
 # Mouse animation — shown when a session is running
 # ---------------------------------------------------------------------------
 
-_MOUSE_RIGHT = "<:)~~"
-_MOUSE_LEFT = "~~(:>"
+_MOUSE_RIGHT = "~~(:>"
+_MOUSE_LEFT = "<:)~~"
 _MOUSE_TRACK = 16  # character positions of travel
 
 

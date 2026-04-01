@@ -6,11 +6,15 @@ the API key through mDNS advertisements or QR codes.
 """
 
 import logging
+import os
 import secrets
 import threading
 import time
 
 logger = logging.getLogger(__name__)
+
+_PAIRED_DIR = os.path.expanduser("~/.reacher")
+_PAIRED_FILE = os.path.join(_PAIRED_DIR, "paired")
 
 _CODE_INTERVAL = 300  # seconds (5 minutes)
 _STALE_TIMEOUT = 600  # seconds (10 minutes) — resume printing codes if no auth activity
@@ -21,6 +25,14 @@ _started = False
 _paired = False
 _last_auth_time: float = 0.0
 _rotation_start: float = 0.0
+
+
+def load() -> None:
+    """Load persisted paired state from disk. Called at startup before start_rotation()."""
+    global _paired
+    _paired = os.path.isfile(_PAIRED_FILE)
+    if _paired:
+        logger.info("Loaded paired state from %s", _PAIRED_FILE)
 
 
 def _print_code(code: str) -> None:
@@ -132,6 +144,13 @@ def set_paired() -> None:
     """Mark this device as paired. Code rotation continues silently."""
     global _paired
     _paired = True
+    try:
+        os.makedirs(_PAIRED_DIR, exist_ok=True)
+        with open(_PAIRED_FILE, "w") as f:
+            f.write("")
+        os.chmod(_PAIRED_FILE, 0o600)
+    except OSError:
+        logger.warning("Could not persist paired state to %s", _PAIRED_FILE, exc_info=True)
     print("  [ PAIRED ] Pairing codes suppressed (codes still rotate internally).")
     logger.info("Device paired — pairing code printing suppressed")
 
@@ -140,6 +159,12 @@ def set_unpaired() -> None:
     """Clear the paired state. Resumes printing codes to stdout."""
     global _paired
     _paired = False
+    try:
+        os.remove(_PAIRED_FILE)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.warning("Could not remove paired state file %s", _PAIRED_FILE, exc_info=True)
     # Rotation is already running (codes rotate even when paired), so just
     # flip the flag — the next _rotate() call will print the code.
     print("  [ UNPAIRED ] Pairing codes re-enabled.")

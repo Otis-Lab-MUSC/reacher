@@ -179,7 +179,12 @@ def register_peer(device_id: str, host: str, port: int, hostname: str) -> None:
 
 
 def _get_local_ip() -> str | None:
-    """Return the primary outbound IPv4 address of this machine."""
+    """Return the primary outbound IPv4 address of this machine.
+
+    Used for mDNS advertisement and broker registration where a single
+    representative IP is needed.  For subnet scanning, use
+    ``_get_all_local_ips()`` instead.
+    """
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 80))  # no traffic is sent
@@ -188,30 +193,82 @@ def _get_local_ip() -> str | None:
         return None
 
 
+def _get_all_local_ips() -> list[str]:
+    """Return all non-loopback IPv4 addresses on this machine.
+
+    Uses ``fcntl.ioctl(SIOCGIFADDR)`` per interface on Linux, falling
+    back to ``_get_local_ip()`` on failure.
+    """
+    try:
+        import fcntl
+        import struct
+
+        SIOCGIFADDR = 0x8915
+        ips: list[str] = []
+        for _idx, name in socket.if_nameindex():
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                    result = fcntl.ioctl(
+                        s.fileno(),
+                        SIOCGIFADDR,
+                        struct.pack("256s", name.encode("utf-8")[:15]),
+                    )
+                ip_str = socket.inet_ntoa(result[20:24])
+                if not ip_str.startswith("127."):
+                    ips.append(ip_str)
+            except OSError:
+                continue
+        if ips:
+            return ips
+    except Exception:
+        logger.debug("Interface enumeration failed, falling back", exc_info=True)
+
+    ip = _get_local_ip()
+    return [ip] if ip else []
+
+
+_SCAN_CONCURRENCY = 50
+
+
 async def scan_once(http_client, port: int, own_device_id: str) -> None:  # noqa: ANN001
-    """Probe every host on the local /24 subnet for REACHER devices.
+    """Probe every host on all local /24 subnets for REACHER devices.
 
     Results are stored in ``_scanned_peers`` and merged into ``get_peers()``.
     Skips ``own_device_id`` to avoid self-discovery.
     """
-    local_ip = _get_local_ip()
-    if not local_ip:
+    local_ips = _get_all_local_ips()
+    if not local_ips:
+        logger.debug("No local IPs found — skipping subnet scan")
         return
-    prefix = ".".join(local_ip.split(".")[:3])
-    hosts = [f"{prefix}.{i}" for i in range(1, 255)]
+
+    prefixes: set[str] = set()
+    for ip in local_ips:
+        prefixes.add(".".join(ip.split(".")[:3]))
+
+    own_ips = set(local_ips)
+    hosts = [
+        f"{prefix}.{i}"
+        for prefix in sorted(prefixes)
+        for i in range(1, 255)
+        if f"{prefix}.{i}" not in own_ips
+    ]
+
+    logger.info("Subnet scan: probing %d hosts across %d subnet(s)", len(hosts), len(prefixes))
+    semaphore = asyncio.Semaphore(_SCAN_CONCURRENCY)
 
     async def probe(host: str):
-        try:
-            resp = await http_client.get(f"http://{host}:{port}/health", timeout=1.5)
-            h = resp.json()
-            if h.get("service") == "reacher" and h.get("device_id") != own_device_id:
-                return h["device_id"], {
-                    "host": host,
-                    "port": port,
-                    "hostname": h.get("hostname", host),
-                }
-        except Exception:
-            pass
+        async with semaphore:
+            try:
+                resp = await http_client.get(f"http://{host}:{port}/health", timeout=1.5)
+                h = resp.json()
+                if h.get("service") == "reacher" and h.get("device_id") != own_device_id:
+                    return h["device_id"], {
+                        "host": host,
+                        "port": port,
+                        "hostname": h.get("hostname", host),
+                    }
+            except Exception:
+                pass
 
     results = await asyncio.gather(*[probe(h) for h in hosts])
     found = {r[0]: r[1] for r in results if r}
@@ -219,7 +276,9 @@ async def scan_once(http_client, port: int, own_device_id: str) -> None:  # noqa
         _scanned_peers.clear()
         _scanned_peers.update(found)
     if found:
-        logger.debug("Subnet scan found %d REACHER peer(s)", len(found))
+        logger.info("Subnet scan found %d peer(s)", len(found))
+    else:
+        logger.debug("Subnet scan found no peers")
 
 
 async def run_scan_loop(http_client, port: int, own_device_id: str) -> None:  # noqa: ANN001

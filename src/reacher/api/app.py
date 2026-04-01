@@ -177,6 +177,10 @@ async def lifespan(app: FastAPI):
     # Load previously paired machines from disk
     machines.load()
 
+    # Restore persisted paired state before starting code rotation so the
+    # first _rotate() call respects whether this device is already paired.
+    pairing.load()
+
     # Only start pairing code rotation on peripheral devices (no frontend bundled).
     # The main Labrynth machine has a bundled frontend and should not show codes.
     if not _resolve_static_dir():
@@ -308,6 +312,7 @@ def main():
     # The main Labrynth machine has the frontend and discovers Pis, not the reverse.
     # start_rotation() already prints the code via _rotate(); no duplicate print needed.
     if not _resolve_static_dir():
+        pairing.load()
         pairing.start_rotation()
     print(f"  API key      : {API_KEY}")
     uvicorn.run(
