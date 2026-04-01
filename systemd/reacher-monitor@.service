@@ -8,7 +8,7 @@ Conflicts=getty@tty1.service
 [Service]
 Type=simple
 User=%i
-Environment="PATH=/home/%i/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PATH=/home/%i/.local/bin:/usr/local/bin:/usr/bin:/bin" "TERM=linux"
 SupplementaryGroups=tty
 ExecStart=reacher-monitor
 Restart=always

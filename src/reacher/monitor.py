@@ -25,7 +25,7 @@ from pathlib import Path
 
 import httpx
 from rich import box
-from rich.console import Console
+from rich.console import Console, Group
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
@@ -47,6 +47,23 @@ _STATE_STYLES: dict[str, str] = {
     "connected": "blue",
     "idle": "dim",
 }
+
+# ---------------------------------------------------------------------------
+# Mouse animation — shown when a session is running
+# ---------------------------------------------------------------------------
+
+_MOUSE_RIGHT = "<:)~~"
+_MOUSE_LEFT = "~~(:>"
+_MOUSE_TRACK = 16  # character positions of travel
+
+
+def _mouse_frame(tick: int) -> str:
+    """Return one frame of the bouncing-mouse animation."""
+    period = _MOUSE_TRACK * 2 - 2  # 30 ticks per full bounce
+    cycle = tick % period if period > 0 else 0
+    if cycle < _MOUSE_TRACK:
+        return " " * cycle + _MOUSE_RIGHT
+    return " " * (period - cycle) + _MOUSE_LEFT
 
 
 # ---------------------------------------------------------------------------
@@ -70,13 +87,14 @@ def _fmt_countdown(seconds: float) -> str:
 # ---------------------------------------------------------------------------
 
 class _State:
-    __slots__ = ("health", "pairing", "sessions", "error")
+    __slots__ = ("health", "pairing", "sessions", "error", "frame")
 
     def __init__(self) -> None:
         self.health: dict | None = None
         self.pairing: dict | None = None
         self.sessions: list[dict] = []
         self.error: str = ""
+        self.frame: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -139,29 +157,35 @@ def _pairing_panel(state: _State) -> Panel:
 
 
 def _sessions_panel(state: _State) -> Panel:
+    any_running = any(s.get("state") == "running" for s in state.sessions)
+
     if not state.sessions:
-        body = Text("\n  No active sessions.", style="dim")
-        return Panel(body, title="[bold]Sessions[/bold]", box=box.ROUNDED, padding=(0, 1))
+        body: object = Text("\n  No active sessions.", style="dim")
+    else:
+        t = Table(box=box.SIMPLE_HEAD, expand=True, show_edge=False, padding=(0, 1))
+        t.add_column("Session ID", style="dim", no_wrap=True, min_width=12)
+        t.add_column("Port", no_wrap=True)
+        t.add_column("Board", no_wrap=True)
+        t.add_column("Paradigm")
+        t.add_column("State")
 
-    t = Table(box=box.SIMPLE_HEAD, expand=True, show_edge=False, padding=(0, 1))
-    t.add_column("Session ID", style="dim", no_wrap=True, min_width=12)
-    t.add_column("Port", no_wrap=True)
-    t.add_column("Board", no_wrap=True)
-    t.add_column("Paradigm")
-    t.add_column("State")
+        for s in state.sessions:
+            state_str = s.get("state", "?")
+            style = _STATE_STYLES.get(state_str, "white")
+            t.add_row(
+                s.get("session_id", "?")[:12],
+                s.get("port", "?"),
+                s.get("board") or "—",
+                s.get("paradigm") or "—",
+                Text(state_str, style=style),
+            )
+        body = t
 
-    for s in state.sessions:
-        state_str = s.get("state", "?")
-        style = _STATE_STYLES.get(state_str, "white")
-        t.add_row(
-            s.get("session_id", "?")[:12],
-            s.get("port", "?"),
-            s.get("board") or "—",
-            s.get("paradigm") or "—",
-            Text(state_str, style=style),
-        )
+    if any_running:
+        mouse = Text("  " + _mouse_frame(state.frame), style="dim green")
+        body = Group(body, Text(), mouse)
 
-    return Panel(t, title="[bold]Sessions[/bold]", box=box.ROUNDED, padding=(0, 0))
+    return Panel(body, title="[bold]Sessions[/bold]", box=box.ROUNDED, padding=(0, 0))
 
 
 def _build_display(state: _State, base_url: str) -> Layout:
@@ -240,6 +264,7 @@ async def _run(base_url: str, api_key: str, refresh: float) -> None:
         try:
             while True:
                 live.update(_build_display(state, base_url))
+                state.frame += 1
                 await asyncio.sleep(0.5)
         finally:
             poll_task.cancel()
