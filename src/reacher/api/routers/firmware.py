@@ -2,14 +2,16 @@
 
 import asyncio
 import base64
+import hashlib
 import logging
+import os
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from ...uploader.boards import DEFAULT_BOARD, SUPPORTED_BOARDS
-from ...uploader.uploader import FirmwareUploader
+from ...uploader.uploader import PARADIGMS, FirmwareUploader
 from . import websocket as ws_mod
 
 _MAX_HEX_SIZE = 200 * 1024  # 200 KB — hex files are typically 15-40 KB
@@ -129,3 +131,28 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
         "board": body.board,
         "firmware_info": instance.get_firmware_information(),
     }
+
+
+@router.get("/diagnostics")
+async def firmware_diagnostics(board: str = Query(DEFAULT_BOARD)):
+    """Return diagnostic information about hex file resolution for debugging."""
+    if board.lower() not in SUPPORTED_BOARDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported board: {board!r}. Supported: {SUPPORTED_BOARDS}",
+        )
+    result: dict = {
+        "resolved_hex_dir": _uploader.hex_dir,
+        "board": board,
+        "paradigms": {},
+    }
+    for p in PARADIGMS:
+        try:
+            path = _uploader.get_hex_path(p, board)
+            size = os.path.getsize(path)
+            with open(path, "rb") as f:
+                sha = hashlib.sha256(f.read()).hexdigest()[:16]
+            result["paradigms"][p] = {"path": path, "size": size, "sha256_prefix": sha}
+        except (FileNotFoundError, ValueError) as exc:
+            result["paradigms"][p] = {"error": str(exc)}
+    return result

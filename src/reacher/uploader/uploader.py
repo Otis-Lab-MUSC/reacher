@@ -5,11 +5,13 @@ spawns avrdude as a subprocess, and streams progress to a callback.
 """
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
 import shutil
 import sys
+import time
 import urllib.request
 import warnings
 from typing import Callable, Dict, List, Optional
@@ -26,6 +28,7 @@ _FIRMWARE_REPO = "Otis-Lab-MUSC/reacher-firmware"
 _FIRMWARE_BRANCH = "develop"  # Will migrate to "main" in a future pass
 _FIRMWARE_RAW_BASE = f"https://raw.githubusercontent.com/{_FIRMWARE_REPO}/{_FIRMWARE_BRANCH}/hex"
 _HEX_CACHE_DIR = os.path.expanduser("~/.reacher/hex")
+_CACHE_MAX_AGE_S = 86400  # 24 hours — re-download cached hex files older than this
 
 
 def _dir_has_hex(path: str) -> bool:
@@ -75,8 +78,10 @@ def _fetch_hex_from_github() -> Optional[str]:
     for paradigm in PARADIGMS:
         dest = os.path.join(board_dir, f"{paradigm}.hex")
         if os.path.isfile(dest):
-            # Already cached — skip download
-            continue
+            age = time.time() - os.path.getmtime(dest)
+            if age < _CACHE_MAX_AGE_S:
+                continue  # Fresh enough
+            logger.info("Cached %s.hex is %.1fh old — re-downloading", paradigm, age / 3600)
         url = f"{_FIRMWARE_RAW_BASE}/{paradigm}.hex"
         total += 1
         try:
@@ -109,31 +114,43 @@ class FirmwareUploader:
         base = _frozen_base()
         if base:
             return os.path.join(base, "hex")
-        # Dev mode: check env var first, then CWD-relative, then home fallback
+        # Dev mode: check env var first
         env_dir = os.environ.get("REACHER_HEX_DIR", "")
         if env_dir and os.path.isdir(env_dir):
+            logger.info("Hex dir from REACHER_HEX_DIR: %s", env_dir)
             return env_dir
 
-        # Package data: hex files bundled inside the reacher package
+        # Package data: hex files bundled inside the reacher package.
+        # This is the CANONICAL source — checked BEFORE CWD-relative paths
+        # to prevent stale submodules or old checkouts from shadowing fixes.
         pkg_hex = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hex")
 
         candidates = [
+            # Package data (pip-installed with hex files as package data) — CANONICAL
+            ("package-data", pkg_hex),
             # CWD-relative (running from labrynth/ or a project root)
-            os.path.join(os.getcwd(), "firmware", "hex"),
+            ("cwd/firmware/hex", os.path.join(os.getcwd(), "firmware", "hex")),
             # Monorepo root (running `reacher` from REACHER/)
-            os.path.join(os.getcwd(), "labrynth", "firmware", "hex"),
-            os.path.join(os.getcwd(), "reacher-firmware", "hex"),
-            # Package data (pip-installed with hex files as package data)
-            pkg_hex,
+            ("cwd/labrynth/firmware/hex", os.path.join(os.getcwd(), "labrynth", "firmware", "hex")),
+            ("cwd/reacher-firmware/hex", os.path.join(os.getcwd(), "reacher-firmware", "hex")),
             # Home directory fallback
-            os.path.expanduser("~/REACHER/hex"),
+            ("~/REACHER/hex", os.path.expanduser("~/REACHER/hex")),
             # GitHub-fetched cache (populated by _fetch_hex_from_github)
-            _HEX_CACHE_DIR,
+            ("~/.reacher/hex", _HEX_CACHE_DIR),
         ]
-        for c in candidates:
+
+        chosen = None
+        for label, c in candidates:
             norm = os.path.normpath(c)
-            if os.path.isdir(norm) and _dir_has_hex(norm):
-                return norm
+            exists = os.path.isdir(norm)
+            has_hex = _dir_has_hex(norm) if exists else False
+            logger.debug("Hex candidate %-30s exists=%-5s has_hex=%-5s path=%s", label, exists, has_hex, norm)
+            if chosen is None and exists and has_hex:
+                chosen = (label, norm)
+
+        if chosen:
+            logger.info("Resolved hex dir: [%s] %s", chosen[0], chosen[1])
+            return chosen[1]
 
         # No local hex directory found — try fetching from GitHub once.
         # This handles remote Pis that only have `pip install reacher` with no
@@ -143,7 +160,9 @@ class FirmwareUploader:
             logger.info("Using GitHub-fetched hex files from %s", fetched)
             return fetched
 
-        return os.path.normpath(candidates[0])
+        fallback = os.path.normpath(candidates[0][1])
+        logger.warning("No hex directory found; returning default: %s", fallback)
+        return fallback
 
     @staticmethod
     def _resolve_avrdude() -> str:
@@ -262,6 +281,18 @@ class FirmwareUploader:
         if hex_path is None:
             hex_path = self.get_hex_path(paradigm, board)
         profile = get_board_profile(board)
+
+        # Log hex file identity for deployment auditing
+        try:
+            hex_size = os.path.getsize(hex_path)
+            with open(hex_path, "rb") as hf:
+                hex_hash = hashlib.sha256(hf.read()).hexdigest()[:16]
+            logger.info(
+                "Firmware hex: %s  board=%s  paradigm=%s  size=%d  sha256=%s",
+                hex_path, board, paradigm, hex_size, hex_hash,
+            )
+        except OSError as exc:
+            logger.warning("Could not read hex file metadata: %s", exc)
 
         # Pre-flight: verify avrdude is reachable before spawning subprocess
         if os.path.isabs(self.avrdude_path):
