@@ -49,6 +49,9 @@ async def send_command(session_id: str, body: CommandRequest, request: Request):
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    if info.state == "idle":
+        raise HTTPException(status_code=409, detail="Session not connected — connect to a serial port first")
+
     # Sliding-window rate limit
     now = time.monotonic()
     window = _command_timestamps[session_id]
