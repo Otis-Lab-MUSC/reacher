@@ -63,6 +63,14 @@ async def send_command(session_id: str, body: CommandRequest, request: Request):
 
     spec = COMMAND_REGISTRY[body.code]
 
+    if spec.deprecated:
+        raise HTTPException(status_code=400, detail=f"Command {spec.name} is deprecated")
+    if info.paradigm and spec.paradigms and info.paradigm.lower() not in spec.paradigms:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Command {spec.name} not available for {info.paradigm} paradigm",
+        )
+
     # Validate value against hardware-safe ranges
     if body.value is not None and spec.payload_key is not None:
         bounds = _VALUE_RANGES.get(spec.payload_key)
