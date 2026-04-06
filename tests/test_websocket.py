@@ -6,6 +6,9 @@ import time
 
 import pytest
 from unittest.mock import AsyncMock, Mock, patch
+from fastapi.testclient import TestClient
+from reacher.api.app import create_app
+from reacher.api.middleware.auth import API_KEY
 
 import reacher.api.routers.websocket as ws
 
@@ -111,3 +114,67 @@ class TestBroadcastWorkerF004:
         warning_msgs = [p for p in sent_payloads if p.get("type") == "warning"]
         assert len(warning_msgs) == 1
         assert warning_msgs[0]["data"]["dropped_count"] == 5
+
+
+AUTH_HEADER = {"Authorization": f"Bearer {API_KEY}"}
+
+
+class TestBehaviorSinceEndpoint:
+    """Verify GET /behavior?since=N returns correct slices for event recovery."""
+
+    @pytest.fixture
+    def api_client(self):
+        with patch("reacher.session_manager.REACHER") as MockReacher, patch("os.makedirs"):
+            mock_instance = Mock()
+            mock_instance.program_running = False
+            mock_instance.ser = Mock()
+            mock_instance.ser.is_open = False
+            mock_instance.get_firmware_information.return_value = {}
+            mock_instance.get_behavior_data.return_value = []
+            mock_instance.get_frame_data.return_value = []
+            mock_instance.get_frame_timestamps_count.return_value = 0
+            mock_instance.get_hardware_settings.return_value = []
+            mock_instance.get_program_running.return_value = False
+            mock_instance.get_filename.return_value = None
+            mock_instance.get_data_destination.return_value = None
+            mock_instance.get_detected_paradigm.return_value = None
+            mock_instance.make_destination_folder.return_value = "/tmp/reacher_test"
+            MockReacher.return_value = mock_instance
+            app = create_app()
+            with TestClient(app) as c:
+                yield c
+
+    def _create_session(self, api_client):
+        resp = api_client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
+        return resp.json()["session_id"]
+
+    def test_since_returns_slice(self, api_client):
+        """since=N returns behavior_data[N:] with correct total."""
+        sid = self._create_session(api_client)
+        instance = api_client.app.state.session_manager.get_instance(sid)
+        events = [
+            {"device": "RH_LEVER", "event": "ACTIVE_PRESS", "start_timestamp": i, "end_timestamp": i}
+            for i in range(5)
+        ]
+        instance.get_behavior_data.return_value = list(events)
+
+        resp = api_client.get(f"/api/data/{sid}/behavior?since=3", headers=AUTH_HEADER)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["data"]) == 2
+        assert body["total"] == 5
+
+    def test_since_beyond_length_returns_empty(self, api_client):
+        """since beyond list length returns empty data with correct total."""
+        sid = self._create_session(api_client)
+        instance = api_client.app.state.session_manager.get_instance(sid)
+        events = [
+            {"device": "PUMP", "event": "INFUSION", "start_timestamp": 0, "end_timestamp": 0}
+        ]
+        instance.get_behavior_data.return_value = list(events)
+
+        resp = api_client.get(f"/api/data/{sid}/behavior?since=99", headers=AUTH_HEADER)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["data"]) == 0
+        assert body["total"] == 1

@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 PORT = int(os.getenv("REACHER_PORT", "6229"))
 HOST = os.getenv("REACHER_HOST", "0.0.0.0")
+WS_PING_INTERVAL = int(os.getenv("REACHER_WS_PING_INTERVAL", "20"))
+WS_PING_TIMEOUT = int(os.getenv("REACHER_WS_PING_TIMEOUT", "60"))
 
 
 def _open_browser(url: str) -> None:
@@ -320,8 +322,8 @@ def main():
         host=HOST,
         port=PORT,
         log_level="info",
-        ws_ping_interval=15,
-        ws_ping_timeout=30,
+        ws_ping_interval=WS_PING_INTERVAL,
+        ws_ping_timeout=WS_PING_TIMEOUT,
     )
 
 
