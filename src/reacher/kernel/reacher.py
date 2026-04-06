@@ -767,19 +767,21 @@ class REACHER:
                 f.flush()
                 os.fsync(f.fileno())
 
-            # frame_timestamps.csv
-            ft_buf = io.StringIO()
-            ft_writer = csv.DictWriter(ft_buf, fieldnames=["frame_index", "timestamp_ms"])
-            ft_writer.writeheader()
-            for i, ts in enumerate(frame_timestamps):
-                ft_writer.writerow({"frame_index": i, "timestamp_ms": ts})
-            path = os.path.join(self.reacher_log_path, "frame_timestamps.csv")
-            with open(path, "w", newline="") as f:
-                f.write(ft_buf.getvalue())
-                f.flush()
-                os.fsync(f.fileno())
+            # frame_timestamps.csv — only when microscope data was captured
+            if frame_timestamps:
+                ft_buf = io.StringIO()
+                ft_writer = csv.DictWriter(ft_buf, fieldnames=["frame_index", "timestamp_ms"])
+                ft_writer.writeheader()
+                for i, ts in enumerate(frame_timestamps):
+                    ft_writer.writerow({"frame_index": i, "timestamp_ms": ts})
+                path = os.path.join(self.reacher_log_path, "frame_timestamps.csv")
+                with open(path, "w", newline="") as f:
+                    f.write(ft_buf.getvalue())
+                    f.flush()
+                    os.fsync(f.fileno())
 
-            self.logger.info("Auto-export complete: behavior_events.csv + frame_timestamps.csv")
+            export_files = "behavior_events.csv + frame_timestamps.csv" if frame_timestamps else "behavior_events.csv"
+            self.logger.info("Auto-export complete: %s", export_files)
         except Exception as e:
             # Fix: F-005 — Surface export failures to the frontend in real time
             self.logger.warning("Auto-export failed", exc_info=True)

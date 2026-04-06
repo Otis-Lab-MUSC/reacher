@@ -154,13 +154,14 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
             writer.writerow(out)
         zf.writestr("behavior_events.csv", csv_buf.getvalue())
 
-        # frame_timestamps.csv
-        ft_buf = io.StringIO()
-        ft_writer = csv.DictWriter(ft_buf, fieldnames=["frame_index", "timestamp_ms"])
-        ft_writer.writeheader()
-        for i, ts in enumerate(frame_timestamps):
-            ft_writer.writerow({"frame_index": i, "timestamp_ms": ts})
-        zf.writestr("frame_timestamps.csv", ft_buf.getvalue())
+        # frame_timestamps.csv — only when microscope data was captured
+        if frame_timestamps:
+            ft_buf = io.StringIO()
+            ft_writer = csv.DictWriter(ft_buf, fieldnames=["frame_index", "timestamp_ms"])
+            ft_writer.writeheader()
+            for i, ts in enumerate(frame_timestamps):
+                ft_writer.writerow({"frame_index": i, "timestamp_ms": ts})
+            zf.writestr("frame_timestamps.csv", ft_buf.getvalue())
 
         # arduino_config.json
         zf.writestr(
