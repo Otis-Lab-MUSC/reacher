@@ -121,6 +121,11 @@ class REACHER:
         self._DATA_WARNING_THRESHOLD = 100_000  # Warn when lists exceed this size
         self._data_warning_emitted: bool = False
 
+        # Segmentation state
+        self._segment_number: int = 0
+        self._cumulative_infusion_count: int = 0
+        self._segment_exports: List[str] = []
+
         # Program variables
         self.program_start_time: Optional[float] = None
         self.program_end_time: Optional[float] = None
@@ -737,37 +742,56 @@ class REACHER:
             except Exception:
                 self.logger.warning("Failed to close event log", exc_info=True)
 
+    def _export_segment(self, behavior: list, suffix: str = "") -> str:
+        """Write behavior_events{suffix}.csv to the session log directory.
+
+        Uses the full frame_data list for frame-index binary search so that
+        microscope frame indices remain continuous across splits.
+
+        Args:
+            behavior: Snapshot of behavior_data rows to export.
+            suffix: Optional filename suffix (e.g. "_001").
+        Returns:
+            Path to the written CSV file.
+        """
+        frame_data = self.get_frame_data()
+        frame_timestamps = sorted(int(ts) for ts in frame_data if ts)
+
+        csv_buf = io.StringIO()
+        fieldnames = ["device", "event", "start_timestamp", "end_timestamp", "start_frame_index", "end_frame_index"]
+        writer = csv.DictWriter(csv_buf, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in behavior:
+            start_ts = row.get("start_timestamp")
+            end_ts = row.get("end_timestamp")
+            start_fi = self._find_frame_index(frame_timestamps, int(start_ts)) if start_ts not in (None, "") else None
+            end_fi = self._find_frame_index(frame_timestamps, int(end_ts)) if end_ts not in (None, "") else None
+            out = {k: row.get(k, "") for k in ("device", "event", "start_timestamp", "end_timestamp")}
+            out["start_frame_index"] = start_fi if start_fi is not None else ""
+            out["end_frame_index"] = end_fi if end_fi is not None else ""
+            writer.writerow(out)
+        path = os.path.join(self.reacher_log_path, f"behavior_events{suffix}.csv")
+        with open(path, "w", newline="") as f:
+            f.write(csv_buf.getvalue())
+            f.flush()
+            os.fsync(f.fileno())
+        return path
+
     def _auto_export(self) -> None:
         """Write behavior_events.csv and frame_timestamps.csv to the session log directory.
 
         Called automatically on stop_program(). Failure never blocks shutdown.
+        If segments were split during the session, the remaining data is exported
+        with the next segment number suffix.
         """
         try:
             behavior = self.get_behavior_data()
-            frame_data = self.get_frame_data()
-            frame_timestamps = sorted(int(ts) for ts in frame_data if ts)
-
-            # behavior_events.csv
-            csv_buf = io.StringIO()
-            fieldnames = ["device", "event", "start_timestamp", "end_timestamp", "start_frame_index", "end_frame_index"]
-            writer = csv.DictWriter(csv_buf, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in behavior:
-                start_ts = row.get("start_timestamp")
-                end_ts = row.get("end_timestamp")
-                start_fi = self._find_frame_index(frame_timestamps, int(start_ts)) if start_ts not in (None, "") else None
-                end_fi = self._find_frame_index(frame_timestamps, int(end_ts)) if end_ts not in (None, "") else None
-                out = {k: row.get(k, "") for k in ("device", "event", "start_timestamp", "end_timestamp")}
-                out["start_frame_index"] = start_fi if start_fi is not None else ""
-                out["end_frame_index"] = end_fi if end_fi is not None else ""
-                writer.writerow(out)
-            path = os.path.join(self.reacher_log_path, "behavior_events.csv")
-            with open(path, "w", newline="") as f:
-                f.write(csv_buf.getvalue())
-                f.flush()
-                os.fsync(f.fileno())
+            suffix = f"_{self._segment_number + 1:03d}" if self._segment_number > 0 else ""
+            self._export_segment(behavior, suffix)
 
             # frame_timestamps.csv — only when microscope data was captured
+            frame_data = self.get_frame_data()
+            frame_timestamps = sorted(int(ts) for ts in frame_data if ts)
             if frame_timestamps:
                 ft_buf = io.StringIO()
                 ft_writer = csv.DictWriter(ft_buf, fieldnames=["frame_index", "timestamp_ms"])
@@ -780,7 +804,7 @@ class REACHER:
                     f.flush()
                     os.fsync(f.fileno())
 
-            export_files = "behavior_events.csv + frame_timestamps.csv" if frame_timestamps else "behavior_events.csv"
+            export_files = f"behavior_events{suffix}.csv + frame_timestamps.csv" if frame_timestamps else f"behavior_events{suffix}.csv"
             self.logger.info("Auto-export complete: %s", export_files)
         except Exception as e:
             # Fix: F-005 — Surface export failures to the frontend in real time
@@ -871,6 +895,9 @@ class REACHER:
         self.behavior_data = []
         self.frame_data = []
         self._infusion_count = 0
+        self._segment_number = 0
+        self._cumulative_infusion_count = 0
+        self._segment_exports = []
         self.paused_time = 0
         self.last_infusion_time = None
         if self.program_flag.is_set():
@@ -952,6 +979,83 @@ class REACHER:
         - `bool`: True if running and not paused, False otherwise.
         """
         return self.program_running and not self.program_flag.is_set()
+
+    def split_segment(self) -> dict:
+        """Export the current segment and reset buffers for the next segment.
+
+        Snapshots behavior_data, exports it as a numbered CSV, clears the
+        in-memory buffer and per-segment counters, and increments the segment
+        counter.  frame_data is NOT cleared — microscope frame indices remain
+        continuous across splits.
+
+        Returns:
+            Dict with segment_number and export_path.
+        """
+        with self.thread_lock:
+            snapshot = list(self.behavior_data)
+            segment_infusions = self._infusion_count
+            self._cumulative_infusion_count += segment_infusions
+            self.behavior_data = []
+            self._infusion_count = 0
+            self._data_warning_emitted = False
+            self._segment_number += 1
+
+        if not snapshot:
+            self.logger.warning("split_segment: no behavioral data in segment %d", self._segment_number)
+
+        export_path = self._export_segment(snapshot, f"_{self._segment_number:03d}")
+        self._segment_exports.append(export_path)
+
+        self._write_event_log({
+            "type": "SEGMENT_SPLIT",
+            "segment": self._segment_number,
+            "events_exported": len(snapshot),
+            "timestamp": time.time(),
+        })
+        self._emit("split", {
+            "segment_number": self._segment_number,
+            "export_path": export_path,
+        })
+        self.logger.info("Segment %d exported (%d events): %s", self._segment_number, len(snapshot), export_path)
+        return {"segment_number": self._segment_number, "export_path": export_path}
+
+    def restart_program(self) -> None:
+        """Stop and re-start the Arduino without destroying the session.
+
+        Sends SESSION_END then SESSION_START to the firmware, clears all
+        in-memory data and counters, and resets timing.  The serial connection
+        and hardware configuration are preserved.  program_running stays True
+        throughout to avoid triggering stop_program's re-entrance guard.
+        """
+        self.logger.info("Restarting program...")
+        self.send_serial_command({"cmd": 100})
+        time.sleep(1)
+
+        with self.thread_lock:
+            self.behavior_data = []
+            self.frame_data = []
+            self._infusion_count = 0
+            self._segment_number = 0
+            self._cumulative_infusion_count = 0
+            self._segment_exports = []
+            self._data_warning_emitted = False
+
+        self.paused_time = 0
+        self.paused_start_time = None
+        self.last_infusion_time = None
+        if self.program_flag.is_set():
+            self.program_flag.clear()
+
+        self.send_serial_command({"cmd": 101})
+        self.program_start_time = time.time()
+
+        self._write_event_log({"type": "SESSION_RESTART", "timestamp": self.program_start_time})
+        self._emit("restart", {})
+        self.logger.info("Program restarted at %s", self.get_time())
+
+    def get_segment_number(self) -> int:
+        """Return the current segment number (0 means no splits have occurred)."""
+        return self._segment_number
 
     def monitor_time_limit(self) -> None:
         """Continuously monitor the time limit in a separate thread.

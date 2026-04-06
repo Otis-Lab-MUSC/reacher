@@ -137,3 +137,51 @@ async def set_limit(session_id: str, body: LimitRequest, request: Request):
         instance.set_stop_delay(body.delay)
 
     return {"status": "limits_set", "type": body.type}
+
+
+@router.post("/{session_id}/split")
+async def split_segment(session_id: str, request: Request):
+    sm = request.app.state.session_manager
+    try:
+        info = sm.get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if info.state not in ("running", "paused"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot split in '{info.state}' state",
+        )
+
+    try:
+        result = info.instance.split_segment()
+    except Exception:
+        logger.error("split_segment failed for session %s", session_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to split segment")
+
+    return {"status": "split", **result}
+
+
+@router.post("/{session_id}/restart")
+async def restart_program(session_id: str, request: Request):
+    sm = request.app.state.session_manager
+    try:
+        info = sm.get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if info.state not in ("running", "paused"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot restart in '{info.state}' state",
+        )
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, info.instance.restart_program)
+    except Exception:
+        logger.error("restart_program failed for session %s", session_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to restart program")
+
+    sm.set_state(session_id, "running")
+    return {"status": "restarted"}
