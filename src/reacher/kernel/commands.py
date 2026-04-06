@@ -83,7 +83,6 @@ class CommandCode(IntEnum):
     LASER_TEST = 603
     LASER_SET_FREQUENCY = 671
     LASER_SET_DURATION = 672
-    LASER_SET_TRACE = 673  # deprecated
     LASER_MODE_CONTINGENT = 681
     LASER_MODE_INDEPENDENT = 682
     PAV_LASER_CS_PLUS = 691
@@ -450,13 +449,6 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         "Set laser pulse duration (ms)",
         payload_key="duration", payload_type="int",
         paradigms=["fr", "pr", "vi", "omission", "pavlovian"],
-    ),
-    673: CommandSpec(
-        CommandCode.LASER_SET_TRACE, "LASER_SET_TRACE",
-        "Set laser trace interval (deprecated)",
-        payload_key="interval", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission"],
-        deprecated=True,
     ),
     681: CommandSpec(
         CommandCode.LASER_MODE_CONTINGENT, "LASER_MODE_CONTINGENT",
