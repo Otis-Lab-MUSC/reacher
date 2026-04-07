@@ -4,6 +4,30 @@ This guide walks you through installing and running the REACHER API server and m
 
 ---
 
+## Quick Install
+
+If you already have Python 3.10+ installed, the fastest path is:
+
+```bash
+# Install (isolated — no system packages affected)
+pipx install reacher
+
+# Run
+reacher
+```
+
+### Raspberry Pi / Headless Linux
+
+A single command handles Python, serial permissions, systemd services, and firewall:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/otis-lab-musc/reacher/main/scripts/install.sh | bash
+```
+
+After running, the REACHER API starts on boot via systemd. The rest of this guide covers manual setup for when you need more control.
+
+---
+
 ## What You're Setting Up
 
 The **REACHER API** is a Python application with two parts:

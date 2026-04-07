@@ -12,6 +12,7 @@ requires-python = ">=3.10"
 authors = [
     { name = "Joshua Boquiren", email = "thejoshbq@proton.me" },
 ]
+keywords = ["neuroscience", "arduino", "operant-conditioning", "experiment-control", "fastapi"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -46,6 +47,8 @@ dev = [
 
 [project.urls]
 Homepage = "https://github.com/Otis-Lab-MUSC/REACHER"
+Repository = "https://github.com/Otis-Lab-MUSC/reacher"
+Issues = "https://github.com/Otis-Lab-MUSC/reacher/issues"
 
 [project.scripts]
 reacher = "reacher.api.app:main"
