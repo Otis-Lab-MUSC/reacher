@@ -277,7 +277,7 @@ def create_app() -> FastAPI:
     app.include_router(data.router, prefix="/api/data", tags=["data"], dependencies=api_deps)
     app.include_router(file.router, prefix="/api/file", tags=["file"], dependencies=api_deps)
     app.include_router(websocket.router, tags=["websocket"])
-    app.include_router(lifecycle.router, prefix="/api/lifecycle", tags=["lifecycle"], dependencies=api_deps)
+    app.include_router(lifecycle.router, prefix="/api/lifecycle", tags=["lifecycle"])
     # Zero-config machine discovery: pairing + register endpoints are auth-free;
     # other discovery routes require auth.
     app.include_router(pairing_router.router, prefix="/api/pairing", tags=["pairing"])
