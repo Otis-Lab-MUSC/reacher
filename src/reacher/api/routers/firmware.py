@@ -6,6 +6,7 @@ import hashlib
 import logging
 import os
 import shutil
+import sys
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -18,6 +19,7 @@ from . import websocket as ws_mod
 _MAX_HEX_SIZE = 200 * 1024  # 200 KB — hex files are typically 15-40 KB
 
 router = APIRouter()
+diagnostics_router = APIRouter()  # Registered without auth in app.py
 _logger = logging.getLogger(__name__)
 _uploader = FirmwareUploader()
 
@@ -106,7 +108,8 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
 
     if not success:
         sm.set_state(session_id, "idle")
-        raise HTTPException(status_code=500, detail="Firmware upload failed")
+        detail = _uploader.last_error or "Firmware upload failed"
+        raise HTTPException(status_code=500, detail=detail)
 
     # Wait for Arduino to reboot, then reconnect
     await asyncio.sleep(2)
@@ -134,7 +137,7 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
     }
 
 
-@router.get("/diagnostics")
+@diagnostics_router.get("/diagnostics")
 async def firmware_diagnostics(board: str = Query(DEFAULT_BOARD)):
     """Return diagnostic information about hex file resolution for debugging."""
     if board.lower() not in SUPPORTED_BOARDS:
@@ -142,11 +145,27 @@ async def firmware_diagnostics(board: str = Query(DEFAULT_BOARD)):
             status_code=400,
             detail=f"Unsupported board: {board!r}. Supported: {SUPPORTED_BOARDS}",
         )
+    _avrdude_path = _uploader.avrdude_path
+    _is_abs = os.path.isabs(_avrdude_path)
+
+    # List files in the avrdude directory to verify companion DLLs were bundled
+    avrdude_dir_contents = None
+    if _is_abs:
+        avrdude_dir = os.path.dirname(_avrdude_path)
+        try:
+            avrdude_dir_contents = sorted(os.listdir(avrdude_dir))
+        except OSError:
+            avrdude_dir_contents = None
+
     result: dict = {
+        "frozen": getattr(sys, "frozen", False),
+        "meipass": getattr(sys, "_MEIPASS", None),
         "resolved_hex_dir": _uploader.hex_dir,
-        "avrdude_path": _uploader.avrdude_path,
-        "avrdude_exists": os.path.isfile(_uploader.avrdude_path) if os.path.isabs(_uploader.avrdude_path) else bool(shutil.which(_uploader.avrdude_path)),
+        "avrdude_path": _avrdude_path,
+        "avrdude_exists": os.path.isfile(_avrdude_path) if _is_abs else bool(shutil.which(_avrdude_path)),
         "avrdude_conf": _uploader.avrdude_conf,
+        "avrdude_dir_contents": avrdude_dir_contents,
+        "last_upload_error": _uploader.last_error or None,
         "board": board,
         "paradigms": {},
     }

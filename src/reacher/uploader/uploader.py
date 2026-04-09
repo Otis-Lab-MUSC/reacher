@@ -105,6 +105,7 @@ class FirmwareUploader:
         self.hex_dir = hex_dir or self._resolve_hex_dir()
         self.avrdude_path = avrdude_path or self._resolve_avrdude()
         self.avrdude_conf = self._resolve_avrdude_conf()
+        self.last_error: str = ""  # stderr from the most recent failed upload
 
     # ------------------------------------------------------------------
     # Path resolution
@@ -398,10 +399,12 @@ class FirmwareUploader:
         else:
             stdout = (await proc.stdout.read()).decode(errors="replace") if proc.stdout else ""
             stderr_full = "\n".join(stderr_lines)
-            logger.error(
-                "avrdude exited %d.\nstderr:\n%s\nstdout:\n%s",
-                proc.returncode, stderr_full, stdout,
+            self.last_error = (
+                f"avrdude exited {proc.returncode}.\n"
+                f"stderr: {stderr_full or '(empty)'}\n"
+                f"stdout: {stdout or '(empty)'}"
             )
+            logger.error(self.last_error)
             if progress_callback:
                 progress_callback(percent, f"Failed (exit {proc.returncode})")
             return False
