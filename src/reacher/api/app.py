@@ -322,6 +322,7 @@ def main():
         host=HOST,
         port=PORT,
         log_level="info",
+        log_config=None if getattr(sys, "frozen", False) else uvicorn.config.LOGGING_CONFIG,
         ws_ping_interval=WS_PING_INTERVAL,
         ws_ping_timeout=WS_PING_TIMEOUT,
     )
