@@ -5,6 +5,7 @@ import base64
 import hashlib
 import logging
 import os
+import shutil
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -143,6 +144,9 @@ async def firmware_diagnostics(board: str = Query(DEFAULT_BOARD)):
         )
     result: dict = {
         "resolved_hex_dir": _uploader.hex_dir,
+        "avrdude_path": _uploader.avrdude_path,
+        "avrdude_exists": os.path.isfile(_uploader.avrdude_path) if os.path.isabs(_uploader.avrdude_path) else bool(shutil.which(_uploader.avrdude_path)),
+        "avrdude_conf": _uploader.avrdude_conf,
         "board": board,
         "paradigms": {},
     }

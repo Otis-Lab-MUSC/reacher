@@ -337,20 +337,36 @@ class FirmwareUploader:
         if progress_callback:
             progress_callback(0, "Starting upload")
 
+        # In frozen mode, ensure avrdude can locate companion DLLs that
+        # PyInstaller may have placed in the bundle root or alongside the
+        # binary.  Add both directories to PATH for the subprocess.
+        sub_env = None
+        base = _frozen_base()
+        if base and sys.platform == "win32":
+            sub_env = os.environ.copy()
+            avrdude_dir = os.path.dirname(self.avrdude_path)
+            extra = os.pathsep.join([avrdude_dir, base])
+            sub_env["PATH"] = extra + os.pathsep + sub_env.get("PATH", "")
+
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=sub_env,
         )
 
-        # avrdude prints progress to stderr
+        # avrdude prints progress to stderr — collect all lines so we can
+        # log the full output at ERROR level if the upload fails.
         percent = 0
+        stderr_lines: list[str] = []
         assert proc.stderr is not None
         while True:
             line = await proc.stderr.readline()
             if not line:
                 break
             text = line.decode(errors="replace").strip()
+            if text:
+                stderr_lines.append(text)
             logger.debug("avrdude: %s", text)
 
             # Parse progress markers like "Writing | ################################################## | 100%"
@@ -381,7 +397,11 @@ class FirmwareUploader:
             return True
         else:
             stdout = (await proc.stdout.read()).decode(errors="replace") if proc.stdout else ""
-            logger.error("avrdude exited %d. stdout=%s", proc.returncode, stdout)
+            stderr_full = "\n".join(stderr_lines)
+            logger.error(
+                "avrdude exited %d.\nstderr:\n%s\nstdout:\n%s",
+                proc.returncode, stderr_full, stdout,
+            )
             if progress_callback:
                 progress_callback(percent, f"Failed (exit {proc.returncode})")
             return False
