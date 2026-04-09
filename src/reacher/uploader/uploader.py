@@ -104,6 +104,7 @@ class FirmwareUploader:
     def __init__(self, hex_dir: Optional[str] = None, avrdude_path: Optional[str] = None) -> None:
         self.hex_dir = hex_dir or self._resolve_hex_dir()
         self.avrdude_path = avrdude_path or self._resolve_avrdude()
+        self.avrdude_conf = self._resolve_avrdude_conf()
 
     # ------------------------------------------------------------------
     # Path resolution
@@ -177,6 +178,22 @@ class FirmwareUploader:
         if found:
             return found
         return "avrdude"
+
+    @staticmethod
+    def _resolve_avrdude_conf() -> Optional[str]:
+        """Return the path to avrdude.conf when running frozen, or None.
+
+        In a PyInstaller bundle the config file is placed alongside the
+        avrdude binary at ``_MEIPASS/avrdude/avrdude.conf``.  System-installed
+        avrdude uses a compiled-in config path, so no override is needed in
+        development mode.
+        """
+        base = _frozen_base()
+        if base:
+            bundled = os.path.join(base, "avrdude", "avrdude.conf")
+            if os.path.isfile(bundled):
+                return bundled
+        return None
 
     # ------------------------------------------------------------------
     # Public API
@@ -307,12 +324,14 @@ class FirmwareUploader:
                     "sudo apt-get install avrdude"
                 )
 
-        cmd = [
-            self.avrdude_path,
+        cmd = [self.avrdude_path]
+        if self.avrdude_conf:
+            cmd.extend(["-C", self.avrdude_conf])
+        cmd.extend([
             *profile.avrdude_args,
             "-P", port,
             "-U", f"flash:w:{hex_path}:i",
-        ]
+        ])
 
         logger.info("Running: %s", " ".join(cmd))
         if progress_callback:
