@@ -36,6 +36,24 @@ def _find_frame_index(frame_timestamps: list[int], event_ts: int) -> int | None:
     return idx
 
 
+def _build_behavior_csv(behavior: list, frame_timestamps: list[int]) -> str:
+    """Serialise a behavior event list to CSV matching the on-disk segment format."""
+    csv_buf = io.StringIO()
+    fieldnames = ["device", "event", "start_timestamp", "end_timestamp", "start_frame_index", "end_frame_index"]
+    writer = csv.DictWriter(csv_buf, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in behavior:
+        start_ts = row.get("start_timestamp")
+        end_ts = row.get("end_timestamp")
+        start_fi = _find_frame_index(frame_timestamps, int(start_ts)) if start_ts not in (None, "") else None
+        end_fi = _find_frame_index(frame_timestamps, int(end_ts)) if end_ts not in (None, "") else None
+        out = {k: row.get(k, "") for k in ("device", "event", "start_timestamp", "end_timestamp")}
+        out["start_frame_index"] = start_fi if start_fi is not None else ""
+        out["end_frame_index"] = end_fi if end_fi is not None else ""
+        writer.writerow(out)
+    return csv_buf.getvalue()
+
+
 class FileConfigRequest(BaseModel):
     filename: Optional[str] = None
     destination: Optional[str] = None
@@ -134,25 +152,39 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
     frame_data = instance.get_frame_data()
     frame_timestamps = sorted(int(ts) for ts in frame_data if ts)
     frame_count = len(frame_data)
+    segment_exports = instance.get_segment_exports()
+    prior_segment_counts = instance.get_segment_event_counts()
 
     # Build ZIP in memory
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # behavior_events.csv
-        csv_buf = io.StringIO()
-        fieldnames = ["device", "event", "start_timestamp", "end_timestamp", "start_frame_index", "end_frame_index"]
-        writer = csv.DictWriter(csv_buf, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in behavior:
-            start_ts = row.get("start_timestamp")
-            end_ts = row.get("end_timestamp")
-            start_fi = _find_frame_index(frame_timestamps, int(start_ts)) if start_ts not in (None, "") else None
-            end_fi = _find_frame_index(frame_timestamps, int(end_ts)) if end_ts not in (None, "") else None
-            out = {k: row.get(k, "") for k in ("device", "event", "start_timestamp", "end_timestamp")}
-            out["start_frame_index"] = start_fi if start_fi is not None else ""
-            out["end_frame_index"] = end_fi if end_fi is not None else ""
-            writer.writerow(out)
-        zf.writestr("behavior_events.csv", csv_buf.getvalue())
+        if segment_exports:
+            # Segmented session — include each prior segment CSV verbatim from disk
+            for seg_path in segment_exports:
+                if os.path.isfile(seg_path):
+                    with open(seg_path, "rb") as f:
+                        zf.writestr(os.path.basename(seg_path), f.read())
+                else:
+                    logger.warning("Segment CSV missing from log dir: %s", seg_path)
+
+            # Final (current) segment — serialise from the in-memory buffer
+            final_segment_number = len(segment_exports) + 1
+            final_csv = _build_behavior_csv(behavior, frame_timestamps)
+            zf.writestr(f"behavior_events_{final_segment_number:03d}.csv", final_csv)
+
+            per_segment_event_counts = list(prior_segment_counts) + [len(behavior)]
+            if len(per_segment_event_counts) != final_segment_number:
+                per_segment_event_counts = per_segment_event_counts[:final_segment_number]
+                while len(per_segment_event_counts) < final_segment_number:
+                    per_segment_event_counts.append(0)
+            segment_count = final_segment_number
+            total_event_count = sum(per_segment_event_counts)
+        else:
+            # Non-segmented — single behavior_events.csv
+            zf.writestr("behavior_events.csv", _build_behavior_csv(behavior, frame_timestamps))
+            per_segment_event_counts = [len(behavior)]
+            segment_count = 1
+            total_event_count = len(behavior)
 
         # frame_timestamps.csv — only when microscope data was captured
         if frame_timestamps:
@@ -171,6 +203,18 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
                 indent=2,
             ),
         )
+
+        # event_log.jsonl — authoritative cross-segment record of lifecycle, events, frames
+        try:
+            instance.flush_event_log()
+            event_log_path = instance.get_event_log_path()
+            if os.path.isfile(event_log_path):
+                with open(event_log_path, "rb") as f:
+                    zf.writestr("event_log.jsonl", f.read())
+            else:
+                logger.info("event_log.jsonl not present for session %s — skipping", session_id)
+        except Exception:
+            logger.warning("Failed to include event_log.jsonl for session %s", session_id, exc_info=True)
 
         # metadata.json
         now = time.time()
@@ -195,7 +239,9 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
                     "export_date": export_date,
                     "export_time": export_time,
                     "program_start_time": program_start_str,
-                    "behavior_event_count": len(behavior),
+                    "behavior_event_count": total_event_count,
+                    "segment_count": segment_count,
+                    "per_segment_event_counts": per_segment_event_counts,
                     "frame_count": frame_count,
                     "infusion_count": body.infusion_count,
                     "press_count": body.press_count,

@@ -125,6 +125,7 @@ class REACHER:
         self._segment_number: int = 0
         self._cumulative_infusion_count: int = 0
         self._segment_exports: List[str] = []
+        self._segment_event_counts: List[int] = []
 
         # Program variables
         self.program_start_time: Optional[float] = None
@@ -898,6 +899,7 @@ class REACHER:
         self._segment_number = 0
         self._cumulative_infusion_count = 0
         self._segment_exports = []
+        self._segment_event_counts = []
         self.paused_time = 0
         self.last_infusion_time = None
         if self.program_flag.is_set():
@@ -1005,6 +1007,7 @@ class REACHER:
 
         export_path = self._export_segment(snapshot, f"_{self._segment_number:03d}")
         self._segment_exports.append(export_path)
+        self._segment_event_counts.append(len(snapshot))
 
         self._write_event_log({
             "type": "SEGMENT_SPLIT",
@@ -1038,6 +1041,7 @@ class REACHER:
             self._segment_number = 0
             self._cumulative_infusion_count = 0
             self._segment_exports = []
+            self._segment_event_counts = []
             self._data_warning_emitted = False
 
         self.paused_time = 0
@@ -1056,6 +1060,30 @@ class REACHER:
     def get_segment_number(self) -> int:
         """Return the current segment number (0 means no splits have occurred)."""
         return self._segment_number
+
+    def get_segment_exports(self) -> List[str]:
+        """Return a snapshot of split-segment CSV paths (does not include the final in-memory segment)."""
+        with self.thread_lock:
+            return list(self._segment_exports)
+
+    def get_segment_event_counts(self) -> List[int]:
+        """Return per-split behavior event counts, parallel to get_segment_exports()."""
+        with self.thread_lock:
+            return list(self._segment_event_counts)
+
+    def get_event_log_path(self) -> str:
+        """Return the absolute path to this session's event_log.jsonl."""
+        return self._event_log_path
+
+    def flush_event_log(self) -> None:
+        """Force-flush the event log file handle. Safe to call when the handle is closed or None."""
+        f = self._event_log_file
+        if f is not None and not f.closed:
+            try:
+                f.flush()
+                os.fsync(f.fileno())
+            except Exception:
+                self.logger.warning("flush_event_log failed", exc_info=True)
 
     def monitor_time_limit(self) -> None:
         """Continuously monitor the time limit in a separate thread.

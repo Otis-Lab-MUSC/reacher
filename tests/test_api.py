@@ -33,6 +33,10 @@ def client():
         mock_instance.get_data_destination.return_value = None
         mock_instance.get_detected_paradigm.return_value = None
         mock_instance.make_destination_folder.return_value = "/tmp/reacher_test"
+        mock_instance.get_segment_exports.return_value = []
+        mock_instance.get_segment_event_counts.return_value = []
+        mock_instance.get_event_log_path.return_value = "/tmp/reacher_test_missing_event_log.jsonl"
+        mock_instance.flush_event_log.return_value = None
         MockReacher.return_value = mock_instance
 
         app = create_app()
@@ -238,6 +242,19 @@ class TestFileEndpoints:
         instance.get_hardware_settings.return_value = [{"baud_rate": 9600}]
         instance.get_frame_data.return_value = [50, 150, 250, 350, 450]
 
+        # Non-segmented session — no prior segment CSVs
+        instance.get_segment_exports.return_value = []
+        instance.get_segment_event_counts.return_value = []
+
+        # Real event_log.jsonl on disk so it gets included
+        event_log_path = tmp_path / "event_log.jsonl"
+        event_log_path.write_text(
+            '{"type": "SESSION_START", "timestamp": 1700000000.0}\n'
+            '{"type": "behavior", "device": "lever", "event": "press"}\n'
+            '{"type": "SESSION_END", "timestamp": 1700000010.0}\n'
+        )
+        instance.get_event_log_path.return_value = str(event_log_path)
+
         resp = client.post(
             f"/api/file/{sid}/export/zip",
             json={
@@ -265,13 +282,21 @@ class TestFileEndpoints:
             assert "metadata.json" in names
             assert "notes.txt" in names
             assert "frame_timestamps.csv" in names
+            assert "event_log.jsonl" in names
 
             meta = json.loads(zf.read("metadata.json"))
             assert meta["session_name"] == "my_session"
             assert meta["infusion_count"] == 3
-            assert meta["firmware_sketch"] == "fr.ino"
+            assert meta["firmware_sketch"] == "fr"
             assert meta["firmware_version"] == "v2.0.0"
             assert meta["frame_count"] == 5
+            assert meta["segment_count"] == 1
+            assert meta["per_segment_event_counts"] == [1]
+            assert meta["behavior_event_count"] == 1
+
+            # event_log.jsonl should round-trip exactly
+            event_log_roundtrip = zf.read("event_log.jsonl").decode()
+            assert event_log_roundtrip == event_log_path.read_text()
 
             # Verify behavior_events.csv has frame index columns
             behavior_csv = zf.read("behavior_events.csv").decode()
@@ -290,3 +315,138 @@ class TestFileEndpoints:
             assert len(ft_rows) == 5
             assert ft_rows[0] == {"frame_index": "0", "timestamp_ms": "50"}
             assert ft_rows[4] == {"frame_index": "4", "timestamp_ms": "450"}
+
+    def test_export_zip_segmented_session(self, client, tmp_path):
+        """Segmented sessions should include all prior segment CSVs, event_log.jsonl, and segment metadata."""
+        resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
+        sid = resp.json()["session_id"]
+
+        sm = client.app.state.session_manager
+        instance = sm.get_instance(sid)
+        instance.get_filename.return_value = "seg_session"
+        instance.get_data_destination.return_value = str(tmp_path)
+        folder = tmp_path / "seg_session"
+        folder.mkdir()
+        instance.make_destination_folder.return_value = str(folder)
+
+        # Two prior segment CSVs already on disk (written by split_segment)
+        log_dir = tmp_path / "log"
+        log_dir.mkdir()
+        seg1_path = log_dir / "behavior_events_001.csv"
+        seg2_path = log_dir / "behavior_events_002.csv"
+        seg1_content = (
+            "device,event,start_timestamp,end_timestamp,start_frame_index,end_frame_index\n"
+            "lever,press,10,20,,\n"
+            "lever,press,30,40,,\n"
+            "pump,infusion,35,45,,\n"
+        )
+        seg2_content = (
+            "device,event,start_timestamp,end_timestamp,start_frame_index,end_frame_index\n"
+            "lever,press,100,110,,\n"
+            "lever,press,120,130,,\n"
+            "lick,contact,125,135,,\n"
+            "lick,contact,140,145,,\n"
+            "pump,infusion,150,160,,\n"
+        )
+        seg1_path.write_text(seg1_content)
+        seg2_path.write_text(seg2_content)
+        instance.get_segment_exports.return_value = [str(seg1_path), str(seg2_path)]
+        instance.get_segment_event_counts.return_value = [3, 5]
+
+        # Final segment (still in memory, not yet auto-exported)
+        instance.get_behavior_data.return_value = [
+            {"device": "lever", "event": "press", "start_timestamp": 200, "end_timestamp": 210},
+            {"device": "pump", "event": "infusion", "start_timestamp": 215, "end_timestamp": 220},
+        ]
+        instance.get_frame_data.return_value = []
+        instance.get_firmware_information.return_value = {"sketch": "fr", "version": "v2.0.0"}
+        instance.get_hardware_settings.return_value = []
+
+        # event_log.jsonl spanning all segments
+        event_log_path = tmp_path / "event_log.jsonl"
+        event_log_path.write_text(
+            '{"type": "SESSION_START", "timestamp": 1700000000.0}\n'
+            '{"type": "SEGMENT_SPLIT", "segment": 1, "events_exported": 3}\n'
+            '{"type": "SEGMENT_SPLIT", "segment": 2, "events_exported": 5}\n'
+            '{"type": "SESSION_END", "timestamp": 1700000500.0}\n'
+        )
+        instance.get_event_log_path.return_value = str(event_log_path)
+
+        resp = client.post(f"/api/file/{sid}/export/zip", json={}, headers=AUTH_HEADER)
+        assert resp.status_code == 200
+        zip_path = resp.json()["file_path"]
+
+        with zipfile.ZipFile(zip_path) as zf:
+            names = set(zf.namelist())
+
+            # All three segment CSVs plus event log
+            assert "behavior_events_001.csv" in names
+            assert "behavior_events_002.csv" in names
+            assert "behavior_events_003.csv" in names
+            assert "event_log.jsonl" in names
+            # Suffix-less behavior_events.csv must NOT be present in a segmented export
+            assert "behavior_events.csv" not in names
+
+            # Prior segment CSVs should be byte-identical passthrough
+            assert zf.read("behavior_events_001.csv").decode() == seg1_content
+            assert zf.read("behavior_events_002.csv").decode() == seg2_content
+
+            # Final segment from the in-memory buffer
+            final_csv = zf.read("behavior_events_003.csv").decode()
+            final_rows = list(csv.DictReader(io.StringIO(final_csv)))
+            assert len(final_rows) == 2
+            assert final_rows[0]["device"] == "lever"
+            assert final_rows[1]["device"] == "pump"
+
+            # Metadata reflects all three segments
+            meta = json.loads(zf.read("metadata.json"))
+            assert meta["segment_count"] == 3
+            assert meta["per_segment_event_counts"] == [3, 5, 2]
+            assert meta["behavior_event_count"] == 10
+
+            # Event log round-trips
+            assert zf.read("event_log.jsonl").decode() == event_log_path.read_text()
+
+    def test_export_zip_missing_segment_file_logs_and_continues(self, client, tmp_path):
+        """A missing on-disk segment CSV should not break the export."""
+        resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
+        sid = resp.json()["session_id"]
+
+        sm = client.app.state.session_manager
+        instance = sm.get_instance(sid)
+        instance.get_filename.return_value = "missing_seg"
+        instance.get_data_destination.return_value = str(tmp_path)
+        folder = tmp_path / "missing_seg"
+        folder.mkdir()
+        instance.make_destination_folder.return_value = str(folder)
+
+        # One real segment on disk, one ghost path that doesn't exist
+        real_seg = tmp_path / "behavior_events_001.csv"
+        real_seg.write_text(
+            "device,event,start_timestamp,end_timestamp,start_frame_index,end_frame_index\n"
+            "lever,press,1,2,,\n"
+        )
+        ghost_seg = tmp_path / "behavior_events_002.csv"  # never written
+        instance.get_segment_exports.return_value = [str(real_seg), str(ghost_seg)]
+        instance.get_segment_event_counts.return_value = [1, 4]
+
+        instance.get_behavior_data.return_value = [
+            {"device": "lever", "event": "press", "start_timestamp": 50, "end_timestamp": 60}
+        ]
+        instance.get_frame_data.return_value = []
+        instance.get_firmware_information.return_value = {"sketch": "fr", "version": "v2.0.0"}
+        instance.get_hardware_settings.return_value = []
+
+        resp = client.post(f"/api/file/{sid}/export/zip", json={}, headers=AUTH_HEADER)
+        assert resp.status_code == 200
+
+        with zipfile.ZipFile(resp.json()["file_path"]) as zf:
+            names = set(zf.namelist())
+            assert "behavior_events_001.csv" in names  # survivor
+            assert "behavior_events_002.csv" not in names  # ghost — skipped
+            assert "behavior_events_003.csv" in names  # final segment from buffer
+
+            meta = json.loads(zf.read("metadata.json"))
+            # segment_count reflects the intended layout even if one file was missing
+            assert meta["segment_count"] == 3
+            assert meta["per_segment_event_counts"] == [1, 4, 1]
