@@ -616,6 +616,8 @@ class REACHER:
                 entry_dict['event'] = event.get('event')
                 entry_dict['start_timestamp'] = event.get('start_timestamp') or event.get('timestamp')
                 entry_dict['end_timestamp'] = event.get('end_timestamp') or event.get('timestamp')
+                if (trial_type := event.get('trial_type')) is not None:
+                    entry_dict['trial_type'] = trial_type
             case _:
                 entry_dict['device'] = event.get('device')
                 entry_dict['event'] = event.get('event')
