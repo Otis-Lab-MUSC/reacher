@@ -107,6 +107,11 @@ class REACHER:
         self._queue_overflow_count: int = 0
         self._last_queue_overflow_emit: float = float("-inf")
 
+        # Fix 7.4: track cumulative event_callback failures so the API layer
+        # can surface degraded WS/observer health without risking recursion
+        # (a broken callback is the one channel we can't use to self-report).
+        self._emit_failure_count: int = 0
+
         # Thread variables
         # Fix: PY-007 — Threads created here but started lazily in open_serial()
         # Fix 7.1: wrap each target in a resilient shim so an unhandled
@@ -786,12 +791,26 @@ class REACHER:
             self._update_hardware_setting(device, {field: effective})
 
     def _emit(self, event_type: str, data: dict) -> None:
-        """Broadcast an event via the registered callback (if any)."""
+        """Broadcast an event via the registered callback (if any).
+
+        Fix 7.4: increment a failure counter rather than re-emitting a warning
+        through the same callback (which would recurse if the callback is the
+        broken channel). The counter is surfaced via /api/sessions/{sid}.
+        """
         if self.event_callback and self.session_id:
             try:
                 self.event_callback(self.session_id, event_type, data)
             except Exception:
-                self.logger.warning("Event callback failed", exc_info=True)
+                self._emit_failure_count += 1
+                self.logger.warning(
+                    "Event callback failed (total=%d)",
+                    self._emit_failure_count, exc_info=True,
+                )
+
+    @property
+    def emit_failure_count(self) -> int:
+        """Cumulative count of event_callback invocations that raised."""
+        return self._emit_failure_count
 
     def _write_event_log(self, entry: dict) -> None:
         """Append a JSON line to the append-only event log.

@@ -37,6 +37,7 @@ def client():
         mock_instance.get_segment_event_counts.return_value = []
         mock_instance.get_event_log_path.return_value = "/tmp/reacher_test_missing_event_log.jsonl"
         mock_instance.flush_event_log.return_value = None
+        mock_instance.emit_failure_count = 0
         MockReacher.return_value = mock_instance
 
         app = create_app()
@@ -80,7 +81,19 @@ class TestSessionEndpoints:
         sid = resp.json()["session_id"]
         resp = client.get(f"/api/sessions/{sid}", headers=AUTH_HEADER)
         assert resp.status_code == 200
-        assert resp.json()["port"] == "/dev/ttyUSB0"
+        body = resp.json()
+        assert body["port"] == "/dev/ttyUSB0"
+        # Fix 7.4: surface cumulative event_callback failures
+        assert body["callback_failures"] == 0
+
+    def test_get_session_reports_callback_failures(self, client):
+        resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
+        sid = resp.json()["session_id"]
+        sm = client.app.state.session_manager
+        sm.get_session(sid).instance.emit_failure_count = 7
+        resp = client.get(f"/api/sessions/{sid}", headers=AUTH_HEADER)
+        assert resp.status_code == 200
+        assert resp.json()["callback_failures"] == 7
 
     def test_get_nonexistent_session(self, client):
         resp = client.get("/api/sessions/nonexistent", headers=AUTH_HEADER)

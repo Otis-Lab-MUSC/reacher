@@ -52,6 +52,7 @@ async def get_session(session_id: str, request: Request):
         "state": info.state,
         "program_running": instance.get_program_running(),
         "firmware_info": instance.get_firmware_information(),
+        "callback_failures": instance.emit_failure_count,
     }
 
 

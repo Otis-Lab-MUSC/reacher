@@ -433,6 +433,27 @@ def test_event_callback_fires(mock_serial):
         cb.assert_called_once_with("sess1", "event", {"foo": "bar"})
 
 
+def test_emit_failure_counter_increments_on_callback_error(reacher):
+    """Fix 7.4: a raising callback must bump emit_failure_count, not propagate."""
+    reacher.event_callback = Mock(side_effect=RuntimeError("broken cb"))
+    reacher.session_id = "sid12345"
+
+    assert reacher.emit_failure_count == 0
+    reacher._emit("event", {"x": 1})
+    reacher._emit("event", {"x": 2})
+    reacher._emit("event", {"x": 3})
+    assert reacher.emit_failure_count == 3
+
+
+def test_emit_failure_counter_stays_zero_on_success(reacher):
+    """A working callback must not touch the failure counter."""
+    reacher.event_callback = Mock()
+    reacher.session_id = "sid12345"
+    reacher._emit("event", {"x": 1})
+    reacher._emit("event", {"x": 2})
+    assert reacher.emit_failure_count == 0
+
+
 def test_get_detected_paradigm(reacher):
     """Test paradigm detection from firmware info."""
     assert reacher.get_detected_paradigm() is None
