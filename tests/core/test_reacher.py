@@ -454,6 +454,52 @@ def test_emit_failure_counter_stays_zero_on_success(reacher):
     assert reacher.emit_failure_count == 0
 
 
+def test_controller_log_uses_persistent_handle(reacher, mocker):
+    """Fix 4.9: _write_controller_log opens the file once across N writes."""
+    m_open = mocker.mock_open()
+    m_open.return_value.closed = False
+    mocker.patch("builtins.open", m_open)
+    mocker.patch("os.fsync")
+
+    for i in range(5):
+        reacher._write_controller_log({"level": "007", "i": i})
+
+    # Exactly one open() for controller_log across the 5 writes.
+    controller_opens = [
+        c for c in m_open.call_args_list if c.args and c.args[0] == reacher.controller_log
+    ]
+    assert len(controller_opens) == 1
+
+
+def test_controller_log_fsync_cadence(reacher, mocker):
+    """Fix 4.9: fsync fires every _CONTROLLER_LOG_FSYNC_INTERVAL writes."""
+    m_open = mocker.mock_open()
+    m_open.return_value.closed = False
+    mocker.patch("builtins.open", m_open)
+    fsync = mocker.patch("os.fsync")
+    reacher._CONTROLLER_LOG_FSYNC_INTERVAL = 3
+
+    for i in range(7):
+        reacher._write_controller_log({"i": i})
+
+    # 7 writes, interval 3 → fsync at write 3 and 6 → exactly 2 calls.
+    assert fsync.call_count == 2
+
+
+def test_controller_log_close_flushes_and_closes(reacher, mocker):
+    """_close_controller_log must flush, fsync, and close the handle."""
+    handle = mocker.MagicMock()
+    handle.closed = False
+    reacher._controller_log_file = handle
+    fsync = mocker.patch("os.fsync")
+
+    reacher._close_controller_log()
+
+    handle.flush.assert_called_once()
+    fsync.assert_called_once_with(handle.fileno.return_value)
+    handle.close.assert_called_once()
+
+
 def test_get_detected_paradigm(reacher):
     """Test paradigm detection from firmware info."""
     assert reacher.get_detected_paradigm() is None

@@ -183,6 +183,12 @@ class REACHER:
         self._event_log_write_count: int = 0
         self._EVENT_LOG_FSYNC_INTERVAL: int = 50  # fsync every N writes
 
+        # Fix 4.9: mirror the event-log pattern — keep controller_log.json open
+        # across writes and batch fsyncs instead of open/close/fsync per line.
+        self._controller_log_file: Optional[io.TextIOWrapper] = None
+        self._controller_log_write_count: int = 0
+        self._CONTROLLER_LOG_FSYNC_INTERVAL: int = 10
+
         self.data_destination: Optional[str] = None
         self.behavior_filename: Optional[str] = None
         self.code_dict: Dict = {
@@ -219,6 +225,7 @@ class REACHER:
         self._infusion_count = 0
         self._data_warning_emitted = False  # Fix: F-002 — Reset warning flag
         self._event_log_write_count = 0  # Fix: F-010 — Reset write counter
+        self._controller_log_write_count = 0  # Fix 4.9 — Reset write counter
 
         self.program_start_time = None
         self.program_end_time = None
@@ -392,6 +399,7 @@ class REACHER:
             self.logger.error(f"Error during closure: {e}")
         finally:
             self._close_event_log()
+            self._close_controller_log()  # Fix 4.9
             self.logger.info("--> Cleanup complete")
 
     def _resilient(self, target, name: str):
@@ -560,11 +568,7 @@ class REACHER:
 
             data = json.loads(line)
 
-            with open(self.controller_log, 'a', newline='') as file:
-                file.write(json.dumps(data))
-                file.write('\n')
-                file.flush()
-                os.fsync(file.fileno())
+            self._write_controller_log(data)
 
             # Fix: F-004 — Use .get() so a missing 'level' key doesn't KeyError
             level = data.get('level')
@@ -840,6 +844,35 @@ class REACHER:
                 self._event_log_file.close()
             except Exception:
                 self.logger.warning("Failed to close event log", exc_info=True)
+
+    def _write_controller_log(self, data: dict) -> None:
+        """Append a JSON line to controller_log.json (Fix 4.9).
+
+        Mirrors _write_event_log: persistent handle, flush every write, fsync
+        every _CONTROLLER_LOG_FSYNC_INTERVAL writes. Avoids the syscall storm
+        of open/close/fsync per firmware line at high event rates.
+        """
+        try:
+            if self._controller_log_file is None or self._controller_log_file.closed:
+                self._controller_log_file = open(self.controller_log, "a", newline="")
+            self._controller_log_file.write(json.dumps(data) + "\n")
+            self._controller_log_file.flush()
+            self._controller_log_write_count += 1
+            if self._controller_log_write_count >= self._CONTROLLER_LOG_FSYNC_INTERVAL:
+                os.fsync(self._controller_log_file.fileno())
+                self._controller_log_write_count = 0
+        except Exception:
+            self.logger.warning("Failed to write controller log", exc_info=True)
+
+    def _close_controller_log(self) -> None:
+        """Flush and close the persistent controller log file handle."""
+        if self._controller_log_file is not None and not self._controller_log_file.closed:
+            try:
+                self._controller_log_file.flush()
+                os.fsync(self._controller_log_file.fileno())
+                self._controller_log_file.close()
+            except Exception:
+                self.logger.warning("Failed to close controller log", exc_info=True)
 
     def _export_segment(self, behavior: list, suffix: str = "") -> str:
         """Write behavior_events{suffix}.csv to the session log directory.
