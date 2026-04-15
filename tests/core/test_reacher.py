@@ -66,6 +66,80 @@ def test_init_with_session_id(mock_serial):
         assert r.event_callback is cb
 
 
+def test_resilient_wrapper_restarts_after_exception(reacher, mocker):
+    """Fix 7.1: unhandled exception in a thread body is caught, a warning is
+    emitted, and the target is retried."""
+    mocker.patch("time.sleep")  # skip the 1s back-off
+    cb = mocker.Mock()
+    reacher.event_callback = cb
+    reacher.session_id = "sid12345"
+
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("boom")
+        # Second call returns cleanly, simulating a recovered target.
+
+    wrapped = reacher._resilient(flaky, "flaky")
+    wrapped()
+
+    assert calls["n"] == 2  # raised once, restarted once, clean return
+    # Exactly one warning event emitted with reason=thread_crash.
+    warnings = [
+        c.args for c in cb.call_args_list
+        if c.args[1] == "warning" and c.args[2].get("reason") == "thread_crash"
+    ]
+    assert len(warnings) == 1
+    assert warnings[0][2]["thread"] == "flaky"
+
+
+def test_resilient_wrapper_gives_up_after_max_restarts(reacher, mocker):
+    """Fix 7.1: a target that fails forever is abandoned after the budget."""
+    mocker.patch("time.sleep")
+    cb = mocker.Mock()
+    reacher.event_callback = cb
+    reacher.session_id = "sid12345"
+
+    def always_raises():
+        raise RuntimeError("persistent")
+
+    wrapped = reacher._resilient(always_raises, "always_raises")
+    wrapped()  # Must return; must not hang.
+
+    # The budget is 10 restarts; we should see exactly 10 warning emissions.
+    warnings = [c for c in cb.call_args_list if c.args[1] == "warning"]
+    assert len(warnings) == 10
+
+
+def test_resilient_wrapper_tolerates_broken_callback(reacher, mocker):
+    """Fix 7.1: a failing event_callback must not crash the shim itself."""
+    mocker.patch("time.sleep")
+    reacher.event_callback = Mock(side_effect=RuntimeError("cb broken"))
+    reacher.session_id = "sid12345"
+
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("boom")
+
+    wrapped = reacher._resilient(flaky, "flaky")
+    wrapped()  # Should not raise.
+    assert calls["n"] == 2
+
+
+def test_make_thread_returns_daemon_thread(reacher):
+    """Fix 7.1: helper builds a daemon thread with the right name."""
+    import threading as _threading
+    t = reacher._make_thread(lambda: None, "myname")
+    assert isinstance(t, _threading.Thread)
+    assert t.daemon is True
+    assert t.name == "myname"
+
+
 def test_reset(reacher, mocker):
     """Test that reset clears data, stops the program, and resets flags."""
     mocker.patch.object(reacher, "stop_program")

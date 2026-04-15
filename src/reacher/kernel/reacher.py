@@ -101,9 +101,12 @@ class REACHER:
 
         # Thread variables
         # Fix: PY-007 — Threads created here but started lazily in open_serial()
-        self.serial_thread: threading.Thread = threading.Thread(target=self.read_serial, daemon=True)
-        self.queue_thread: threading.Thread = threading.Thread(target=self.handle_queue, daemon=True)
-        self.time_check_thread: threading.Thread = threading.Thread(target=self.monitor_time_limit, daemon=True)
+        # Fix 7.1: wrap each target in a resilient shim so an unhandled
+        # exception in read_serial/handle_queue/monitor_time_limit does not
+        # silently kill the daemon. See _resilient().
+        self.serial_thread: threading.Thread = self._make_thread(self.read_serial, "read_serial")
+        self.queue_thread: threading.Thread = self._make_thread(self.handle_queue, "handle_queue")
+        self.time_check_thread: threading.Thread = self._make_thread(self.monitor_time_limit, "monitor_time_limit")
         self.thread_lock: threading.Lock = threading.Lock()
         self.serial_flag: threading.Event = threading.Event()
         self.program_flag: threading.Event = threading.Event()
@@ -231,9 +234,9 @@ class REACHER:
         self.serial_flag.clear()
         self.program_flag.set()
         self.time_check_flag.set()
-        self.serial_thread = threading.Thread(target=self.read_serial, daemon=True)
-        self.queue_thread = threading.Thread(target=self.handle_queue, daemon=True)
-        self.time_check_thread = threading.Thread(target=self.monitor_time_limit, daemon=True)
+        self.serial_thread = self._make_thread(self.read_serial, "read_serial")
+        self.queue_thread = self._make_thread(self.handle_queue, "handle_queue")
+        self.time_check_thread = self._make_thread(self.monitor_time_limit, "monitor_time_limit")
         self.serial_thread.start()
         self.queue_thread.start()
         self.time_check_thread.start()
@@ -308,18 +311,20 @@ class REACHER:
         self.ser.open()
         if self.serial_flag.is_set():
             self.serial_flag.clear()
-        if not self.serial_thread.is_alive(): 
+        if not self.serial_thread.is_alive():
             self.logger.info("--> Starting serial thread")
-            self.serial_thread = threading.Thread(target=self.read_serial, daemon=True)
+            self.serial_thread = self._make_thread(self.read_serial, "read_serial")
             self.serial_thread.start()
         if not self.queue_thread.is_alive():
             self.logger.info("--> Starting queue thread")
-            self.queue_thread = threading.Thread(target=self.handle_queue, daemon=True)
+            self.queue_thread = self._make_thread(self.handle_queue, "handle_queue")
             self.queue_thread.start()
         # Fix: PY-007 — Start time-check thread on connection (deferred from __init__)
         if not self.time_check_thread.is_alive():
             self.logger.info("--> Starting time check thread")
-            self.time_check_thread = threading.Thread(target=self.monitor_time_limit, daemon=True)
+            self.time_check_thread = self._make_thread(
+                self.monitor_time_limit, "monitor_time_limit"
+            )
             self.time_check_thread.start()
         time.sleep(2)
         self.ser.reset_input_buffer()
@@ -375,6 +380,58 @@ class REACHER:
         finally:
             self._close_event_log()
             self.logger.info("--> Cleanup complete")
+
+    def _resilient(self, target, name: str):
+        """Fix 7.1: wrap a thread body so an unhandled exception does not
+        silently kill the daemon.
+
+        Catches exceptions from ``target``, logs a traceback, emits a
+        ``warning`` WS event with ``reason="thread_crash"``, and retries
+        after a one-second back-off. Gives up after ten consecutive
+        failures so a fundamentally broken target does not spin forever.
+        A clean return from ``target`` (the normal stop path — serial_flag
+        or time_check_flag is set) exits the shim immediately.
+        """
+        _MAX_RESTARTS = 10
+
+        def wrapped():
+            restarts = 0
+            while True:
+                try:
+                    target()
+                    return  # target exited cleanly via its own stop flag
+                except Exception:
+                    restarts += 1
+                    self.logger.exception(
+                        "Thread %s crashed (restart %d/%d)",
+                        name, restarts, _MAX_RESTARTS,
+                    )
+                    try:
+                        self._emit("warning", {
+                            "reason": "thread_crash",
+                            "thread": name,
+                        })
+                    except Exception:
+                        # Protect against a failing event_callback — bug 7.4
+                        # handles the counting; do not recurse here.
+                        pass
+                    if restarts >= _MAX_RESTARTS:
+                        self.logger.error(
+                            "Thread %s exceeded restart budget; giving up", name,
+                        )
+                        return
+                    time.sleep(1.0)
+
+        wrapped.__name__ = f"resilient_{name}"
+        return wrapped
+
+    def _make_thread(self, target, name: str) -> threading.Thread:
+        """Fix 7.1: build a resilient daemon thread using ``_resilient``."""
+        return threading.Thread(
+            target=self._resilient(target, name),
+            daemon=True,
+            name=name,
+        )
 
     def read_serial(self) -> None:
         """Read data from the serial port and queue it for processing.
