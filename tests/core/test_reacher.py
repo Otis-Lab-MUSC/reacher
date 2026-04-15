@@ -131,6 +131,62 @@ def test_resilient_wrapper_tolerates_broken_callback(reacher, mocker):
     assert calls["n"] == 2
 
 
+def _simulate_queue_overflow(reacher_instance, now: float) -> None:
+    """Drive the overflow branch once at the given monotonic time."""
+    reacher_instance._queue_overflow_count += 1
+    if now - reacher_instance._last_queue_overflow_emit > 1.0:
+        reacher_instance._emit("warning", {
+            "reason": "queue_overflow",
+            "count": reacher_instance._queue_overflow_count,
+        })
+        reacher_instance._last_queue_overflow_emit = now
+
+
+def test_queue_overflow_emits_first_warning_immediately(reacher, mocker):
+    """Fix 2.6: the first overflow always emits a warning."""
+    cb = mocker.Mock()
+    reacher.event_callback = cb
+    reacher.session_id = "sid12345"
+
+    _simulate_queue_overflow(reacher, now=0.0)
+
+    warnings = [c for c in cb.call_args_list
+                if c.args[1] == "warning" and c.args[2].get("reason") == "queue_overflow"]
+    assert len(warnings) == 1
+    assert warnings[0].args[2]["count"] == 1
+
+
+def test_queue_overflow_throttles_repeat_warnings(reacher, mocker):
+    """Fix 2.6: overflows inside a 1s window do not double-emit."""
+    cb = mocker.Mock()
+    reacher.event_callback = cb
+    reacher.session_id = "sid12345"
+
+    _simulate_queue_overflow(reacher, now=0.0)
+    _simulate_queue_overflow(reacher, now=0.3)
+    _simulate_queue_overflow(reacher, now=0.9)
+
+    warnings = [c for c in cb.call_args_list
+                if c.args[1] == "warning" and c.args[2].get("reason") == "queue_overflow"]
+    assert len(warnings) == 1
+    # Counter advances even when warnings are suppressed.
+    assert reacher._queue_overflow_count == 3
+
+
+def test_queue_overflow_emits_again_after_throttle_window(reacher, mocker):
+    """Fix 2.6: once the throttle window elapses, a new overflow re-emits."""
+    cb = mocker.Mock()
+    reacher.event_callback = cb
+    reacher.session_id = "sid12345"
+
+    _simulate_queue_overflow(reacher, now=0.0)
+    _simulate_queue_overflow(reacher, now=1.1)
+
+    warnings = [c for c in cb.call_args_list
+                if c.args[1] == "warning" and c.args[2].get("reason") == "queue_overflow"]
+    assert len(warnings) == 2
+
+
 def test_make_thread_returns_daemon_thread(reacher):
     """Fix 7.1: helper builds a daemon thread with the right name."""
     import threading as _threading

@@ -98,6 +98,14 @@ class REACHER:
         # Fix: F-003 — Configurable serial reconnection parameters
         self._SERIAL_RECONNECT_RETRIES: int = 3
         self._SERIAL_RECONNECT_DELAY: int = 3  # seconds between retry attempts
+        # Fix 2.6: count queue-overflow drops and throttle WS-warning emission.
+        # Without visibility, an overflowed queue silently drops serial lines
+        # while the frontend still shows "connected". The counter is cumulative;
+        # the throttle keeps an overflow storm from flooding the WS queue in
+        # turn (which would itself need to drop). -inf ensures the first
+        # overflow always emits.
+        self._queue_overflow_count: int = 0
+        self._last_queue_overflow_emit: float = float("-inf")
 
         # Thread variables
         # Fix: PY-007 — Threads created here but started lazily in open_serial()
@@ -457,7 +465,19 @@ class REACHER:
                     try:
                         self.queue.put_nowait(decoded)
                     except queue.Full:
-                        self.logger.warning("Serial queue full — dropping line: %s", decoded)
+                        # Fix 2.6: surface overflow to the frontend so a silent
+                        # data-loss window is visible. Throttle to one emission
+                        # per second so an overflow storm doesn't itself flood
+                        # the WS queue.
+                        self._queue_overflow_count += 1
+                        self.logger.warning("Serial queue full — dropping line")
+                        _now = time.monotonic()
+                        if _now - self._last_queue_overflow_emit > 1.0:
+                            self._emit("warning", {
+                                "reason": "queue_overflow",
+                                "count": self._queue_overflow_count,
+                            })
+                            self._last_queue_overflow_emit = _now
                 else:
                     time.sleep(0.1)
             except (serial.SerialException, OSError) as e:
