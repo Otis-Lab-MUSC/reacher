@@ -178,8 +178,19 @@ async def proxy_request(device_id: str, rest_path: str, request: Request) -> Res
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="Remote machine did not respond")
 
+    # Preserve Content-Disposition/Content-Length for binary file downloads
+    # (e.g. /api/file/{sid}/export/download).  Deliberately drop
+    # Content-Encoding: httpx has already decoded the body on this side, so
+    # forwarding a stale "gzip" would mislead the browser.
+    passthrough: dict[str, str] = {}
+    for h in ("content-disposition", "content-length"):
+        v = upstream.headers.get(h)
+        if v:
+            passthrough[h] = v
+
     return Response(
         content=upstream.content,
         status_code=upstream.status_code,
+        headers=passthrough,
         media_type=upstream.headers.get("content-type", "application/json"),
     )

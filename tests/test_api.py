@@ -420,6 +420,68 @@ class TestFileEndpoints:
             # Event log round-trips
             assert zf.read("event_log.jsonl").decode() == event_log_path.read_text()
 
+    @pytest.mark.parametrize("stored_filename,expected_stem", [
+        ("run1.zip", "run1"),
+        ("run2.ZIP", "run2"),
+        ("run3.tar.gz", "run3"),
+        ("run4.tgz", "run4"),
+        ("run5", "run5"),  # negative control — unchanged
+    ])
+    def test_export_zip_strips_doubled_archive_suffix(self, client, tmp_path, stored_filename, expected_stem):
+        """Filenames with archive suffixes must not produce `{name}.zip.zip` downloads."""
+        resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
+        sid = resp.json()["session_id"]
+
+        sm = client.app.state.session_manager
+        instance = sm.get_instance(sid)
+        instance.get_filename.return_value = stored_filename
+        instance.get_data_destination.return_value = str(tmp_path)
+        folder = tmp_path / expected_stem
+        folder.mkdir()
+        instance.make_destination_folder.return_value = str(folder)
+        instance.get_behavior_data.return_value = []
+        instance.get_firmware_information.return_value = {"sketch": "fr", "version": "v2.0.0"}
+        instance.get_hardware_settings.return_value = []
+        instance.get_frame_data.return_value = []
+        instance.get_segment_exports.return_value = []
+        instance.get_segment_event_counts.return_value = []
+
+        resp = client.post(f"/api/file/{sid}/export/zip", json={}, headers=AUTH_HEADER)
+        assert resp.status_code == 200
+        file_path = resp.json()["file_path"]
+
+        # Exactly one `.zip` at the tail — never doubled.
+        assert file_path.endswith(f"{expected_stem}.zip")
+        assert not file_path.endswith(".zip.zip")
+
+        # Contents must remain the flat layout (no nested archives).
+        with zipfile.ZipFile(file_path) as zf:
+            names = zf.namelist()
+            assert not any(n.lower().endswith((".zip", ".tar", ".gz", ".tgz")) for n in names)
+
+        # The cleaned filename must be pushed back into the kernel so downstream
+        # folder/segment naming uses the same stem.
+        assert instance.set_filename.called
+        assert instance.set_filename.call_args[0][0] == expected_stem
+
+    def test_set_file_config_strips_archive_suffix(self, client):
+        """POST /config must not persist a `.zip`-suffixed filename into the kernel."""
+        resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
+        sid = resp.json()["session_id"]
+
+        sm = client.app.state.session_manager
+        instance = sm.get_instance(sid)
+        instance.get_filename.return_value = "experiment"
+        instance.get_data_destination.return_value = "/tmp"
+
+        resp = client.post(
+            f"/api/file/{sid}/config",
+            json={"filename": "experiment.zip"},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 200
+        instance.set_filename.assert_called_with("experiment")
+
     def test_export_zip_missing_segment_file_logs_and_continues(self, client, tmp_path):
         """A missing on-disk segment CSV should not break the export."""
         resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)

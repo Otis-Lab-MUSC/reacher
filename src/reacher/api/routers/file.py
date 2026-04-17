@@ -18,6 +18,20 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+_ARCHIVE_SUFFIXES = (".tar.gz", ".tgz", ".zip", ".tar", ".gz")
+
+
+def _strip_archive_suffix(name: str) -> str:
+    """Strip one trailing archive extension so `{name}.zip` never becomes `*.zip.zip`."""
+    if not name:
+        return name
+    lower = name.lower()
+    for suf in _ARCHIVE_SUFFIXES:  # longest-first
+        if lower.endswith(suf):
+            return name[: -len(suf)]
+    return name
+
+
 def _sanitize_for_path(name: str) -> str:
     """Replace characters unsafe for directory/file names with underscores."""
     sanitized = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name)
@@ -72,7 +86,7 @@ async def set_file_config(session_id: str, body: FileConfigRequest, request: Req
     if body.filename is not None:
         if os.sep in body.filename or "/" in body.filename:
             raise HTTPException(status_code=400, detail="Filename must not contain path separators")
-        instance.set_filename(body.filename)
+        instance.set_filename(_strip_archive_suffix(body.filename))
 
     if body.destination is not None:
         resolved = os.path.realpath(os.path.expanduser(body.destination))
@@ -122,7 +136,7 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
         raise HTTPException(status_code=404, detail="Session not found")
 
     instance = info.instance
-    filename = instance.get_filename()
+    filename = _strip_archive_suffix(instance.get_filename() or "")
     destination = instance.get_data_destination()
 
     if not filename:
@@ -131,14 +145,14 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
 
         if session_name and session_name != default_pattern:
             # Manually named session — use as-is (sanitized)
-            filename = _sanitize_for_path(session_name)
+            filename = _strip_archive_suffix(_sanitize_for_path(session_name))
         else:
             # Auto-default or empty — paradigm + port + datetime
             base = _sanitize_for_path(default_pattern)
             timestamp = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
             filename = f"{base}_{timestamp}"
 
-        instance.set_filename(filename)
+    instance.set_filename(filename)
     if not destination:
         destination = os.path.expanduser("~/Downloads")
         instance.set_data_destination(destination)
