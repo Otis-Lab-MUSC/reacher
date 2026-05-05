@@ -102,3 +102,47 @@ class TestBuildCommandPayload:
         # SESSION_START has no payload_key, so value is silently ignored
         payload = build_command_payload(101, 42)
         assert payload == {"cmd": 101}
+
+
+class TestPinCommands:
+    """Pin reassignment command codes (suffix x76) and their registry entries."""
+
+    EXPECTED = [
+        ("CUE_SET_PIN", 376),
+        ("CUE2_SET_PIN", 386),
+        ("PUMP_SET_PIN", 476),
+        ("PUMP2_SET_PIN", 486),
+        ("LICK_SET_PIN", 576),
+        ("LASER_SET_PIN", 676),
+        ("MICROSCOPE_SET_TRIG_PIN", 976),
+        ("LEVER_RH_SET_PIN", 1076),
+        ("LEVER_LH_SET_PIN", 1376),
+    ]
+
+    def test_codes_match(self):
+        for name, code in self.EXPECTED:
+            assert int(getattr(CommandCode, name)) == code, f"{name} != {code}"
+
+    def test_registry_entries_present(self):
+        for _, code in self.EXPECTED:
+            assert code in COMMAND_REGISTRY, f"code {code} missing from registry"
+
+    def test_payload_key_is_pin(self):
+        for _, code in self.EXPECTED:
+            spec = COMMAND_REGISTRY[code]
+            assert spec.payload_key == "pin", f"{spec.name} payload_key={spec.payload_key!r}"
+            assert spec.payload_type == "int"
+
+    def test_not_deprecated(self):
+        for _, code in self.EXPECTED:
+            assert not COMMAND_REGISTRY[code].deprecated
+
+    def test_pavlovian_includes_lever_set_pin(self):
+        """Pavlovian doesn't use levers but pin reassignment is paradigm-agnostic."""
+        for code in (1076, 1376):
+            spec = COMMAND_REGISTRY[code]
+            assert "pavlovian" in spec.paradigms, f"{spec.name} excludes pavlovian"
+
+    def test_build_payload_with_pin(self):
+        payload = build_command_payload(376, 11)
+        assert payload == {"cmd": 376, "pin": 11}

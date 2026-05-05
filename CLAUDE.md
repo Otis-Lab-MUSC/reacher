@@ -11,23 +11,24 @@ REACHER is a Python backend server that bridges Arduino hardware and a React bro
 ```bash
 # Install for development
 pip install -e ".[dev]"
+pip install -e ".[tray]"          # adds pystray + Pillow for system-tray icon
 
-# Run the server
+# Run the server (FastAPI on REACHER_PORT)
 python -m reacher
-# or after install:
-reacher
+reacher                            # console script (entry: reacher.api.app:main)
 
-# Run all tests
-pytest
+# Run the read-only terminal dashboard against a running server
+reacher-monitor                    # localhost:6229
+reacher-monitor --url http://host:6229 --refresh 5
 
-# Run a single test file
-pytest tests/test_api.py
+# Tests
+pytest                             # all
+pytest tests/test_api.py           # single file
+pytest tests/test_api.py::test_function_name -v   # single test
 
-# Run a single test by name
-pytest tests/test_api.py::test_function_name -v
-
-# Lint
+# Lint / format (target py310, line-length 120)
 ruff check .
+ruff format .
 
 # Build wheel
 python -m build
@@ -38,10 +39,12 @@ python -m build
 | Variable | Default | Purpose |
 |---|---|---|
 | `REACHER_PORT` | `6229` | HTTP/WebSocket port |
-| `REACHER_HOST` | `0.0.0.0` | Bind address |
+| `REACHER_HOST` | `0.0.0.0` | Bind address (the parent `CLAUDE.md` lists `127.0.0.1` — code default is `0.0.0.0`) |
 | `REACHER_STATIC_DIR` | `web/dist/` | React frontend directory |
 | `REACHER_HEX_DIR` | `firmware/hex/` | Pre-compiled firmware hex files |
 | `REACHER_CORS_ORIGINS` | None | Extra allowed CORS origins (comma-separated) |
+| `REACHER_API_KEY` | auto-generated | Bearer token; auto-written to `~/.reacher/api_key` if unset |
+| `REACHER_AVRDUDE_PATH` | system PATH | Path to `avrdude` binary (set during PyInstaller packaging) |
 
 ## Architecture
 
@@ -64,11 +67,21 @@ Coordinates multiple independent `REACHER` instances. Enforces port locking (pre
 
 ### FastAPI App (`src/reacher/api/`)
 - `app.py` — lifespan management, CORS, static file mounting, auth middleware
-- Auth: Bearer token (API key generated at startup); `/health` is exempt for mDNS discovery
-- 13 routers under `api/routers/`: `session`, `serial`, `firmware`, `hardware`, `program`, `data`, `file`, `websocket`, `discovery`, `pairing`, `proxy`, `lifecycle`
+- `middleware/auth.py` — Bearer-token gate over `/api/*`; `/health` is exempt (used by mDNS discovery and `reacher-monitor`); WebSocket auth uses `?token=<key>` query param
+- 12 routers under `api/routers/`: `session`, `serial`, `firmware`, `hardware`, `program`, `data`, `file`, `websocket`, `discovery`, `pairing`, `proxy`, `lifecycle`
+
+### Discovery and Pairing (zero-config peer setup)
+- `discovery.py` — advertises `_reacher._tcp.local.` over mDNS via `zeroconf` (soft dependency; degrades gracefully when missing). Also tracks unicast `/api/discovery/register` self-registrations as a fallback for networks that block multicast.
+- `pairing.py` — rotating 6-digit code (5-min interval) printed to stdout and validated by `/api/pairing/claim`, so API keys never travel through mDNS or QR codes. State lives in `~/.reacher/paired`.
+- `machines.py` — persistent paired-peer store at `~/.reacher/machines.json` (mode `0o600`), keyed by `device_id`.
+- `device_id.py` — stable per-host identifier used by discovery/pairing.
+- `monitor.py` (`reacher-monitor` script) — Rich-based terminal dashboard showing pairing code, health, and session state; designed to run on the host's local display independently of any SSH session.
 
 ### Firmware Uploader (`src/reacher/uploader/`)
 Wraps `avrdude` to flash Arduino firmware. Handles PyInstaller frozen mode path resolution (`_MEIPASS/hex/`) and streams upload progress via callback. Board profiles in `boards.py`.
+
+### systemd integration
+`systemd/reacher@.service` and `systemd/reacher-monitor@.service` are templated unit files (`%i` = username) for running the API and the dashboard as services on Linux hosts (e.g. a lab Raspberry Pi).
 
 ## Serial Protocol
 

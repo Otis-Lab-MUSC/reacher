@@ -317,6 +317,29 @@ def test_handle_behavioral_events(reacher, mocker):
     assert reacher.behavior_data[0]["event"] == "INFUSION"
 
 
+def test_update_behavioral_events_persists_pavlov(reacher, mocker):
+    """PAVLOV rows must land in behavior_data so they reach behavior_events.csv."""
+    mocker.patch("builtins.open", mocker.mock_open())
+    mocker.patch("os.fsync")
+    reacher.program_running = True
+    reacher.program_flag.clear()
+    event = {
+        "level": "007",
+        "device": "PAVLOV",
+        "event": "TRIAL_START",
+        "timestamp": 42000,
+        "trial_type": "rewarded",
+    }
+    reacher.update_behavioral_events(event)
+    assert len(reacher.behavior_data) == 1
+    row = reacher.behavior_data[0]
+    assert row["device"] == "PAVLOV"
+    assert row["event"] == "TRIAL_START"
+    assert row["start_timestamp"] == 42000
+    assert row["end_timestamp"] == 42000
+    assert row["trial_type"] == "rewarded"
+
+
 def test_handle_frame_events(reacher, mocker):
     """Test that handle_data processes frame event data into frame_data."""
     mocker.patch("builtins.open", mocker.mock_open())

@@ -150,6 +150,124 @@ class TestHardwareEndpoints:
         assert resp.status_code == 429
 
 
+class TestPinAssignments:
+    """PUT /api/hardware/{id}/pins — bulk pin reassignment endpoint."""
+
+    def _connected_session(self, client, port="/dev/ttyUSB0", board="uno"):
+        resp = client.post("/api/sessions", json={"port": port, "paradigm": "fr"}, headers=AUTH_HEADER)
+        sid = resp.json()["session_id"]
+        sm = client.app.state.session_manager
+        sm.set_state(sid, "connected")
+        sm.set_board(sid, board)
+        return sid
+
+    def test_happy_path_uno(self, client):
+        sid = self._connected_session(client)
+        resp = client.put(
+            f"/api/hardware/{sid}/pins",
+            json={"assignments": {"cue": 11, "pump": 4, "lever_rh": 12}},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["applied"] == {"cue": 11, "pump": 4, "lever_rh": 12}
+        assert body["errors"] == []
+
+    def test_state_gate_rejects_non_connected(self, client):
+        resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
+        sid = resp.json()["session_id"]
+        # state defaults to "idle" — not connected
+        resp = client.put(
+            f"/api/hardware/{sid}/pins",
+            json={"assignments": {"cue": 11}},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 409
+
+    def test_collision_rejection(self, client):
+        sid = self._connected_session(client)
+        resp = client.put(
+            f"/api/hardware/{sid}/pins",
+            json={"assignments": {"cue": 11, "laser": 11}},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "pin_collision"
+
+    def test_role_violation_pwm_required(self, client):
+        sid = self._connected_session(client)
+        # Pin 4 is digital but not PWM on UNO; cue requires PWM
+        resp = client.put(
+            f"/api/hardware/{sid}/pins",
+            json={"assignments": {"cue": 4}},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["error"] == "pin_violations"
+        assert any(v["required"] == "pwm" for v in detail["violations"])
+
+    def test_out_of_range_rejected_on_uno(self, client):
+        sid = self._connected_session(client, board="uno")
+        # Pin 30 only exists on Mega; should fail UNO digital range
+        resp = client.put(
+            f"/api/hardware/{sid}/pins",
+            json={"assignments": {"pump": 30}},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert any(v["error"] == "pin_out_of_range" for v in detail["violations"])
+
+    def test_mega_allows_pin_30(self, client):
+        sid = self._connected_session(client, board="mega")
+        resp = client.put(
+            f"/api/hardware/{sid}/pins",
+            json={"assignments": {"pump": 30}},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["applied"] == {"pump": 30}
+
+    def test_mega_pwm_44_allowed_for_cue(self, client):
+        sid = self._connected_session(client, board="mega")
+        resp = client.put(
+            f"/api/hardware/{sid}/pins",
+            json={"assignments": {"cue": 44}},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 200
+
+    def test_unknown_component_rejected(self, client):
+        sid = self._connected_session(client)
+        resp = client.put(
+            f"/api/hardware/{sid}/pins",
+            json={"assignments": {"invalid_component": 11}},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 400
+
+    def test_single_command_pin_state_gate(self, client):
+        # Sending a SET_PIN via single POST /command also requires connected state
+        resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
+        sid = resp.json()["session_id"]
+        resp = client.post(
+            f"/api/hardware/{sid}/command",
+            json={"code": 376, "value": 11},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 409
+
+    def test_single_command_pin_role_validation(self, client):
+        sid = self._connected_session(client)
+        resp = client.post(
+            f"/api/hardware/{sid}/command",
+            json={"code": 376, "value": 4},  # cue requires PWM, pin 4 is non-PWM
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 422
+
+
 class TestProgramEndpoints:
     def test_set_limits(self, client):
         resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
@@ -328,6 +446,71 @@ class TestFileEndpoints:
             assert len(ft_rows) == 5
             assert ft_rows[0] == {"frame_index": "0", "timestamp_ms": "50"}
             assert ft_rows[4] == {"frame_index": "4", "timestamp_ms": "450"}
+
+    def test_export_zip_includes_pavlov_rows(self, client, tmp_path):
+        """behavior_events.csv in the export must carry device=PAVLOV rows."""
+        resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
+        sid = resp.json()["session_id"]
+
+        sm = client.app.state.session_manager
+        instance = sm.get_instance(sid)
+        instance.get_filename.return_value = "pavlov_file"
+        instance.get_data_destination.return_value = str(tmp_path)
+        folder = tmp_path / "pavlov_file"
+        folder.mkdir()
+        instance.make_destination_folder.return_value = str(folder)
+        instance.get_behavior_data.return_value = [
+            {
+                "device": "PAVLOV",
+                "event": "TRIAL_START",
+                "start_timestamp": 1000,
+                "end_timestamp": 1000,
+            },
+            {
+                "device": "PAVLOV",
+                "event": "REWARD_DELIVERED",
+                "start_timestamp": 2000,
+                "end_timestamp": 2000,
+            },
+            {
+                "device": "PUMP",
+                "event": "INFUSION",
+                "start_timestamp": 2100,
+                "end_timestamp": 2200,
+            },
+        ]
+        instance.get_firmware_information.return_value = {"sketch": "pavlovian", "version": "v2.0.0"}
+        instance.get_hardware_settings.return_value = []
+        instance.get_frame_data.return_value = []
+        instance.get_segment_exports.return_value = []
+        instance.get_segment_event_counts.return_value = []
+
+        event_log_path = tmp_path / "pavlov_event_log.jsonl"
+        event_log_path.write_text('{"type": "SESSION_START", "timestamp": 1700000000.0}\n')
+        instance.get_event_log_path.return_value = str(event_log_path)
+
+        resp = client.post(
+            f"/api/file/{sid}/export/zip",
+            json={
+                "session_name": "pavlov_session",
+                "notes": "",
+                "infusion_count": 1,
+                "press_count": 0,
+                "trial_count": 1,
+                "program_start_time": 1700000000.0,
+            },
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 200
+        zip_path = resp.json()["file_path"]
+        with zipfile.ZipFile(zip_path) as zf:
+            behavior_csv = zf.read("behavior_events.csv").decode()
+            reader = csv.DictReader(io.StringIO(behavior_csv))
+            rows = list(reader)
+        devices = [r["device"] for r in rows]
+        assert devices.count("PAVLOV") == 2
+        events = {r["event"] for r in rows if r["device"] == "PAVLOV"}
+        assert events == {"TRIAL_START", "REWARD_DELIVERED"}
 
     def test_export_zip_segmented_session(self, client, tmp_path):
         """Segmented sessions should include all prior segment CSVs, event_log.jsonl, and segment metadata."""

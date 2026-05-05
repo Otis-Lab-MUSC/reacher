@@ -58,9 +58,9 @@ def _frozen_base() -> Optional[str]:
 def _fetch_hex_from_github() -> Optional[str]:
     """Download all hex files from GitHub and cache them in ~/.reacher/hex/.
 
-    The ``reacher-firmware`` repo uses a **flat** layout (``hex/{paradigm}.hex``)
-    and currently only compiles for UNO.  Downloaded files are stored in the
-    board-aware local cache at ``~/.reacher/hex/uno/{paradigm}.hex``.
+    The ``reacher-firmware`` repo uses a board-aware subdirectory layout
+    (``hex/{board}/{paradigm}.hex``). Downloaded files are stored in the
+    matching local cache at ``~/.reacher/hex/{board}/{paradigm}.hex``.
 
     Returns the cache directory path on success, None if fetching is disabled
     (``REACHER_SKIP_HEX_FETCH=1``) or if all downloads fail.
@@ -68,28 +68,28 @@ def _fetch_hex_from_github() -> Optional[str]:
     if os.getenv("REACHER_SKIP_HEX_FETCH"):
         return None
 
-    # The repo only has flat-layout UNO hex files — store into uno/ subdir.
-    board_dir = os.path.join(_HEX_CACHE_DIR, "uno")
-    os.makedirs(board_dir, exist_ok=True)
-
     failed = 0
     total = 0
 
-    for paradigm in PARADIGMS:
-        dest = os.path.join(board_dir, f"{paradigm}.hex")
-        if os.path.isfile(dest):
-            age = time.time() - os.path.getmtime(dest)
-            if age < _CACHE_MAX_AGE_S:
-                continue  # Fresh enough
-            logger.info("Cached %s.hex is %.1fh old — re-downloading", paradigm, age / 3600)
-        url = f"{_FIRMWARE_RAW_BASE}/{paradigm}.hex"
-        total += 1
-        try:
-            urllib.request.urlretrieve(url, dest)
-            logger.info("Fetched firmware hex: uno/%s.hex", paradigm)
-        except Exception as exc:
-            failed += 1
-            logger.warning("Could not fetch %s.hex from GitHub: %s", paradigm, exc)
+    for board in BOARD_PROFILES:
+        board_dir = os.path.join(_HEX_CACHE_DIR, board)
+        os.makedirs(board_dir, exist_ok=True)
+
+        for paradigm in PARADIGMS:
+            dest = os.path.join(board_dir, f"{paradigm}.hex")
+            if os.path.isfile(dest):
+                age = time.time() - os.path.getmtime(dest)
+                if age < _CACHE_MAX_AGE_S:
+                    continue  # Fresh enough
+                logger.info("Cached %s/%s.hex is %.1fh old — re-downloading", board, paradigm, age / 3600)
+            url = f"{_FIRMWARE_RAW_BASE}/{board}/{paradigm}.hex"
+            total += 1
+            try:
+                urllib.request.urlretrieve(url, dest)
+                logger.info("Fetched firmware hex: %s/%s.hex", board, paradigm)
+            except Exception as exc:
+                failed += 1
+                logger.warning("Could not fetch %s/%s.hex from GitHub: %s", board, paradigm, exc)
 
     if total > 0 and failed == total:
         # Every attempted download failed — don't return a broken cache dir

@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from serial.tools import list_ports
 
 from ...uploader.boards import detect_board_from_port
+from ... import pin_overrides
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,41 @@ async def connect_serial(session_id: str, request: Request):
     except Exception as e:
         logger.warning("Board detection failed on session %s: %s", session_id, e)
 
-    return {"status": "connected", "port": info.port, "detected_paradigm": detected_paradigm, "detected_board": detected_board}
+    # --- Replay persisted pin overrides (per-port) ---
+    # Saved overrides may be invalid for the now-connected board (e.g. pin 50
+    # saved when the rig was Mega and an UNO is now plugged in). Drop those
+    # with a warning rather than refusing to connect.
+    replayed_pins: dict[str, int] = {}
+    skipped_pins: list[dict] = []
+    try:
+        saved = pin_overrides.get(info.port)
+        for component, pin in saved.items():
+            code = pin_overrides.SET_PIN_CODE_FOR.get(component)
+            if code is None:
+                skipped_pins.append({"component": component, "reason": "unknown_component"})
+                continue
+            violation = pin_overrides.validate_pin(code, pin, detected_board)
+            if violation is not None:
+                logger.warning("Skipping invalid saved pin override for session %s: %s", session_id, violation)
+                skipped_pins.append({"component": component, "reason": violation})
+                continue
+            try:
+                instance.send_command(code, pin)
+                replayed_pins[component] = pin
+            except Exception as e:
+                logger.warning("Failed to replay pin %s=%d on session %s: %s", component, pin, session_id, e)
+                skipped_pins.append({"component": component, "reason": "send_failed"})
+    except Exception:
+        logger.exception("Pin override replay failed on session %s", session_id)
+
+    return {
+        "status": "connected",
+        "port": info.port,
+        "detected_paradigm": detected_paradigm,
+        "detected_board": detected_board,
+        "replayed_pins": replayed_pins,
+        "skipped_pins": skipped_pins,
+    }
 
 
 @router.post("/{session_id}/disconnect")

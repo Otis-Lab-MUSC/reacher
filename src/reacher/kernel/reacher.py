@@ -66,6 +66,16 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     1075: ("LEVER_RH", "ratio", _USE_VALUE),
     1374: ("LEVER_LH", "timeout", _USE_VALUE),
     1375: ("LEVER_LH", "ratio", _USE_VALUE),
+    # --- Pin reassignment (suffix x76) ---
+    376: ("CUE", "pin", _USE_VALUE),
+    386: ("CUE2", "pin", _USE_VALUE),
+    476: ("PUMP", "pin", _USE_VALUE),
+    486: ("PUMP2", "pin", _USE_VALUE),
+    576: ("LICK_CIRCUIT", "pin", _USE_VALUE),
+    676: ("LASER", "pin", _USE_VALUE),
+    976: ("MICROSCOPE", "trigger_pin", _USE_VALUE),
+    1076: ("LEVER_RH", "pin", _USE_VALUE),
+    1376: ("LEVER_LH", "pin", _USE_VALUE),
 }
 
 class REACHER:
@@ -716,10 +726,10 @@ class REACHER:
         # Always emit for real-time UI feedback (e.g. hardware testing)
         self._emit("event", entry_dict)
 
-        # Only persist to dataset when actively recording
-        # PAVLOV events (TRIAL_START, ALL_TRIALS_COMPLETE) are trial-structure
-        # metadata, not behavioral observations — exclude from CSV export.
-        if self.program_running and not self.program_flag.is_set() and entry_dict.get('device') != 'PAVLOV':
+        # Only persist to dataset when actively recording.
+        # PAVLOV rows are kept so downstream analysis (pynapse/axplorer) can
+        # align on trial_start / reward_delivered / reward_omitted.
+        if self.program_running and not self.program_flag.is_set():
             with self.thread_lock:
                 self.behavior_data.append(entry_dict)
                 if entry_dict.get('device') == 'PUMP' and entry_dict.get('event') == 'INFUSION':

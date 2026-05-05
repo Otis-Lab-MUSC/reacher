@@ -57,10 +57,12 @@ class CommandCode(IntEnum):
     CUE_SET_TRACE = 373  # deprecated
     CUE_SET_PULSE_ON = 374
     CUE_SET_PULSE_OFF = 375
+    CUE_SET_PIN = 376
     CUE2_SET_FREQUENCY = 381
     CUE2_SET_DURATION = 382
     CUE2_SET_PULSE_ON = 384
     CUE2_SET_PULSE_OFF = 385
+    CUE2_SET_PIN = 386
 
     # --- Pump (4xx) ---
     PUMP_DISARM = 400
@@ -71,11 +73,14 @@ class CommandCode(IntEnum):
     PUMP2_TEST = 413
     PUMP_SET_DURATION = 472
     PUMP_SET_TRACE = 473  # deprecated
+    PUMP_SET_PIN = 476
     PUMP2_SET_DURATION = 482
+    PUMP2_SET_PIN = 486
 
     # --- Lick Circuit (5xx) ---
     LICK_DISARM = 500
     LICK_ARM = 501
+    LICK_SET_PIN = 576
 
     # --- Laser (6xx) ---
     LASER_DISARM = 600
@@ -83,6 +88,7 @@ class CommandCode(IntEnum):
     LASER_TEST = 603
     LASER_SET_FREQUENCY = 671
     LASER_SET_DURATION = 672
+    LASER_SET_PIN = 676
     LASER_MODE_CONTINGENT = 681
     LASER_MODE_INDEPENDENT = 682
     PAV_LASER_CS_PLUS = 691
@@ -95,12 +101,14 @@ class CommandCode(IntEnum):
     MICROSCOPE_DISARM = 900
     MICROSCOPE_ARM = 901
     MICROSCOPE_TEST = 903
+    MICROSCOPE_SET_TRIG_PIN = 976
 
     # --- RH Lever (10xx) ---
     LEVER_RH_DISARM = 1000
     LEVER_RH_ARM = 1001
     LEVER_RH_SET_TIMEOUT = 1074
     LEVER_RH_SET_RATIO = 1075
+    LEVER_RH_SET_PIN = 1076
     LEVER_RH_SET_INACTIVE = 1080
     LEVER_RH_SET_ACTIVE = 1081
 
@@ -109,6 +117,7 @@ class CommandCode(IntEnum):
     LEVER_LH_ARM = 1301
     LEVER_LH_SET_TIMEOUT = 1374
     LEVER_LH_SET_RATIO = 1375
+    LEVER_LH_SET_PIN = 1376
     LEVER_LH_SET_INACTIVE = 1380
     LEVER_LH_SET_ACTIVE = 1381
 
@@ -369,6 +378,16 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         payload_key="pulse_off", payload_type="int",
         paradigms=["pavlovian"],
     ),
+    376: CommandSpec(
+        CommandCode.CUE_SET_PIN, "CUE_SET_PIN",
+        "Reassign the primary cue speaker output pin",
+        payload_key="pin", payload_type="int",
+    ),
+    386: CommandSpec(
+        CommandCode.CUE2_SET_PIN, "CUE2_SET_PIN",
+        "Reassign the secondary cue speaker output pin",
+        payload_key="pin", payload_type="int",
+    ),
 
     # --- Pump ---
     400: CommandSpec(
@@ -411,6 +430,16 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         "Set secondary pump duration (ms)",
         payload_key="duration", payload_type="int",
     ),
+    476: CommandSpec(
+        CommandCode.PUMP_SET_PIN, "PUMP_SET_PIN",
+        "Reassign the primary pump output pin",
+        payload_key="pin", payload_type="int",
+    ),
+    486: CommandSpec(
+        CommandCode.PUMP2_SET_PIN, "PUMP2_SET_PIN",
+        "Reassign the secondary pump output pin",
+        payload_key="pin", payload_type="int",
+    ),
 
     # --- Lick Circuit ---
     500: CommandSpec(
@@ -420,6 +449,11 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     501: CommandSpec(
         CommandCode.LICK_ARM, "LICK_ARM",
         "Arm lick detection circuit",
+    ),
+    576: CommandSpec(
+        CommandCode.LICK_SET_PIN, "LICK_SET_PIN",
+        "Reassign the lick detection circuit input pin",
+        payload_key="pin", payload_type="int",
     ),
 
     # --- Laser ---
@@ -458,6 +492,12 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     682: CommandSpec(
         CommandCode.LASER_MODE_INDEPENDENT, "LASER_MODE_INDEPENDENT",
         "Set laser to independent mode (free-running)",
+        paradigms=["fr", "pr", "vi", "omission", "pavlovian"],
+    ),
+    676: CommandSpec(
+        CommandCode.LASER_SET_PIN, "LASER_SET_PIN",
+        "Reassign the laser PWM output pin",
+        payload_key="pin", payload_type="int",
         paradigms=["fr", "pr", "vi", "omission", "pavlovian"],
     ),
     691: CommandSpec(
@@ -499,6 +539,11 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.MICROSCOPE_TEST, "MICROSCOPE_TEST",
         "Test microscope sync",
     ),
+    976: CommandSpec(
+        CommandCode.MICROSCOPE_SET_TRIG_PIN, "MICROSCOPE_SET_TRIG_PIN",
+        "Reassign the microscope trigger output pin (timestamp pin is fixed)",
+        payload_key="pin", payload_type="int",
+    ),
 
     # --- RH Lever ---
     1000: CommandSpec(
@@ -529,6 +574,11 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.LEVER_RH_SET_ACTIVE, "LEVER_RH_SET_ACTIVE",
         "Set right-hand lever to active",
     ),
+    1076: CommandSpec(
+        CommandCode.LEVER_RH_SET_PIN, "LEVER_RH_SET_PIN",
+        "Reassign the right-hand lever input pin",
+        payload_key="pin", payload_type="int",
+    ),
 
     # --- LH Lever ---
     1300: CommandSpec(
@@ -558,6 +608,11 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     1381: CommandSpec(
         CommandCode.LEVER_LH_SET_ACTIVE, "LEVER_LH_SET_ACTIVE",
         "Set left-hand lever to active",
+    ),
+    1376: CommandSpec(
+        CommandCode.LEVER_LH_SET_PIN, "LEVER_LH_SET_PIN",
+        "Reassign the left-hand lever input pin",
+        payload_key="pin", payload_type="int",
     ),
 }
 
