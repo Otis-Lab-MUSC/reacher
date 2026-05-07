@@ -111,7 +111,7 @@ async def ws_relay(ws: WebSocket, device_id: str, session_id: str):
             pass
 
 
-@router.api_route("/{device_id}/{rest_path:path}", methods=["GET", "POST", "DELETE"])
+@router.api_route("/{device_id}/{rest_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
 async def proxy_request(device_id: str, rest_path: str, request: Request) -> Response:
     """Forward a REST request to a paired remote REACHER machine.
 

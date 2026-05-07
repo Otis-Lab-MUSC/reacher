@@ -268,6 +268,23 @@ class TestPinAssignments:
         assert resp.status_code == 422
 
 
+class TestProxyMethods:
+    """Regression: proxy must forward all REST verbs the API uses, not just GET/POST/DELETE.
+    PUT was added by /api/hardware/{id}/pins; PATCH reserved for forward-compat."""
+
+    @pytest.mark.parametrize("method", ["GET", "POST", "PUT", "PATCH", "DELETE"])
+    def test_proxy_routes_verb(self, client, method):
+        resp = client.request(
+            method,
+            "/api/proxy/nonexistent_device/api/hardware/sid/pins",
+            headers=AUTH_HEADER,
+            json={} if method in ("POST", "PUT", "PATCH") else None,
+        )
+        # Unpaired device → 404 from handler. Anything else (e.g. 405) means
+        # the verb didn't reach the proxy_request body.
+        assert resp.status_code == 404, f"{method} did not route to proxy handler"
+
+
 class TestProgramEndpoints:
     def test_set_limits(self, client):
         resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
