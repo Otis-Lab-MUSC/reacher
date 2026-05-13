@@ -71,40 +71,52 @@ async def ws_relay(ws: WebSocket, device_id: str, session_id: str):
     upstream_base = machine["url"].replace("http://", "ws://").replace("https://", "wss://")
     upstream_url = f"{upstream_base}/ws/{session_id}?token={machine['api_key']}"
 
+    # Connect upstream BEFORE accepting the browser — a failure here surfaces as
+    # a real WS error to the browser (code 1011) so reconnectAttempt accumulates
+    # and the client's give-up logic fires instead of looping silently forever.
+    try:
+        upstream = await websockets.connect(upstream_url, open_timeout=10)
+    except Exception as exc:
+        logger.error(
+            "WS relay upstream connect failed for %s/%s url=%s: %s",
+            device_id[:8], session_id, upstream_url, exc, exc_info=True,
+        )
+        await ws.close(code=1011, reason=f"upstream {type(exc).__name__}")
+        return
+
     await ws.accept()
 
     try:
-        async with websockets.connect(upstream_url) as upstream:
-            async def browser_to_pi():
-                try:
-                    while True:
-                        data = await ws.receive_text()
-                        await upstream.send(data)
-                except WebSocketDisconnect:
-                    pass
+        async def browser_to_pi():
+            try:
+                while True:
+                    data = await ws.receive_text()
+                    await upstream.send(data)
+            except (WebSocketDisconnect, websockets.ConnectionClosed):
+                pass
 
-            async def pi_to_browser():
-                try:
-                    async for data in upstream:
-                        if isinstance(data, str):
-                            await ws.send_text(data)
-                        else:
-                            await ws.send_bytes(data)
-                except websockets.ConnectionClosed:
-                    pass
+        async def pi_to_browser():
+            try:
+                async for data in upstream:
+                    if isinstance(data, str):
+                        await ws.send_text(data)
+                    else:
+                        await ws.send_bytes(data)
+            except (websockets.ConnectionClosed, WebSocketDisconnect):
+                pass
 
-            tasks = [
-                asyncio.create_task(browser_to_pi()),
-                asyncio.create_task(pi_to_browser()),
-            ]
-            _done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            for task in pending:
-                task.cancel()
-    except websockets.exceptions.WebSocketException as exc:
-        logger.warning("WS relay upstream connection failed for %s/%s: %s", device_id[:8], session_id, exc)
-    except Exception:
-        logger.debug("WS relay error for %s/%s", device_id[:8], session_id, exc_info=True)
+        tasks = [
+            asyncio.create_task(browser_to_pi()),
+            asyncio.create_task(pi_to_browser()),
+        ]
+        _done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
     finally:
+        try:
+            await upstream.close()
+        except Exception:
+            pass
         try:
             await ws.close()
         except Exception:
