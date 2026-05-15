@@ -50,6 +50,7 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     # --- Pump parameters ---
     472: ("PUMP", "duration", _USE_VALUE),
     482: ("PUMP2", "duration", _USE_VALUE),
+    221: ("PUMP2", "active", _USE_VALUE),
     # --- Laser parameters ---
     671: ("LASER", "frequency", _USE_VALUE),
     672: ("LASER", "duration", _USE_VALUE),
@@ -138,6 +139,11 @@ class REACHER:
         self.serial_flag.set()
         self.program_flag.set()
         self.time_check_flag.set()
+        # Fix: LAZ-001 — Event gate for firmware readiness (IDENTIFY response)
+        # Set when firmware_information is populated (IDENTIFY ack received),
+        # used to delay "connected" state transition until bootloader exits and
+        # firmware is truly ready to process commands.
+        self._firmware_ready: threading.Event = threading.Event()
 
         # Data process variables (guarded by thread_lock for cross-thread access)
         self.behavior_data: List[Dict[str, Union[str, int]]] = []
@@ -630,6 +636,9 @@ class REACHER:
             with self.thread_lock:  # Fix: F-009 — guard cross-thread dict access
                 self.firmware_information.update(event)
             self.logger.info("--> Updated arduino configuration")
+            # Fix: LAZ-001 — Signal firmware readiness (IDENTIFY ack received)
+            # Unblock any waiting connect/post-upload flow so state transitions to "connected"
+            self._firmware_ready.set()
             # Fix: XL-001 — Warn on firmware version mismatch
             fw_version = event.get("version", "")
             if fw_version:

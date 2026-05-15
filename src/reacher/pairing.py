@@ -123,6 +123,15 @@ def is_paired() -> bool:
     return _paired
 
 
+def is_active_pairing() -> bool:
+    """Return True if this device is paired and the pairing is not yet stale.
+
+    Used by the watchdog to defer shutdown while a controller is still managing
+    this device between sessions.
+    """
+    return _paired and not _is_stale()
+
+
 def touch() -> None:
     """Record that an authenticated request was received.
 

@@ -30,7 +30,13 @@ class TestPersistence:
         pin_overrides.save("/dev/ttyUSB0", {"cue": 11})
         with open(tmp_overrides / "pin_overrides.json") as f:
             data = json.load(f)
-        assert data == {"/dev/ttyUSB0": {"cue": 11}}
+        assert data == {"/dev/ttyUSB0": {"board": None, "pins": {"cue": 11}}}
+
+    def test_save_with_board_persists_board(self, tmp_overrides):
+        pin_overrides.save("/dev/ttyUSB0", {"cue": 11}, board="uno")
+        with open(tmp_overrides / "pin_overrides.json") as f:
+            data = json.load(f)
+        assert data == {"/dev/ttyUSB0": {"board": "uno", "pins": {"cue": 11}}}
 
     def test_save_replaces_existing(self, tmp_overrides):
         pin_overrides.save("/dev/ttyUSB0", {"cue": 11, "pump": 4})
@@ -76,7 +82,40 @@ class TestPersistence:
             json.dumps({"/dev/ttyUSB0": {"cue": 11}, "garbage": "string"})
         )
         pin_overrides.load()
-        assert pin_overrides.get_all() == {"/dev/ttyUSB0": {"cue": 11}}
+        assert pin_overrides.get_all() == {"/dev/ttyUSB0": {"board": None, "pins": {"cue": 11}}}
+
+    def test_load_old_flat_format_migrates_as_wildcard(self, tmp_overrides):
+        (tmp_overrides / "pin_overrides.json").write_text(
+            json.dumps({"/dev/ttyUSB0": {"lever_rh": 12, "cue": 3}})
+        )
+        pin_overrides.load()
+        # Old flat format migrated: board=None (wildcard), pins preserved
+        assert pin_overrides.get("/dev/ttyUSB0") == {"lever_rh": 12, "cue": 3}
+        assert pin_overrides.get_all()["/dev/ttyUSB0"]["board"] is None
+
+
+class TestBoardFiltering:
+    def test_board_match_returns_pins(self, tmp_overrides):
+        pin_overrides.save("/dev/ttyUSB0", {"cue": 11}, board="uno")
+        assert pin_overrides.get("/dev/ttyUSB0", current_board="uno") == {"cue": 11}
+
+    def test_board_mismatch_returns_empty(self, tmp_overrides):
+        pin_overrides.save("/dev/ttyUSB0", {"cue": 44}, board="mega")
+        assert pin_overrides.get("/dev/ttyUSB0", current_board="uno") == {}
+
+    def test_wildcard_board_applies_to_any(self, tmp_overrides):
+        pin_overrides.save("/dev/ttyUSB0", {"cue": 11}, board=None)
+        assert pin_overrides.get("/dev/ttyUSB0", current_board="mega") == {"cue": 11}
+        assert pin_overrides.get("/dev/ttyUSB0", current_board="uno") == {"cue": 11}
+
+    def test_saved_board_applies_when_detection_fails(self, tmp_overrides):
+        # When current_board is None (detection failed), apply regardless of saved board
+        pin_overrides.save("/dev/ttyUSB0", {"cue": 11}, board="uno")
+        assert pin_overrides.get("/dev/ttyUSB0", current_board=None) == {"cue": 11}
+
+    def test_board_comparison_is_case_insensitive(self, tmp_overrides):
+        pin_overrides.save("/dev/ttyUSB0", {"cue": 11}, board="UNO")
+        assert pin_overrides.get("/dev/ttyUSB0", current_board="uno") == {"cue": 11}
 
 
 class TestValidator:

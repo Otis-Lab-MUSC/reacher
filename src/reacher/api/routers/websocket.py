@@ -14,6 +14,7 @@ from typing import Dict, Set
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..middleware.auth import verify_ws_token
+from reacher import pairing
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -103,9 +104,15 @@ async def _watchdog():
                         idle,
                     )
             elif idle >= _WATCHDOG_TIMEOUT:
-                logger.info("Watchdog: no connections for %.0fs — shutting down", idle)
-                _trigger_shutdown()
-                return
+                if pairing.is_active_pairing():
+                    logger.info(
+                        "Watchdog: no connections for %.0fs but device is actively paired — deferring shutdown",
+                        idle,
+                    )
+                else:
+                    logger.info("Watchdog: no connections for %.0fs — shutting down", idle)
+                    _trigger_shutdown()
+                    return
 
 
 def enqueue_event(session_id: str, event_type: str, data: dict):

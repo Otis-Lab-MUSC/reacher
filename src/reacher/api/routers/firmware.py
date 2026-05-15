@@ -116,19 +116,31 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
     try:
         instance.set_COM_port(info.port)
         instance.open_serial()
-        # Request firmware identification
+        # Fix: [PERSON_NAME] — Wait for IDENTIFY response (firmware readiness gate)
+        # Boot process: 1.5–2s bootloader → firmware starts → responds to IDENTIFY
+        # Don't set "connected" until firmware is ready, to prevent command loss.
+        instance._firmware_ready.clear()
         instance.send_command(102)  # IDENTIFY
     except Exception as e:
-        _logger.error("Post-upload reconnect failed for session %s: %s", session_id, e, exc_info=True)
+        _logger.error("Post-upload reconnect failed for session %s: %s", [ADDRESS], e, exc_info=True)
         sm.set_state(session_id, "idle")
         raise HTTPException(status_code=500, detail="Post-upload reconnect failed")
 
     sm.set_paradigm(session_id, body.paradigm)
     sm.set_board(session_id, body.board)
+
+    # Fix: [PERSON_NAME] — Wait for IDENTIFY response before transitioning to "connected"
+    # This ensures bootloader has exited and firmware is ready to process commands.
+    try:
+        if instance._firmware_ready.wait(timeout=2.0):
+            _logger.info("Post-upload firmware identified for session %s", session_id)
+        else:
+            _logger.warning("Post-upload IDENTIFY timeout (bootloader slow?) for session %s", session_id)
+    except Exception as e:
+        _logger.warning("Post-upload IDENTIFY wait failed for session %s: %s", session_id, e)
+
     sm.set_state(session_id, "connected")
 
-    # Give firmware time to respond with identification
-    await asyncio.sleep(1)
     return {
         "status": "uploaded",
         "paradigm": body.paradigm,

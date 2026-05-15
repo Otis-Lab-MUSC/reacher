@@ -8,6 +8,7 @@ from serial.tools import list_ports
 
 from ...uploader.boards import detect_board_from_port
 from ... import pin_overrides
+from . import websocket as _ws
 
 logger = logging.getLogger(__name__)
 
@@ -51,19 +52,26 @@ async def connect_serial(session_id: str, request: Request):
         logger.exception("Serial connect failed for session %s", session_id)
         raise HTTPException(status_code=500, detail="Failed to open serial connection")
 
-    sm.set_state(session_id, "connected")
-
     # --- Non-fatal firmware detection probe ---
+    # Fix: LAZ-001 — Wait for IDENTIFY response (firmware readiness gate)
+    # Don't transition to "connected" until bootloader exits and firmware acks IDENTIFY.
+    # This prevents commands from being silently dropped during the ~1.5–2s bootloader window.
     detected_paradigm = None
     try:
         instance.send_command(102)  # IDENTIFY
-        await asyncio.sleep(1)     # Give firmware time to respond
-        detected_paradigm = instance.get_detected_paradigm()
-        if detected_paradigm:
-            sm.set_paradigm(session_id, detected_paradigm)
-            logger.info("Auto-detected paradigm '%s' on session %s", detected_paradigm, session_id)
+        instance._firmware_ready.clear()  # Reset gate for this reconnect
+        # Wait up to 2s for firmware to respond (typical bootloader exit is 1.5–2s)
+        if instance._firmware_ready.wait(timeout=2.0):
+            detected_paradigm = instance.get_detected_paradigm()
+            if detected_paradigm:
+                sm.set_paradigm(session_id, detected_paradigm)
+                logger.info("Auto-detected paradigm '%s' on session %s", detected_paradigm, session_id)
+        else:
+            logger.warning("IDENTIFY response timeout (bootloader may be slow) for session %s", session_id)
     except Exception as e:
         logger.warning("Firmware detection failed on session %s: %s", session_id, e)
+
+    sm.set_state(session_id, "connected")
 
     # --- Non-fatal board detection via USB VID/PID ---
     detected_board = None
@@ -82,7 +90,7 @@ async def connect_serial(session_id: str, request: Request):
     replayed_pins: dict[str, int] = {}
     skipped_pins: list[dict] = []
     try:
-        saved = pin_overrides.get(info.port)
+        saved = pin_overrides.get(info.port, detected_board)
         for component, pin in saved.items():
             code = pin_overrides.SET_PIN_CODE_FOR.get(component)
             if code is None:
@@ -101,6 +109,16 @@ async def connect_serial(session_id: str, request: Request):
                 skipped_pins.append({"component": component, "reason": "send_failed"})
     except Exception:
         logger.exception("Pin override replay failed on session %s", session_id)
+
+    if replayed_pins or skipped_pins:
+        parts = [f"{k}={v}" for k, v in replayed_pins.items()]
+        msg = f"Replayed {len(replayed_pins)} pin override(s) on connect"
+        if parts:
+            msg += f": {', '.join(parts)}"
+        if skipped_pins:
+            skipped_names = [s.get('component', '?') for s in skipped_pins]
+            msg += f"; skipped {len(skipped_pins)}: {', '.join(skipped_names)}"
+        _ws.enqueue_event(session_id, "log", {"level": "warn", "message": msg})
 
     return {
         "status": "connected",
@@ -129,3 +147,16 @@ async def disconnect_serial(session_id: str, request: Request):
 
     sm.set_state(session_id, "idle")
     return {"status": "disconnected"}
+
+
+@router.get("/pin-overrides")
+async def get_pin_overrides():
+    """Return all persisted pin overrides keyed by port."""
+    return pin_overrides.get_all()
+
+
+@router.delete("/pin-overrides")
+async def clear_pin_overrides(port: str):
+    """Clear all pin overrides for the given port path (pass as query param)."""
+    pin_overrides.clear(port)
+    return {"status": "cleared", "port": port}

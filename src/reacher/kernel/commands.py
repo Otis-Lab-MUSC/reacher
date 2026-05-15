@@ -44,6 +44,7 @@ class CommandCode(IntEnum):
     PAV_PULSE_CONFIG = 219
 
     SET_TRACE_INTERVAL = 220
+    SET_ACTIVE_PUMP = 221
 
     # --- Cue (3xx) ---
     CUE_DISARM = 300
@@ -301,6 +302,12 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.SET_TRACE_INTERVAL, "SET_TRACE_INTERVAL",
         "Set trace interval (ms)",
         payload_key="interval", payload_type="int",
+    ),
+    221: CommandSpec(
+        CommandCode.SET_ACTIVE_PUMP, "SET_ACTIVE_PUMP",
+        "Select which pump fires in the reward chain (pump2=false → primary, pump2=true → secondary)",
+        payload_key="pump2", payload_type="bool",
+        paradigms=["fr", "pr", "vi", "omission"],
     ),
 
     # --- Cue ---

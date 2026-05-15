@@ -69,6 +69,7 @@ class FirmwareSimulator:
         self.cue2_duration = 1000
         self.pump2_armed = False
         self.pump2_duration = 3000
+        self.pump2_active = False
         self.lever_rh_timeout = 20000  # ms
         self.lever_lh_timeout = 20000  # ms
 
@@ -192,6 +193,8 @@ class FirmwareSimulator:
             self._send_device_test("PUMP", 13, "INFUSION", self.pump2_duration)
         elif cmd == 482:
             self.pump2_duration = cmd_data.get("duration", self.pump2_duration)
+        elif cmd == 221:  # SET_ACTIVE_PUMP
+            self.pump2_active = cmd_data.get("pump2", False)
         elif cmd == 671:
             self.laser_frequency = cmd_data.get("frequency", self.laser_frequency)
         elif cmd == 672:
@@ -551,8 +554,15 @@ class FirmwareSimulator:
             })
             self._clock += self.cue_duration
 
-        # Pump
-        if self.pump_armed:
+        # Pump — use secondary if SET_ACTIVE_PUMP selected it, else primary
+        if self.pump2_active and self.pump2_armed:
+            self._send({
+                "level": "007", "device": "PUMP2", "pin": 13,
+                "event": "INFUSION", "start_timestamp": self._clock,
+                "end_timestamp": self._clock + self.pump2_duration,
+            })
+            self._clock += self.pump2_duration
+        elif not self.pump2_active and self.pump_armed:
             self._send({
                 "level": "007", "device": "PUMP", "pin": 9,
                 "event": "INFUSION", "start_timestamp": self._clock,

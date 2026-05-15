@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 _DIR = os.path.expanduser("~/.reacher")
 _FILE = os.path.join(_DIR, "pin_overrides.json")
 _lock = threading.Lock()
-_cache: dict[str, dict[str, int]] = {}
+_cache: dict[str, dict] = {}
 
 
 # --- Pin validation metadata ---------------------------------------------
@@ -131,6 +131,16 @@ def validate_pin(code: int, pin: int, board: Optional[str]) -> Optional[dict]:
 # --- Persistence ---------------------------------------------------------
 
 
+def _migrate_entry(mapping: dict) -> dict:
+    """Normalise a single port entry to the {board, pins} schema."""
+    if "pins" in mapping and isinstance(mapping["pins"], dict):
+        pins = {k: int(v) for k, v in mapping["pins"].items() if isinstance(v, (int, float))}
+        return {"board": mapping.get("board"), "pins": pins}
+    # old flat format — treat as board-wildcard
+    pins = {k: int(v) for k, v in mapping.items() if isinstance(v, (int, float))}
+    return {"board": None, "pins": pins}
+
+
 def load() -> None:
     """Load pin overrides from disk into memory. Called at startup."""
     global _cache
@@ -141,7 +151,7 @@ def load() -> None:
         with open(_FILE) as f:
             data = json.load(f)
         _cache = {
-            port: {k: int(v) for k, v in mapping.items() if isinstance(v, (int, float))}
+            port: _migrate_entry(mapping)
             for port, mapping in data.items()
             if isinstance(mapping, dict)
         }
@@ -151,28 +161,50 @@ def load() -> None:
         _cache = {}
 
 
-def get(port: str) -> dict[str, int]:
-    """Return the pin override map for *port* (empty dict if none)."""
+def get(port: str, current_board: Optional[str] = None) -> dict[str, int]:
+    """Return the pin override map for *port*, filtered by *current_board*.
+
+    Returns an empty dict if there are no overrides for the port, or if the
+    saved entry was recorded under a different board than *current_board*.
+    Entries saved with board=None are treated as board-wildcards and always
+    apply.  When *current_board* is None (detection failed), overrides are
+    applied regardless of saved board.
+    """
     with _lock:
-        return dict(_cache.get(port, {}))
+        entry = _cache.get(port)
+        if entry is None:
+            return {}
+        saved_board = entry.get("board")
+        pins = entry.get("pins", {})
+        if (
+            saved_board is not None
+            and current_board is not None
+            and saved_board.lower() != current_board.lower()
+        ):
+            logger.info(
+                "Ignoring pin overrides for %s: saved under board '%s', current board is '%s'",
+                port, saved_board, current_board,
+            )
+            return {}
+        return dict(pins)
 
 
-def get_all() -> dict[str, dict[str, int]]:
-    """Return a shallow copy of all pin overrides."""
+def get_all() -> dict[str, dict]:
+    """Return a shallow copy of all pin overrides in the {board, pins} schema."""
     with _lock:
-        return {p: dict(m) for p, m in _cache.items()}
+        return {p: {"board": e.get("board"), "pins": dict(e.get("pins", {}))} for p, e in _cache.items()}
 
 
-def save(port: str, assignments: dict[str, int]) -> None:
-    """Persist a complete override map for *port* and flush to disk.
+def save(port: str, assignments: dict[str, int], board: Optional[str] = None) -> None:
+    """Persist a complete override map for *port* tagged with *board* and flush to disk.
 
-    *assignments* fully replaces any existing entry for the port. Pass an
+    *assignments* fully replaces any existing entry for the port.  Pass an
     empty dict to clear all overrides for the port (use clear() for that
     intent — same effect, clearer name).
     """
     with _lock:
         if assignments:
-            _cache[port] = {k: int(v) for k, v in assignments.items()}
+            _cache[port] = {"board": board, "pins": {k: int(v) for k, v in assignments.items()}}
         else:
             _cache.pop(port, None)
         _flush()

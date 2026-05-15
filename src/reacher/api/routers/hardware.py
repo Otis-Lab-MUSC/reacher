@@ -233,7 +233,7 @@ async def set_pins(session_id: str, body: PinAssignmentsRequest, request: Reques
         try:
             existing = pin_overrides.get(info.port)
             existing.update(applied)
-            pin_overrides.save(info.port, existing)
+            pin_overrides.save(info.port, existing, board=info.board)
         except Exception:
             logger.exception("Failed to persist pin overrides for session %s", session_id)
 
