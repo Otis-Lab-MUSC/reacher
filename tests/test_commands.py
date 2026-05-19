@@ -80,6 +80,29 @@ class TestGetCommandsForParadigm:
     def test_case_insensitive(self):
         assert get_commands_for_paradigm("FR") == get_commands_for_paradigm("fr")
 
+    def test_lever_ratio_excluded_from_non_operant_paradigms(self):
+        for paradigm in ("vi", "omission", "pavlovian"):
+            cmds = get_commands_for_paradigm(paradigm)
+            assert 1075 not in cmds, f"LEVER_RH_SET_RATIO must not be available for {paradigm}"
+            assert 1375 not in cmds, f"LEVER_LH_SET_RATIO must not be available for {paradigm}"
+
+    def test_lever_ratio_available_for_fr_and_pr(self):
+        for paradigm in ("fr", "pr"):
+            cmds = get_commands_for_paradigm(paradigm)
+            assert 1075 in cmds, f"LEVER_RH_SET_RATIO must be available for {paradigm}"
+            assert 1375 in cmds, f"LEVER_LH_SET_RATIO must be available for {paradigm}"
+
+    def test_lever_timeout_excluded_from_pavlovian(self):
+        cmds = get_commands_for_paradigm("pavlovian")
+        assert 1074 not in cmds, "LEVER_RH_SET_TIMEOUT must not be available for pavlovian"
+        assert 1374 not in cmds, "LEVER_LH_SET_TIMEOUT must not be available for pavlovian"
+
+    def test_lever_timeout_available_for_operant_paradigms(self):
+        for paradigm in ("fr", "pr", "vi", "omission"):
+            cmds = get_commands_for_paradigm(paradigm)
+            assert 1074 in cmds, f"LEVER_RH_SET_TIMEOUT must be available for {paradigm}"
+            assert 1374 in cmds, f"LEVER_LH_SET_TIMEOUT must be available for {paradigm}"
+
 
 class TestBuildCommandPayload:
     def test_simple_command(self):
