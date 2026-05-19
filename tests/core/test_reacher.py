@@ -341,9 +341,10 @@ def test_update_behavioral_events_persists_pavlov(reacher, mocker):
 
 
 def test_handle_frame_events(reacher, mocker):
-    """Test that handle_data processes frame event data into frame_data."""
+    """Test that handle_data processes frame event data into frame_data during active session."""
     mocker.patch("builtins.open", mocker.mock_open())
     mocker.patch("os.fsync")
+    reacher.program_flag.clear()
     event = {"level": "008", "timestamp": 54321}
     reacher.handle_data(json.dumps(event))
     assert reacher.frame_data == [54321]
@@ -690,3 +691,62 @@ class TestF010EventLogFsync:
         mock_close_log = mocker.patch.object(reacher, "_close_event_log")
         reacher.close_serial()
         mock_close_log.assert_called_once()
+
+
+class TestFrameTimestampStopSemantics:
+    """Fix FW-002: frame timestamps must be gated by program_flag, not discarded silently."""
+
+    def test_frame_event_logged_while_program_flag_clear(self, reacher, mocker):
+        """Level-008 events during active session land in frame_data."""
+        mocker.patch("builtins.open", mocker.mock_open())
+        mocker.patch("os.fsync")
+        reacher.program_flag.clear()
+        reacher.update_frame_events({"timestamp": 10000})
+        assert reacher.frame_data == [10000]
+
+    def test_frame_event_blocked_after_program_flag_set(self, reacher, mocker):
+        """Level-008 events after drain window (program_flag set) are discarded."""
+        mocker.patch("builtins.open", mocker.mock_open())
+        mocker.patch("os.fsync")
+        reacher.program_flag.set()
+        reacher.update_frame_events({"timestamp": 99999})
+        assert reacher.frame_data == []
+
+    def test_frame_events_straddle_stop(self, reacher, mocker):
+        """Frames before program_flag.set() persist; frames after are blocked."""
+        mocker.patch("builtins.open", mocker.mock_open())
+        mocker.patch("os.fsync")
+        reacher.program_flag.clear()
+        reacher.update_frame_events({"timestamp": 1000})
+        reacher.update_frame_events({"timestamp": 2000})
+        reacher.program_flag.set()
+        reacher.update_frame_events({"timestamp": 3000})
+        assert reacher.frame_data == [1000, 2000]
+
+    def test_frame_data_non_empty_after_session(self, reacher, mocker):
+        """frame_data is populated after a simulated session with frame events."""
+        mocker.patch("builtins.open", mocker.mock_open())
+        mocker.patch("os.fsync")
+        reacher.program_flag.clear()
+        for ts in range(0, 5000, 100):
+            reacher.update_frame_events({"timestamp": ts})
+        reacher.program_flag.set()
+        assert len(reacher.frame_data) == 50
+
+    def test_behavioral_events_unaffected_by_program_flag_guard(self, reacher, mocker):
+        """program_flag guard on frames does not interfere with behavioral event recording."""
+        mocker.patch("builtins.open", mocker.mock_open())
+        mocker.patch("os.fsync")
+        reacher.program_running = True
+        reacher.program_flag.clear()
+        event = {
+            "level": "007",
+            "device": "PUMP",
+            "event": "INFUSION",
+            "start_timestamp": 5000,
+            "end_timestamp": 5100,
+        }
+        reacher.update_behavioral_events(event)
+        reacher.update_frame_events({"timestamp": 5050})
+        assert len(reacher.behavior_data) == 1
+        assert reacher.frame_data == [5050]

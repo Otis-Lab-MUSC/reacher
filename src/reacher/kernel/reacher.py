@@ -767,6 +767,8 @@ class REACHER:
             threading.Thread(target=self.stop_program, daemon=True).start()
                 
     def update_frame_events(self, event: dict) -> None:
+        if self.program_flag.is_set():
+            return
         ts = int(event.get('timestamp'))
         self._write_event_log({"type": "frame", "timestamp": ts})
         with self.thread_lock:
