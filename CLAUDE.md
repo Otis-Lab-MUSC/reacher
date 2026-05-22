@@ -69,6 +69,10 @@ Coordinates multiple independent `REACHER` instances. Enforces port locking (pre
 - `app.py` — lifespan management, CORS, static file mounting, auth middleware
 - `middleware/auth.py` — Bearer-token gate over `/api/*`; `/health` is exempt (used by mDNS discovery and `reacher-monitor`); WebSocket auth uses `?token=<key>` query param
 - 12 routers under `api/routers/`: `session`, `serial`, `firmware`, `hardware`, `program`, `data`, `file`, `websocket`, `discovery`, `pairing`, `proxy`, `lifecycle`
+- `routers/proxy.py` — transparent HTTP + WebSocket proxy for paired remote machines (`/api/proxy/{device_id}/...`). The browser always talks to the local server, eliminating CORS configuration; WebSockets authenticate against the *local* API key via a short-lived ws-token.
+
+### Pin Overrides (`src/reacher/pin_overrides.py`)
+Persistent per-port Arduino pin remapping at `~/.reacher/pin_overrides.json` (mode `0o600`), keyed by serial port path. Owns the single source of truth for board pin validation metadata (UNO/Mega digital/PWM/interrupt sets) and the component→`CommandCode` mapping, shared between the HTTP router and the serial-connect replay path that re-applies overrides on every reconnect.
 
 ### Discovery and Pairing (zero-config peer setup)
 - `discovery.py` — advertises `_reacher._tcp.local.` over mDNS via `zeroconf` (soft dependency; degrades gracefully when missing). Also tracks unicast `/api/discovery/register` self-registrations as a fallback for networks that block multicast.
@@ -78,7 +82,7 @@ Coordinates multiple independent `REACHER` instances. Enforces port locking (pre
 - `monitor.py` (`reacher-monitor` script) — Rich-based terminal dashboard showing pairing code, health, and session state; designed to run on the host's local display independently of any SSH session.
 
 ### Firmware Uploader (`src/reacher/uploader/`)
-Wraps `avrdude` to flash Arduino firmware. Handles PyInstaller frozen mode path resolution (`_MEIPASS/hex/`) and streams upload progress via callback. Board profiles in `boards.py`.
+Wraps `avrdude` to flash Arduino firmware. Handles PyInstaller frozen mode path resolution (`_MEIPASS/hex/`) and streams upload progress via callback. `boards.py` is the board-profile registry — each entry maps a `board_id` to a display name, an Arduino CLI FQBN, and the `avrdude` argument tuple. Adding a new board is a single entry in `BOARD_PROFILES`.
 
 ### systemd integration
 `systemd/reacher@.service` and `systemd/reacher-monitor@.service` are templated unit files (`%i` = username) for running the API and the dashboard as services on Linux hosts (e.g. a lab Raspberry Pi).
@@ -114,14 +118,25 @@ Tests use `pytest` with `asyncio_mode=auto` (configured in `pyproject.toml`). Th
 - `tests/core/test_reacher.py` — kernel serial threading and event handling
 - `tests/test_commands.py` — command registry validation
 - `tests/test_websocket.py` — WebSocket event streaming
+- `tests/test_pin_overrides.py` — pin override persistence, validation, and serial-reconnect replay
+
+## Docs & Scripts
+
+- `docs/setup-guide.md` — end-user setup walkthrough (host install, pairing, systemd).
+- `scripts/install.sh` — host-side installer.
+- `scripts/bump-version.py` — single source of truth for the package version; updates `pyproject.toml` (and any mirrored version strings) in one shot.
 
 ## Data Output
 
-Experiments write to `~/REACHER/`:
+Live per-event logs write to `~/REACHER/LOG/`:
 ```
 ~/REACHER/
-├── LOG/YYYY-MM-DD_HH-MM-SS/
-│   ├── controller_log.json
-│   └── interface_log.log
-└── DATA/
+└── LOG/YYYY-MM-DD_HH-MM-SS/
+    ├── controller_log.json
+    └── interface_log.log
 ```
+
+Export ZIPs write to the user-configured Destination (`POST /api/file/{id}/config`).
+When no destination is configured, the fallback is `~/Downloads`. The fallback is
+**not** persisted — `get_data_destination()` remains unset until the user explicitly
+saves a destination via the UI or API.
