@@ -73,6 +73,27 @@ class FileConfigRequest(BaseModel):
     destination: Optional[str] = None
 
 
+@router.get("/browse")
+async def browse_folder():
+    """Open a native OS folder picker and return the selected absolute path.
+
+    Returns ``{"path": null}`` gracefully when no display is available (e.g.
+    headless servers) or when the user cancels the dialog.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        folder = filedialog.askdirectory(title="Select Destination Folder", parent=root)
+        root.destroy()
+        return {"path": folder or None}
+    except Exception as exc:
+        logger.warning("browse_folder unavailable: %s", exc)
+        return {"path": None}
+
+
 @router.post("/{session_id}/config")
 async def set_file_config(session_id: str, body: FileConfigRequest, request: Request):
     sm = request.app.state.session_manager
