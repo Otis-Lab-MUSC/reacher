@@ -1317,8 +1317,9 @@ class REACHER:
         **Returns:**
         - `str`: The path to the created folder.
         """
-        if not self.behavior_filename and not self.data_destination:
+        if not self.data_destination:
             self.data_destination = os.path.expanduser("~/Downloads")
+        if not self.behavior_filename:
             self.behavior_filename = f"{self.get_time()}"
         containing_folder = os.path.join(self.data_destination, self.behavior_filename.split('.')[0])
         if os.path.exists(containing_folder):

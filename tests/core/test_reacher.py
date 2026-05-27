@@ -443,6 +443,19 @@ def test_make_destination_folder(reacher, mocker):
         assert folder == "/data/experiment"
 
 
+def test_make_destination_folder_partial_none(reacher, mocker):
+    """make_destination_folder must not raise when only data_destination is None."""
+    mocker.patch("os.makedirs")
+    mocker.patch("os.path.exists", return_value=False)
+    with patch.object(reacher, "get_time", return_value="2023-01-01_12-00-00"):
+        reacher.data_destination = None
+        reacher.behavior_filename = "experiment"
+        folder = reacher.make_destination_folder()
+        import os
+        assert folder.startswith(os.path.expanduser("~/Downloads"))
+        assert reacher.data_destination == os.path.expanduser("~/Downloads")
+
+
 def test_event_callback_fires(mock_serial):
     """Test that _emit invokes the event_callback."""
     with (

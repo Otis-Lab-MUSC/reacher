@@ -364,7 +364,8 @@ class TestFileEndpoints:
         resp = client.post(f"/api/file/{sid}/export/zip", json={}, headers=AUTH_HEADER)
         assert resp.status_code == 200
         assert "file_path" in resp.json()
-        instance.set_data_destination.assert_not_called()
+        import os
+        instance.set_data_destination.assert_called_once_with(os.path.expanduser("~/Downloads"))
         instance.set_filename.assert_called_once()
         assert len(instance.set_filename.call_args[0][0]) > 0
 
