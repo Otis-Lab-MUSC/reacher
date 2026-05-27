@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import sys
 import time
 import zipfile
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -75,15 +76,29 @@ class FileConfigRequest(BaseModel):
 
 @router.get("/browse")
 async def browse_folder():
-    """Open a native OS folder picker and return the selected absolute path.
+    """Open a native OS folder picker; returns null if cancelled or no display."""
+    if sys.platform.startswith("linux"):
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["zenity", "--file-selection", "--directory", "--title=Select Destination Folder"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode == 0:
+                return {"path": result.stdout.strip() or None}
+            if result.returncode == 1:
+                return {"path": None}
+            # Other return codes fall through to tkinter
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass  # zenity unavailable — fall through to tkinter
 
-    Returns ``{"path": null}`` gracefully when no display is available (e.g.
-    headless servers) or when the user cancels the dialog.
-    """
     try:
         import tkinter as tk
         from tkinter import filedialog
         root = tk.Tk()
+        root.geometry("1x1+0+0")
         root.withdraw()
         root.attributes("-topmost", True)
         folder = filedialog.askdirectory(title="Select Destination Folder", parent=root)
