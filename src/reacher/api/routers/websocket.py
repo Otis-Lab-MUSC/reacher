@@ -39,8 +39,8 @@ _shutdown_scheduled = False
 _had_connections = False
 _last_connection_time: float = 0.0
 _WATCHDOG_INTERVAL = 10  # seconds between polls
-_WATCHDOG_TIMEOUT = 120  # seconds with 0 connections before soft suspend
-_WATCHDOG_HARD_KILL_TIMEOUT = 1800  # seconds after suspend before hard kill (30 min)
+_WATCHDOG_TIMEOUT = 300  # 5 minutes idle → soft suspend
+_WATCHDOG_HARD_KILL_TIMEOUT = 3300  # 55 min more → hard kill (total: 60 min from last connection)
 _server_suspended = False
 
 
@@ -82,6 +82,11 @@ def _trigger_suspend():
 def is_suspended() -> bool:
     """Return True if the server is in the soft-suspended state."""
     return _server_suspended
+
+
+def had_connections() -> bool:
+    """Return True if at least one WS client has ever connected since process start."""
+    return _had_connections
 
 
 def _any_session_active() -> bool:
