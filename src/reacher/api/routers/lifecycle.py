@@ -5,7 +5,7 @@ import logging
 
 from fastapi import APIRouter, Response
 
-from .websocket import total_connections, _trigger_shutdown
+from .websocket import total_connections, _trigger_shutdown, is_suspended
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -26,6 +26,9 @@ async def shutdown(response: Response):
 
     async def _delayed_shutdown():
         await asyncio.sleep(_SHUTDOWN_GRACE_PERIOD)
+        if is_suspended():
+            logger.info("Shutdown beacon: server already suspended — hard-kill timer owns shutdown")
+            return
         if total_connections() == 0:
             logger.info("Grace period elapsed with 0 connections — shutting down")
             _trigger_shutdown()

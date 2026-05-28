@@ -39,7 +39,9 @@ _shutdown_scheduled = False
 _had_connections = False
 _last_connection_time: float = 0.0
 _WATCHDOG_INTERVAL = 10  # seconds between polls
-_WATCHDOG_TIMEOUT = 120  # seconds with 0 connections before auto-shutdown
+_WATCHDOG_TIMEOUT = 120  # seconds with 0 connections before soft suspend
+_WATCHDOG_HARD_KILL_TIMEOUT = 1800  # seconds after suspend before hard kill (30 min)
+_server_suspended = False
 
 
 def total_connections() -> int:
@@ -61,6 +63,25 @@ def _trigger_shutdown():
     _shutdown_scheduled = True
     logger.info("Triggering graceful shutdown (SIGINT to self)")
     os.kill(os.getpid(), signal.SIGINT)
+
+
+def _trigger_suspend():
+    """Soft-suspend: broadcast timeout signal to connected clients; keep process alive."""
+    global _server_suspended
+    if _server_suspended:
+        return
+    _server_suspended = True
+    logger.info("Watchdog: soft-suspending (no connections for %ds)", _WATCHDOG_TIMEOUT)
+    for sid in list(_connections.keys()):
+        enqueue_event(sid, "server_suspended", {
+            "reason": "watchdog_timeout",
+            "hard_kill_in": _WATCHDOG_HARD_KILL_TIMEOUT,
+        })
+
+
+def is_suspended() -> bool:
+    """Return True if the server is in the soft-suspended state."""
+    return _server_suspended
 
 
 def _any_session_active() -> bool:
@@ -91,26 +112,34 @@ async def _watchdog():
         if total_connections() == 0 and _had_connections:
             idle = time.monotonic() - _last_connection_time
             if _any_session_active():
-                # Use the extended orphan timeout for active sessions
                 if idle >= _SESSION_ORPHAN_TIMEOUT_ACTIVE:
-                    logger.info(
-                        "Watchdog: no connections for %.0fs with active sessions — shutting down", idle
-                    )
-                    _trigger_shutdown()
-                    return
+                    if not _server_suspended:
+                        logger.info(
+                            "Watchdog: no connections for %.0fs with active sessions — suspending", idle
+                        )
+                        _trigger_suspend()
+                    elif idle >= _SESSION_ORPHAN_TIMEOUT_ACTIVE + _WATCHDOG_HARD_KILL_TIMEOUT:
+                        logger.info(
+                            "Watchdog: hard-kill timeout reached with active sessions — shutting down",
+                        )
+                        _trigger_shutdown()
+                        return
                 elif idle >= _WATCHDOG_TIMEOUT:
                     logger.info(
-                        "Watchdog: no connections for %.0fs but sessions still active — deferring shutdown",
+                        "Watchdog: no connections for %.0fs but sessions still active — deferring",
                         idle,
                     )
             elif idle >= _WATCHDOG_TIMEOUT:
                 if pairing.is_active_pairing():
                     logger.info(
-                        "Watchdog: no connections for %.0fs but device is actively paired — deferring shutdown",
+                        "Watchdog: no connections for %.0fs but device is actively paired — deferring",
                         idle,
                     )
-                else:
-                    logger.info("Watchdog: no connections for %.0fs — shutting down", idle)
+                elif not _server_suspended:
+                    logger.info("Watchdog: no connections for %.0fs — suspending", idle)
+                    _trigger_suspend()
+                elif idle >= _WATCHDOG_TIMEOUT + _WATCHDOG_HARD_KILL_TIMEOUT:
+                    logger.info("Watchdog: hard-kill timeout reached — shutting down")
                     _trigger_shutdown()
                     return
 
@@ -281,6 +310,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     _last_connection_time = time.monotonic()
     _session_disconnect_times.pop(session_id, None)
     _app_ref = websocket.app
+    global _server_suspended
+    if _server_suspended:
+        _server_suspended = False
+        logger.info("WS reconnect from %s — clearing suspended state", session_id)
     _ensure_broadcast_worker()
     if _orphan_task is None or _orphan_task.done():
         _orphan_task = asyncio.get_running_loop().create_task(_orphan_cleanup())

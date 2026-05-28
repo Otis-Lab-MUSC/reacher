@@ -22,6 +22,7 @@ def reset_ws_globals():
         ws._dropped_events,
         ws._app_ref,
         ws._shutdown_scheduled,
+        ws._server_suspended,
     )
     yield
     ws._connections.clear()
@@ -31,6 +32,7 @@ def reset_ws_globals():
         ws._dropped_events = saved[2]
     ws._app_ref = saved[3]
     ws._shutdown_scheduled = saved[4]
+    ws._server_suspended = saved[5]
 
 
 class TestWatchdogF001:
@@ -65,9 +67,12 @@ class TestWatchdogF001:
             mock_shutdown.assert_not_called()
 
     async def test_watchdog_shuts_down_when_no_active_sessions(self):
+        # Idle well past WATCHDOG_TIMEOUT + WATCHDOG_HARD_KILL_TIMEOUT (120 + 1800 = 1920s)
+        # so the watchdog reaches the hard-kill branch in a single pass.
         ws._had_connections = True
-        ws._last_connection_time = time.monotonic() - 150
+        ws._last_connection_time = time.monotonic() - (ws._WATCHDOG_TIMEOUT + ws._WATCHDOG_HARD_KILL_TIMEOUT + 10)
         ws._connections.clear()
+        ws._server_suspended = True  # pre-set suspended so hard-kill branch fires immediately
 
         # Mock app_ref with no sessions
         mock_sm = Mock()
@@ -79,6 +84,35 @@ class TestWatchdogF001:
         with patch.object(ws, "_trigger_shutdown") as mock_shutdown, patch("asyncio.sleep", new_callable=AsyncMock):
             await ws._watchdog()
             mock_shutdown.assert_called_once()
+
+    async def test_watchdog_suspends_before_hard_kill(self):
+        """First threshold (WATCHDOG_TIMEOUT) triggers soft-suspend, not hard kill."""
+        ws._had_connections = True
+        ws._last_connection_time = time.monotonic() - (ws._WATCHDOG_TIMEOUT + 10)
+        ws._connections.clear()
+        ws._server_suspended = False
+
+        mock_sm = Mock()
+        mock_sm._sessions = {}
+        mock_app = Mock()
+        mock_app.state.session_manager = mock_sm
+        ws._app_ref = mock_app
+
+        call_count = [0]
+
+        async def mock_sleep(duration):
+            call_count[0] += 1
+            if call_count[0] >= 2:
+                raise asyncio.CancelledError()
+
+        with patch.object(ws, "_trigger_shutdown") as mock_shutdown, \
+             patch.object(ws, "_trigger_suspend") as mock_suspend, \
+             patch("asyncio.sleep", side_effect=mock_sleep):
+            with pytest.raises(asyncio.CancelledError):
+                await ws._watchdog()
+
+        mock_suspend.assert_called_once()
+        mock_shutdown.assert_not_called()
 
 
 class TestBroadcastWorkerF004:
