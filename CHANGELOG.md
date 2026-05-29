@@ -10,6 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.0.2] - 2026-05-29
+
+### Fixed
+- CONTROLLER END event now reliably lands in `behavior_data` before export — `stop_program()` waits for the firmware's END acknowledgement (up to 8s) rather than a fixed 2s sleep, preventing the final session event from being silently dropped
+- `program_running` guard relaxed for CONTROLLER device events so START/END markers are always persisted regardless of stop-sequence timing
+
+---
+
 ## [2.0.1] - 2026-04-07
 
 ### Added

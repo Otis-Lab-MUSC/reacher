@@ -144,6 +144,9 @@ class REACHER:
         # used to delay "connected" state transition until bootloader exits and
         # firmware is truly ready to process commands.
         self._firmware_ready: threading.Event = threading.Event()
+        # Gate for the firmware's CONTROLLER END event (level 007, device CONTROLLER, event END).
+        # stop_program() waits on this before exporting so the END row lands in behavior_data.
+        self._controller_end_received: threading.Event = threading.Event()
 
         # Data process variables (guarded by thread_lock for cross-thread access)
         self.behavior_data: List[Dict[str, Union[str, int]]] = []
@@ -716,6 +719,8 @@ class REACHER:
                 entry_dict['event'] = event.get('event')
                 entry_dict['start_timestamp'] = event.get('timestamp')
                 entry_dict['end_timestamp'] = event.get('timestamp')
+                if event.get('event') == 'END':
+                    self._controller_end_received.set()
             case "PAVLOV":
                 entry_dict['device'] = event.get('device')
                 entry_dict['event'] = event.get('event')
@@ -735,10 +740,11 @@ class REACHER:
         # Always emit for real-time UI feedback (e.g. hardware testing)
         self._emit("event", entry_dict)
 
-        # Only persist to dataset when actively recording.
-        # PAVLOV rows are kept so downstream analysis (pynapse/axplorer) can
-        # align on trial_start / reward_delivered / reward_omitted.
-        if self.program_running and not self.program_flag.is_set():
+        # Persist to dataset when actively recording, and always for CONTROLLER
+        # events (START/END markers must survive the program_running=False guard
+        # that stop_program() sets before the END event arrives from firmware).
+        if (self.program_running and not self.program_flag.is_set()) \
+                or entry_dict.get('device') == 'CONTROLLER':
             with self.thread_lock:
                 self.behavior_data.append(entry_dict)
                 if entry_dict.get('device') == 'PUMP' and entry_dict.get('event') == 'INFUSION':
@@ -1086,8 +1092,14 @@ class REACHER:
                 self.logger.warning("on_stop callback failed", exc_info=True)
 
         # Then do cleanup (send firmware END, close serial, etc.)
+        self._controller_end_received.clear()
         self.send_serial_command({"cmd": 100})
-        time.sleep(2)
+        # Wait for the firmware's CONTROLLER END event (~200ms after cmd 100).
+        # Fallback to 2s sleep if it doesn't arrive within 8s.
+        received = self._controller_end_received.wait(timeout=8.0)
+        if not received:
+            self.logger.warning("Timed out waiting for CONTROLLER END — export may be incomplete")
+            time.sleep(2)
         self.program_flag.set()
         # Drain remaining events with timeout to avoid indefinite hang
         self._join_queue_with_timeout(5.0)
@@ -1183,6 +1195,7 @@ class REACHER:
         throughout to avoid triggering stop_program's re-entrance guard.
         """
         self.logger.info("Restarting program...")
+        self._controller_end_received.clear()
         self.send_serial_command({"cmd": 100})
         time.sleep(1)
 
