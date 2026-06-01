@@ -12,8 +12,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - AI-assisted session config validation endpoint (`POST /api/validate/config`): forwards the assembled session config to a local Ollama model and returns structured warnings (field, message, severity) before `start_program()` fires; degrades gracefully to empty warnings when Ollama is unreachable
 - `REACHER_OLLAMA_URL` and `REACHER_OLLAMA_MODEL` env vars for configuring the local Ollama endpoint (defaults: `http://localhost:11434`, `qwen2.5:7b`)
 
+### Changed
+- AI validation rule set expanded from 7 to 26 conflict patterns with full paradigm coverage: pump/cue/laser duration-zero errors, temporal ordering checks (trace interval and lever timeout vs session time limit with correct ms↔s unit conversion), Pavlovian CS-tone frequency identity warning, trial count firmware limit (128) enforcement, cue + trace interval vs ITI-min overlap warnings, and cue pulse misconfiguration detection
+- Validation success path now emits `logger.info` with result counts so server logs confirm whether Ollama ran
+
 ### Fixed
 - CORS `allow_methods` now includes `PUT` (hardware pin-assignment endpoint was missing this method for browser clients)
+- Ollama httpx inner timeout reduced to 9 s so `asyncio.wait_for` (10 s outer) is the authoritative deadline; previously both were 10 s and the httpx `ReadTimeout` fired first, bypassing the asyncio cancellation path
 
 ---
 

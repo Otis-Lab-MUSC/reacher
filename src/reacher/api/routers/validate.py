@@ -53,7 +53,7 @@ async def _call_ollama(config_json: str) -> ValidateConfigResponse:
         "format": "json",
     }
     async with httpx.AsyncClient() as client:
-        r = await client.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=10.0)
+        r = await client.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=9.0)
         r.raise_for_status()
     raw = r.json()["message"]["content"]
     parsed = json.loads(raw)
@@ -71,7 +71,13 @@ async def validate_config(body: ValidateConfigRequest) -> ValidateConfigResponse
     Returns empty warnings on any Ollama error so the session start is never blocked.
     """
     try:
-        return await asyncio.wait_for(_call_ollama(body.model_dump_json()), timeout=10.0)
+        result = await asyncio.wait_for(_call_ollama(body.model_dump_json()), timeout=10.0)
+        logger.info(
+            "AI config validation complete: valid=%s warnings=%d",
+            result.valid,
+            len(result.warnings),
+        )
+        return result
     except Exception:
         logger.debug("AI config validation unavailable — proceeding without warnings", exc_info=True)
         return _EMPTY
