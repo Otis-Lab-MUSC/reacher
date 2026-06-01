@@ -1,88 +1,25 @@
-"""AI-assisted session configuration validation endpoint."""
+"""Session configuration validation endpoint."""
 
-import asyncio
-import json
 import logging
-import os
-from typing import Any, Optional
 
-import httpx
 from fastapi import APIRouter
-from pydantic import BaseModel
 
-from .validation_rules import SYSTEM_PROMPT
+from .validators import ValidateConfigRequest, ValidateConfigResponse, _EMPTY, run_validation
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-OLLAMA_URL = os.getenv("REACHER_OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("REACHER_OLLAMA_MODEL", "qwen2.5:7b")
-
-
-class ValidateConfigRequest(BaseModel):
-    paradigm: Optional[str] = None
-    paradigmSettings: Optional[dict[str, Any]] = None
-    hardwareUi: Optional[dict[str, Any]] = None
-    pavlovianParams: Optional[dict[str, Any]] = None
-    limitSettings: Optional[dict[str, Any]] = None
-
-
-class ValidationWarning(BaseModel):
-    field: str
-    message: str
-    severity: str  # "warning" | "error"
-
-
-class ValidateConfigResponse(BaseModel):
-    valid: bool
-    warnings: list[ValidationWarning]
-    suggestions: str
-
-
-_EMPTY = ValidateConfigResponse(valid=True, warnings=[], suggestions="")
-
-
-async def _call_ollama(config_json: str) -> ValidateConfigResponse:
-    payload = {
-        "model": OLLAMA_MODEL,
-        "think": False,  # disable qwen3 extended-thinking mode; no-op on other models
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": config_json},
-        ],
-        "stream": False,
-        "format": "json",
-        "options": {
-            "temperature": 0,
-            "num_ctx": 16384,  # system prompt alone is ~3700 tokens; default 4096 is too small
-        },
-    }
-    async with httpx.AsyncClient() as client:
-        r = await client.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=9.0)
-        r.raise_for_status()
-    raw = r.json()["message"]["content"]
-    parsed = json.loads(raw)
-    return ValidateConfigResponse(
-        valid=parsed.get("valid", True),
-        warnings=[ValidationWarning(**w) for w in parsed.get("warnings", [])],
-        suggestions=parsed.get("suggestions", ""),
-    )
-
 
 @router.post("/config", response_model=ValidateConfigResponse)
 async def validate_config(body: ValidateConfigRequest) -> ValidateConfigResponse:
-    """Run AI-assisted validation on a session config before start.
+    """Validate a session config before start.
 
-    Returns empty warnings on any Ollama error so the session start is never blocked.
+    Returns empty warnings on any rule engine error so session start is never blocked.
     """
     try:
-        result = await asyncio.wait_for(_call_ollama(body.model_dump_json()), timeout=10.0)
-        logger.info(
-            "AI config validation complete: valid=%s warnings=%d",
-            result.valid,
-            len(result.warnings),
-        )
+        result = run_validation(body)
+        logger.info("Config validation complete: valid=%s warnings=%d", result.valid, len(result.warnings))
         return result
     except Exception:
-        logger.debug("AI config validation unavailable — proceeding without warnings", exc_info=True)
+        logger.exception("Config validation error — proceeding without warnings")
         return _EMPTY
