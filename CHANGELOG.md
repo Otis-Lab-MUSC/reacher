@@ -9,18 +9,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- AI-assisted session config validation endpoint (`POST /api/validate/config`): forwards the assembled session config to a local Ollama model and returns structured warnings (field, message, severity) before `start_program()` fires; degrades gracefully to empty warnings when Ollama is unreachable
-- `REACHER_OLLAMA_URL` and `REACHER_OLLAMA_MODEL` env vars for configuring the local Ollama endpoint (defaults: `http://localhost:11434`, `qwen2.5:7b`)
+- Session config validation endpoint (`POST /api/validate/config`): validates the assembled session config against 43 deterministic rules before `start_program()` fires; returns structured warnings (`field`, `message`, `severity`) grouped into five rule categories — paradigm required fields, hardware device checks, session limit conflicts, temporal ordering constraints, and Pavlovian-specific rules; degrades gracefully to empty warnings on any internal error so session start is never blocked
+- `validators.py` — pure-Python rule engine; rules cover all five paradigms (FR, PR, VI, Omission, Pavlovian), pump/cue/laser duration-zero detection, temporal ordering (trace interval and lever timeout vs session time limit with ms↔s unit conversion), Pavlovian CS-tone frequency identity, trial count firmware limit (128) enforcement, cue + trace interval vs ITI-min overlap, and cue pulse misconfiguration
 
 ### Changed
-- AI validation rule set expanded from 7 to 26 conflict patterns with full paradigm coverage: pump/cue/laser duration-zero errors, temporal ordering checks (trace interval and lever timeout vs session time limit with correct ms↔s unit conversion), Pavlovian CS-tone frequency identity warning, trial count firmware limit (128) enforcement, cue + trace interval vs ITI-min overlap warnings, and cue pulse misconfiguration detection
-- Validation success path now emits `logger.info` with result counts so server logs confirm whether Ollama ran
+- Validation is now a synchronous, deterministic rule engine — the Ollama/LLM backend and its `REACHER_OLLAMA_URL` / `REACHER_OLLAMA_MODEL` env vars have been removed; `httpx` is no longer a validation dependency
 
 ### Fixed
 - CORS `allow_methods` now includes `PUT` (hardware pin-assignment endpoint was missing this method for browser clients)
-- Ollama httpx inner timeout reduced to 9 s so `asyncio.wait_for` (10 s outer) is the authoritative deadline; previously both were 10 s and the httpx `ReadTimeout` fired first, bypassing the asyncio cancellation path
-- Validation Ollama payload now sets `think: false` (disables qwen3 extended-thinking mode; no-op on qwen2.5) and `num_ctx: 16384` (system prompt alone is ~3700 tokens, exceeding the previous 4096 default); without these fixes the validator silently degraded on qwen3 models and could truncate context on any model
-- Validation system prompt hardened: mandatory format rule prevents `valid=false` with empty `warnings[]`; `limitType="Trials"` rule now matches explicit operant paradigm list to eliminate false positive on Pavlovian; cue pulse rule now requires pulse_off to be exactly numeric 0 to eliminate false positive on valid pulsed configs (200/200)
 
 ---
 
