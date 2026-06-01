@@ -27,6 +27,7 @@ from ..session_manager import SessionManager
 from .middleware.auth import require_api_key, API_KEY
 from .routers import data, file, firmware, hardware, lifecycle, program, serial, session, websocket
 from .routers import discovery as discovery_router, pairing as pairing_router, proxy as proxy_router
+from .routers import validate as validate_router
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +240,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "Accept", "Authorization"],
     )
     # Outermost middleware: override CORS on /health so any origin can discover
@@ -293,6 +294,7 @@ def create_app() -> FastAPI:
     # upgrades are incompatible with HTTPBearer); auth is handled via
     # verify_ws_token() inside the endpoint.
     app.include_router(proxy_router.ws_router, prefix="/api/proxy", tags=["proxy"])
+    app.include_router(validate_router.router, prefix="/api/validate", tags=["validate"], dependencies=api_deps)
 
     # Serve built React frontend at /
     static_dir = _resolve_static_dir()

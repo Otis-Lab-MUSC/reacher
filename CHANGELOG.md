@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- AI-assisted session config validation endpoint (`POST /api/validate/config`): forwards the assembled session config to a local Ollama model and returns structured warnings (field, message, severity) before `start_program()` fires; degrades gracefully to empty warnings when Ollama is unreachable
+- `REACHER_OLLAMA_URL` and `REACHER_OLLAMA_MODEL` env vars for configuring the local Ollama endpoint (defaults: `http://localhost:11434`, `qwen2.5:7b`)
+
+### Fixed
+- CORS `allow_methods` now includes `PUT` (hardware pin-assignment endpoint was missing this method for browser clients)
+
 ---
 
 ## [2.0.2] - 2026-05-29
