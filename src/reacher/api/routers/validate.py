@@ -45,12 +45,17 @@ _EMPTY = ValidateConfigResponse(valid=True, warnings=[], suggestions="")
 async def _call_ollama(config_json: str) -> ValidateConfigResponse:
     payload = {
         "model": OLLAMA_MODEL,
+        "think": False,  # disable qwen3 extended-thinking mode; no-op on other models
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": config_json},
         ],
         "stream": False,
         "format": "json",
+        "options": {
+            "temperature": 0,
+            "num_ctx": 16384,  # system prompt alone is ~3700 tokens; default 4096 is too small
+        },
     }
     async with httpx.AsyncClient() as client:
         r = await client.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=9.0)

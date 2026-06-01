@@ -19,6 +19,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - CORS `allow_methods` now includes `PUT` (hardware pin-assignment endpoint was missing this method for browser clients)
 - Ollama httpx inner timeout reduced to 9 s so `asyncio.wait_for` (10 s outer) is the authoritative deadline; previously both were 10 s and the httpx `ReadTimeout` fired first, bypassing the asyncio cancellation path
+- Validation Ollama payload now sets `think: false` (disables qwen3 extended-thinking mode; no-op on qwen2.5) and `num_ctx: 16384` (system prompt alone is ~3700 tokens, exceeding the previous 4096 default); without these fixes the validator silently degraded on qwen3 models and could truncate context on any model
+- Validation system prompt hardened: mandatory format rule prevents `valid=false` with empty `warnings[]`; `limitType="Trials"` rule now matches explicit operant paradigm list to eliminate false positive on Pavlovian; cue pulse rule now requires pulse_off to be exactly numeric 0 to eliminate false positive on valid pulsed configs (200/200)
 
 ---
 
