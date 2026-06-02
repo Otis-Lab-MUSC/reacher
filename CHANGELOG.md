@@ -22,6 +22,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.3.1-dev] - 2026-06-02
+
+### Added
+- SLM (Spatial Light Modulator) timestamp device support: new serial event level `009` (`{"level":"009","device":"SLM","timestamp":<ms>}`) emitted by firmware on PCINT0 rising edge; backend stores timestamps in `slm_data` list and exports `slm_timestamps.csv` in session ZIP when data is present
+- `GET /api/data/{session_id}/slm` endpoint returning collected SLM timestamps and count
+- PCINT0 pin-group constraint in `pin_overrides.py` (`requires_pcint: bool`); SLM pin validated against pins 8–13 on both UNO and Mega; `UNO_PCINT0` / `MEGA_PCINT0` frozensets added
+- Command codes `SLM_DISARM=1100`, `SLM_ARM=1101`, `SLM_SET_PIN=1176` registered in `CommandCode` and `COMMAND_REGISTRY`
+- `metadata.json` in export ZIP now includes `slm_event_count`
+- `_COMMAND_STATE_MAP` entries for SLM arm/disarm/pin state tracking
+
+---
+
 ## [2.0.2] - 2026-05-29
 
 ### Fixed

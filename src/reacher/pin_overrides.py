@@ -46,9 +46,13 @@ _cache: dict[str, dict] = {}
 UNO_DIGITAL = frozenset(range(2, 14))
 UNO_PWM = frozenset({3, 5, 6, 9, 10, 11})
 UNO_INT = frozenset({2, 3})
+# PCINT0 group covers PB0–PB5 (Arduino pins 8–13) on both UNO and Mega.
+# SLM timestamp input must be in this group for the ISR(PCINT0_vect) handler.
+UNO_PCINT0 = frozenset(range(8, 14))
 MEGA_DIGITAL = frozenset(range(2, 54))
 MEGA_PWM = frozenset(range(2, 14)) | {44, 45, 46}
 MEGA_INT = frozenset({2, 3, 18, 19, 20, 21})
+MEGA_PCINT0 = frozenset(range(8, 14))
 
 
 @dataclass(frozen=True)
@@ -58,6 +62,7 @@ class PinConstraint:
     component_key: str          # canonical key used by the bulk-pins endpoint
     requires_pwm: bool = False
     requires_interrupt: bool = False
+    requires_pcint: bool = False  # must be in PCINT0 group (pins 8–13) for ISR
 
 
 # Map command code -> PinConstraint. Cue/Cue2/Laser drive PWM; Microscope
@@ -73,6 +78,7 @@ PIN_CONSTRAINTS: dict[int, PinConstraint] = {
     int(CommandCode.MICROSCOPE_SET_TRIG_PIN):  PinConstraint("microscope_trigger"),
     int(CommandCode.LEVER_RH_SET_PIN):         PinConstraint("lever_rh"),
     int(CommandCode.LEVER_LH_SET_PIN):         PinConstraint("lever_lh"),
+    int(CommandCode.SLM_SET_PIN):              PinConstraint("slm", requires_pcint=True),
 }
 
 # Reverse lookup: component_key -> set-pin command code.
@@ -84,11 +90,13 @@ SET_PIN_CODE_FOR: dict[str, int] = {
 COMPONENT_KEYS: tuple[str, ...] = tuple(SET_PIN_CODE_FOR.keys())
 
 
-def board_sets(board: Optional[str]) -> tuple[frozenset[int], frozenset[int], frozenset[int]]:
-    """Return (digital, pwm, interrupt) sets for a board. Defaults to UNO."""
+def board_sets(
+    board: Optional[str],
+) -> tuple[frozenset[int], frozenset[int], frozenset[int], frozenset[int]]:
+    """Return (digital, pwm, interrupt, pcint0) sets for a board. Defaults to UNO."""
     if board and board.lower() == "mega":
-        return MEGA_DIGITAL, MEGA_PWM, MEGA_INT
-    return UNO_DIGITAL, UNO_PWM, UNO_INT
+        return MEGA_DIGITAL, MEGA_PWM, MEGA_INT, MEGA_PCINT0
+    return UNO_DIGITAL, UNO_PWM, UNO_INT, UNO_PCINT0
 
 
 def validate_pin(code: int, pin: int, board: Optional[str]) -> Optional[dict]:
@@ -100,14 +108,16 @@ def validate_pin(code: int, pin: int, board: Optional[str]) -> Optional[dict]:
     constraint = PIN_CONSTRAINTS.get(code)
     if constraint is None:
         return None
-    digital, pwm, interrupt = board_sets(board)
-    if pin not in digital:
+    digital, pwm, interrupt, pcint0 = board_sets(board)
+    # For PCINT-only devices, valid pins are the PCINT0 group, not all digital pins.
+    valid_range = pcint0 if constraint.requires_pcint else digital
+    if pin not in valid_range:
         return {
             "error": "pin_out_of_range",
             "component": constraint.component_key,
             "got": pin,
             "board": (board or "uno").lower(),
-            "allowed": sorted(digital),
+            "allowed": sorted(valid_range),
         }
     if constraint.requires_pwm and pin not in pwm:
         return {

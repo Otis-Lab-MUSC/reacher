@@ -1,4 +1,4 @@
-"""Data retrieval endpoints (behavior, frames)."""
+"""Data retrieval endpoints (behavior, frames, slm)."""
 
 from fastapi import APIRouter, HTTPException, Request
 from typing import Optional
@@ -51,4 +51,28 @@ async def get_frames(
     return {
         "frames": frames,
         "count": info.instance.get_frame_timestamps_count(),
+    }
+
+
+@router.get("/{session_id}/slm")
+async def get_slm(
+    session_id: str,
+    request: Request,
+    limit: Optional[int] = None,
+):
+    sm = request.app.state.session_manager
+    try:
+        info = sm.get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if limit is not None and not (1 <= limit <= 100000):
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 100000")
+
+    slm = info.instance.get_slm_data()
+    if limit is not None:
+        slm = slm[:limit]
+    return {
+        "slm": slm,
+        "count": len(slm),
     }

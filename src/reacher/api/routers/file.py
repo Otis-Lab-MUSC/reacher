@@ -202,6 +202,8 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
     frame_data = instance.get_frame_data()
     frame_timestamps = sorted(int(ts) for ts in frame_data if ts)
     frame_count = len(frame_data)
+    slm_data = instance.get_slm_data()
+    slm_timestamps = sorted(int(ts) for ts in slm_data if ts)
     segment_exports = instance.get_segment_exports()
     prior_segment_counts = instance.get_segment_event_counts()
 
@@ -244,6 +246,15 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
             for i, ts in enumerate(frame_timestamps):
                 ft_writer.writerow({"frame_index": i, "timestamp_ms": ts})
             zf.writestr("frame_timestamps.csv", ft_buf.getvalue())
+
+        # slm_timestamps.csv — only when SLM data was captured
+        if slm_timestamps:
+            st_buf = io.StringIO()
+            st_writer = csv.DictWriter(st_buf, fieldnames=["event_index", "timestamp_ms"])
+            st_writer.writeheader()
+            for i, ts in enumerate(slm_timestamps):
+                st_writer.writerow({"event_index": i, "timestamp_ms": ts})
+            zf.writestr("slm_timestamps.csv", st_buf.getvalue())
 
         # arduino_config.json
         zf.writestr(
@@ -293,6 +304,7 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
                     "segment_count": segment_count,
                     "per_segment_event_counts": per_segment_event_counts,
                     "frame_count": frame_count,
+                    "slm_event_count": len(slm_timestamps),
                     "infusion_count": body.infusion_count,
                     "press_count": body.press_count,
                     "trial_count": body.trial_count,

@@ -27,6 +27,7 @@ def client():
         mock_instance.get_behavior_data.return_value = []
         mock_instance.get_frame_data.return_value = []
         mock_instance.get_frame_timestamps_count.return_value = 0
+        mock_instance.get_slm_data.return_value = []
         mock_instance.get_hardware_settings.return_value = []
         mock_instance.get_program_running.return_value = False
         mock_instance.get_filename.return_value = None

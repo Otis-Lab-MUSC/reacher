@@ -167,7 +167,7 @@ class TestValidator:
 class TestComponentMap:
     def test_all_components_have_codes(self):
         expected = {"cue", "cue2", "pump", "pump2", "lick", "laser",
-                    "microscope_trigger", "lever_rh", "lever_lh"}
+                    "microscope_trigger", "lever_rh", "lever_lh", "slm"}
         assert set(pin_overrides.SET_PIN_CODE_FOR.keys()) == expected
 
     def test_no_microscope_timestamp_in_map(self):

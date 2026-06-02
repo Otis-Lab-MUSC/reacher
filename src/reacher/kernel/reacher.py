@@ -77,6 +77,10 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     976: ("MICROSCOPE", "trigger_pin", _USE_VALUE),
     1076: ("LEVER_RH", "pin", _USE_VALUE),
     1376: ("LEVER_LH", "pin", _USE_VALUE),
+    # --- SLM ---
+    1100: ("SLM", "armed", False),
+    1101: ("SLM", "armed", True),
+    1176: ("SLM", "pin", _USE_VALUE),
 }
 
 class REACHER:
@@ -151,6 +155,7 @@ class REACHER:
         # Data process variables (guarded by thread_lock for cross-thread access)
         self.behavior_data: List[Dict[str, Union[str, int]]] = []
         self.frame_data: List[int] = []
+        self.slm_data: List[int] = []
         self._infusion_count: int = 0  # Atomic counter — avoids O(n) rescan in check_limit_met
         # Fix: F-002 — Memory warning thresholds for unbounded data lists
         self._DATA_WARNING_THRESHOLD = 100_000  # Warn when lists exceed this size
@@ -215,7 +220,8 @@ class REACHER:
             "001": self.logger.info,
             "006": self.handle_firmware_error,
             "007": self.update_behavioral_events,
-            "008": self.update_frame_events
+            "008": self.update_frame_events,
+            "009": self.update_slm_events
         }
 
         self.logger.info("REACHER instance created")
@@ -241,6 +247,7 @@ class REACHER:
 
         self.behavior_data = []
         self.frame_data = []
+        self.slm_data = []
         self._infusion_count = 0
         self._data_warning_emitted = False  # Fix: F-002 — Reset warning flag
         self._event_log_write_count = 0  # Fix: F-010 — Reset write counter
@@ -750,7 +757,7 @@ class REACHER:
                 if entry_dict.get('device') == 'PUMP' and entry_dict.get('event') == 'INFUSION':
                     self._infusion_count += 1
                 # Fix: F-002 — Warn when data lists grow dangerously large
-                total = len(self.behavior_data) + len(self.frame_data)
+                total = len(self.behavior_data) + len(self.frame_data) + len(self.slm_data)
             if total >= self._DATA_WARNING_THRESHOLD and not self._data_warning_emitted:
                 self._data_warning_emitted = True
                 self.logger.warning(
@@ -781,6 +788,21 @@ class REACHER:
             self.frame_data.append(ts)
         self.logger.info("--> Updated frame data")
         self._emit("frame", {"timestamp": ts})
+
+    def update_slm_events(self, event: dict) -> None:
+        if self.program_flag.is_set():
+            return
+        ts = int(event.get('timestamp'))
+        self._write_event_log({"type": "slm", "timestamp": ts})
+        with self.thread_lock:
+            self.slm_data.append(ts)
+        self.logger.info("--> Updated SLM timestamp data")
+        self._emit("event", {
+            "device": "SLM",
+            "event": "TIMESTAMP",
+            "start_timestamp": ts,
+            "end_timestamp": ts,
+        })
 
     def send_serial_command(self, command: dict) -> None:
         """Send a command to the Arduino via serial.
@@ -963,8 +985,27 @@ class REACHER:
                     f.flush()
                     os.fsync(f.fileno())
 
-            export_files = f"behavior_events{suffix}.csv + frame_timestamps.csv" if frame_timestamps else f"behavior_events{suffix}.csv"
-            self.logger.info("Auto-export complete: %s", export_files)
+            # slm_timestamps.csv — only when SLM data was captured
+            slm_data = self.get_slm_data()
+            slm_timestamps = sorted(int(ts) for ts in slm_data if ts)
+            if slm_timestamps:
+                st_buf = io.StringIO()
+                st_writer = csv.DictWriter(st_buf, fieldnames=["event_index", "timestamp_ms"])
+                st_writer.writeheader()
+                for i, ts in enumerate(slm_timestamps):
+                    st_writer.writerow({"event_index": i, "timestamp_ms": ts})
+                path = os.path.join(self.reacher_log_path, "slm_timestamps.csv")
+                with open(path, "w", newline="") as f:
+                    f.write(st_buf.getvalue())
+                    f.flush()
+                    os.fsync(f.fileno())
+
+            export_parts = [f"behavior_events{suffix}.csv"]
+            if frame_timestamps:
+                export_parts.append("frame_timestamps.csv")
+            if slm_timestamps:
+                export_parts.append("slm_timestamps.csv")
+            self.logger.info("Auto-export complete: %s", " + ".join(export_parts))
         except Exception as e:
             # Fix: F-005 — Surface export failures to the frontend in real time
             self.logger.warning("Auto-export failed", exc_info=True)
@@ -1053,6 +1094,7 @@ class REACHER:
         """
         self.behavior_data = []
         self.frame_data = []
+        self.slm_data = []
         self._infusion_count = 0
         self._segment_number = 0
         self._cumulative_infusion_count = 0
@@ -1202,6 +1244,7 @@ class REACHER:
         with self.thread_lock:
             self.behavior_data = []
             self.frame_data = []
+            self.slm_data = []
             self._infusion_count = 0
             self._segment_number = 0
             self._cumulative_infusion_count = 0
@@ -1396,6 +1439,15 @@ class REACHER:
     def get_frame_timestamps_count(self) -> int:
         with self.thread_lock:
             return len(self.frame_data)
+
+    def get_slm_data(self) -> List[int]:
+        """Get a snapshot of the collected SLM timestamp data.
+
+        **Returns:**
+        - `List[int]`: List of SLM event timestamps in milliseconds.
+        """
+        with self.thread_lock:
+            return list(self.slm_data)
     
     def get_firmware_information(self) -> Dict:
         """Get the current Arduino configuration.

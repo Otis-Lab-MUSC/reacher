@@ -104,6 +104,12 @@ class CommandCode(IntEnum):
     MICROSCOPE_TEST = 903
     MICROSCOPE_SET_TRIG_PIN = 976
 
+    # --- SLM (11xx) ---
+    SLM_DISARM = 1100
+    SLM_ARM = 1101
+    # Timestamp pin is configurable within PCINT0 group (Arduino pins 8–13).
+    SLM_SET_PIN = 1176
+
     # --- RH Lever (10xx) ---
     LEVER_RH_DISARM = 1000
     LEVER_RH_ARM = 1001
@@ -619,6 +625,21 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     1376: CommandSpec(
         CommandCode.LEVER_LH_SET_PIN, "LEVER_LH_SET_PIN",
         "Reassign the left-hand lever input pin",
+        payload_key="pin", payload_type="int",
+    ),
+
+    # --- SLM (11xx) ---
+    1100: CommandSpec(
+        CommandCode.SLM_DISARM, "SLM_DISARM",
+        "Disarm the SLM timestamp plugin",
+    ),
+    1101: CommandSpec(
+        CommandCode.SLM_ARM, "SLM_ARM",
+        "Arm the SLM timestamp plugin",
+    ),
+    1176: CommandSpec(
+        CommandCode.SLM_SET_PIN, "SLM_SET_PIN",
+        "Reassign the SLM timestamp input pin (PCINT0 group, Arduino pins 8–13)",
         payload_key="pin", payload_type="int",
     ),
 }
