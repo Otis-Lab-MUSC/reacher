@@ -16,6 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Validation is now a synchronous, deterministic rule engine — the Ollama/LLM backend and its `REACHER_OLLAMA_URL` / `REACHER_OLLAMA_MODEL` env vars have been removed; `httpx` is no longer a validation dependency
 
 ### Fixed
+- In-app update download: Linux asset suffix patterns corrected to match CI-produced filenames (`_amd64.deb`, `-linux-x64.tar.gz`, `-linux-x64.AppImage`) — previous patterns (`-linux-amd64.*`) never matched any release asset, causing "No download link available for this platform" on all Linux installs
+- In-app update download: `follow_redirects=True` added to the `httpx` streaming call in `_do_download` — GitHub `browser_download_url` returns a 302 to the CDN; without this the download failed immediately with `302: Failed to download asset`
 - CORS `allow_methods` now includes `PUT` (hardware pin-assignment endpoint was missing this method for browser clients)
 
 ---
