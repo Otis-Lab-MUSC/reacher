@@ -78,7 +78,7 @@ async def _do_download(client: httpx.AsyncClient, asset_url: str, asset_name: st
         _download_temp_dir = tempfile.mkdtemp(prefix="labrynth-update_")
         local_path = os.path.join(_download_temp_dir, asset_name)
 
-        async with client.stream("GET", asset_url) as response:
+        async with client.stream("GET", asset_url, follow_redirects=True) as response:
             if response.status_code != 200:
                 raise HTTPException(status_code=response.status_code, detail="Failed to download asset")
 
