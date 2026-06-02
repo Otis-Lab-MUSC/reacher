@@ -60,9 +60,9 @@ def _resolve_asset(assets: list[dict]) -> dict | None:
         suffixes = ["-macos-arm64.dmg", "-macos-x86_64.dmg"]
     else:  # linux
         if "aarch64" in machine or "arm64" in machine:
-            suffixes = ["-linux-arm64.deb", "-linux-arm64.tar.gz", "-linux-arm64.AppImage"]
+            suffixes = ["-linux-arm64.tar.gz", "-linux-arm64.AppImage"]
         else:
-            suffixes = ["-linux-amd64.deb", "-linux-amd64.tar.gz", "-linux-amd64.AppImage"]
+            suffixes = ["_amd64.deb", "-linux-x64.tar.gz", "-linux-x64.AppImage"]
 
     for suffix in suffixes:
         for asset in assets:
