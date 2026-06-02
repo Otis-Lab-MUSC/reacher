@@ -27,7 +27,7 @@ from ..session_manager import SessionManager
 from .middleware.auth import require_api_key, API_KEY
 from .routers import data, file, firmware, hardware, lifecycle, program, serial, session, websocket
 from .routers import discovery as discovery_router, pairing as pairing_router, proxy as proxy_router
-from .routers import validate as validate_router
+from .routers import update as update_router, validate as validate_router
 
 logger = logging.getLogger(__name__)
 
@@ -295,6 +295,7 @@ def create_app() -> FastAPI:
     # verify_ws_token() inside the endpoint.
     app.include_router(proxy_router.ws_router, prefix="/api/proxy", tags=["proxy"])
     app.include_router(validate_router.router, prefix="/api/validate", tags=["validate"], dependencies=api_deps)
+    app.include_router(update_router.router, prefix="/api/update", tags=["update"], dependencies=api_deps)
 
     # Serve built React frontend at /
     static_dir = _resolve_static_dir()
