@@ -713,8 +713,14 @@ class REACHER:
         entry_dict: Dict[str, Union[str, int]] = {}
         
         match event.get('device'):
+            case "LEVER_RH" | "LEVER_LH":
+                entry_dict['device'] = event.get('device')
+                entry_dict['event'] = f"{event.get('class')}_{event.get('event')}"
+                entry_dict['start_timestamp'] = event.get('start_timestamp')
+                entry_dict['end_timestamp'] = event.get('end_timestamp')
             case "SWITCH_LEVER":
-                entry_dict['device'] = event.get('orientation') + "_LEVER"
+                # Legacy firmware (pre-v2.4.x): orientation field holds "RH" or "LH"
+                entry_dict['device'] = "LEVER_" + event.get('orientation', '')
                 entry_dict['event'] = f"{event.get('class')}_{event.get('event')}"
                 entry_dict['start_timestamp'] = event.get('start_timestamp')
                 entry_dict['end_timestamp'] = event.get('end_timestamp')
