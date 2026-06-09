@@ -59,12 +59,14 @@ class CommandCode(IntEnum):
     CUE_SET_PULSE_ON = 374
     CUE_SET_PULSE_OFF = 375
     CUE_SET_PIN = 376
+    CUE_SET_ONSET_DELAY = 377  # Cue onset delay from trigger (ms); operant paradigms only
     CUE_SET_LEVER_FILTER = 378  # Per-device lever routing (0=any, 1=RH_only, 2=LH_only)
     CUE2_SET_FREQUENCY = 381
     CUE2_SET_DURATION = 382
     CUE2_SET_PULSE_ON = 384
     CUE2_SET_PULSE_OFF = 385
     CUE2_SET_PIN = 386
+    CUE2_SET_ONSET_DELAY = 387  # Cue2 onset delay (stored but cue2 absent from operant chains)
     CUE2_SET_LEVER_FILTER = 388  # Per-device lever routing (0=any, 1=RH_only, 2=LH_only)
 
     # --- Pump (4xx) ---
@@ -77,9 +79,11 @@ class CommandCode(IntEnum):
     PUMP_SET_DURATION = 472
     PUMP_SET_TRACE = 473  # deprecated
     PUMP_SET_PIN = 476
+    PUMP_SET_ONSET_DELAY = 477  # Pump onset delay from reward-window start (ms)
     PUMP_SET_LEVER_FILTER = 478  # Per-device lever routing (0=any, 1=RH_only, 2=LH_only)
     PUMP2_SET_DURATION = 482
     PUMP2_SET_PIN = 486
+    PUMP2_SET_ONSET_DELAY = 487  # Pump2 onset delay
     PUMP2_SET_LEVER_FILTER = 488  # Per-device lever routing (0=any, 1=RH_only, 2=LH_only)
 
     # --- Lick Circuit (5xx) ---
@@ -402,6 +406,12 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         "Reassign the primary cue speaker output pin",
         payload_key="pin", payload_type="int",
     ),
+    377: CommandSpec(
+        CommandCode.CUE_SET_ONSET_DELAY, "CUE_SET_ONSET_DELAY",
+        "Set primary cue onset delay from trigger (ms)",
+        payload_key="delay", payload_type="int",
+        paradigms=["fr", "pr", "vi", "omission"],
+    ),
     378: CommandSpec(
         CommandCode.CUE_SET_LEVER_FILTER, "CUE_SET_LEVER_FILTER",
         "Set primary cue lever routing filter (0=any, 1=RH_only, 2=LH_only)",
@@ -412,6 +422,12 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.CUE2_SET_PIN, "CUE2_SET_PIN",
         "Reassign the secondary cue speaker output pin",
         payload_key="pin", payload_type="int",
+    ),
+    387: CommandSpec(
+        CommandCode.CUE2_SET_ONSET_DELAY, "CUE2_SET_ONSET_DELAY",
+        "Set secondary cue onset delay (stored; cue2 absent from operant chains)",
+        payload_key="delay", payload_type="int",
+        paradigms=["fr", "pr", "vi", "omission"],
     ),
     388: CommandSpec(
         CommandCode.CUE2_SET_LEVER_FILTER, "CUE2_SET_LEVER_FILTER",
@@ -466,6 +482,12 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         "Reassign the primary pump output pin",
         payload_key="pin", payload_type="int",
     ),
+    477: CommandSpec(
+        CommandCode.PUMP_SET_ONSET_DELAY, "PUMP_SET_ONSET_DELAY",
+        "Set primary pump onset delay from reward-window start (ms)",
+        payload_key="delay", payload_type="int",
+        paradigms=["fr", "pr", "vi", "omission"],
+    ),
     478: CommandSpec(
         CommandCode.PUMP_SET_LEVER_FILTER, "PUMP_SET_LEVER_FILTER",
         "Set primary pump lever routing filter (0=any, 1=RH_only, 2=LH_only)",
@@ -476,6 +498,12 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.PUMP2_SET_PIN, "PUMP2_SET_PIN",
         "Reassign the secondary pump output pin",
         payload_key="pin", payload_type="int",
+    ),
+    487: CommandSpec(
+        CommandCode.PUMP2_SET_ONSET_DELAY, "PUMP2_SET_ONSET_DELAY",
+        "Set secondary pump onset delay from reward-window start (ms)",
+        payload_key="delay", payload_type="int",
+        paradigms=["fr", "pr", "vi", "omission"],
     ),
     488: CommandSpec(
         CommandCode.PUMP2_SET_LEVER_FILTER, "PUMP2_SET_LEVER_FILTER",

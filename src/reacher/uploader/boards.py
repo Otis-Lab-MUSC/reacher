@@ -44,7 +44,7 @@ _USB_ID_MAP: Dict[Tuple[int, int], str] = {
     (0x2A03, 0x0042): "mega",
 }
 
-DEFAULT_BOARD = "uno"
+DEFAULT_BOARD = "mega"
 SUPPORTED_BOARDS: Tuple[str, ...] = tuple(BOARD_PROFILES.keys())
 
 
