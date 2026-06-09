@@ -17,9 +17,12 @@ router = APIRouter()
 
 @router.get("/ports")
 async def get_ports():
-    ports = [p.device for p in list_ports.comports() if p.vid and p.pid]
+    comports = list_ports.comports()
+    ports = [p.device for p in comports if p.vid and p.pid]
     ports.append("SIMULATOR")
-    return {"ports": ports}
+    port_boards = {p.device: detect_board_from_port(p.device) for p in comports if p.vid and p.pid}
+    port_boards["SIMULATOR"] = None
+    return {"ports": ports, "portBoards": port_boards}
 
 
 @router.post("/{session_id}/connect")

@@ -215,8 +215,43 @@ def _check_limits(req: ValidateConfigRequest) -> list[ValidationWarning]:
     return warnings
 
 
+def _cue_lever_overlap(
+    req: ValidateConfigRequest,
+    cue_key: str,
+    lever_key: str,
+    cue_label: str,
+    lever_label: str,
+) -> list[ValidationWarning]:
+    """Warn when lever timeout allows back-to-back presses that would overlap cue playback."""
+    if not _hw(req, cue_key, "armed") or not _hw(req, lever_key, "armed"):
+        return []
+    contingency = _hw(req, cue_key, "contingency") or {}
+    filter_val = {"rhLever": "rh", "lhLever": "lh"}[lever_key]
+    if contingency.get("leverFilter") != filter_val:
+        return []
+    cue_delay = contingency.get("delay") or 0
+    cue_duration = _hw(req, cue_key, "duration") or 0
+    total = cue_delay + cue_duration
+    if total <= 0:
+        return []
+    timeout = _hw(req, lever_key, "timeout") or 0
+    if timeout == 0:
+        return [_w(
+            f"hardwareUi.{lever_key}.timeout",
+            f"{lever_label} timeout is 0 — back-to-back presses will trigger overlapping "
+            f"{cue_label} tones (onset delay {cue_delay}ms + duration {cue_duration}ms)",
+        )]
+    if timeout < total:
+        return [_w(
+            f"hardwareUi.{lever_key}.timeout",
+            f"{lever_label} timeout ({timeout}ms) is shorter than {cue_label} onset delay + "
+            f"duration ({total}ms) — rapid presses may produce overlapping cue tones",
+        )]
+    return []
+
+
 # ---------------------------------------------------------------------------
-# Rule group 4: temporal ordering conflicts  (rules 34–36)
+# Rule group 4: temporal ordering conflicts  (rules 34–40)
 # ---------------------------------------------------------------------------
 
 def _check_temporal(req: ValidateConfigRequest) -> list[ValidationWarning]:
@@ -250,6 +285,11 @@ def _check_temporal(req: ValidateConfigRequest) -> list[ValidationWarning]:
             "hardwareUi.lhLever.timeout",
             "LH lever lock duration (ms) exceeds session time limit — the timeout will never expire within the session",
         ))
+
+    # Rules 37–40: cue tone overlap from short lever timeouts
+    for cue_k, cue_lbl in (("primaryCue", "Primary cue"), ("secondaryCue", "Secondary cue")):
+        for lev_k, lev_lbl in (("rhLever", "RH lever"), ("lhLever", "LH lever")):
+            warnings.extend(_cue_lever_overlap(req, cue_k, lev_k, cue_lbl, lev_lbl))
 
     return warnings
 

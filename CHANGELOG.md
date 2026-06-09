@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `GET /api/serial/ports` now includes a `portBoards` map (`{device: board_id | null}`) alongside the `ports` list; uses `detect_board_from_port()` USB VID/PID lookup so Labrynth can auto-fill the firmware upload board selector without a separate API call
+- Validation rules 37–40 in `_check_temporal()`: warn when a lever's `timeout` is shorter than a contingent cue's onset delay + duration; when `timeout == 0` the warning is unconditional — back-to-back presses are guaranteed to overlap cue playback
+
 ---
 
 ## [2.3.2-dev] - 2026-06-09
