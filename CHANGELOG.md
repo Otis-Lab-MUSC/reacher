@@ -9,6 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `CUE_SET_LEVER_FILTER (378)`, `CUE2_SET_LEVER_FILTER (388)`, `PUMP_SET_LEVER_FILTER (478)`, `PUMP2_SET_LEVER_FILTER (488)` registered in `CommandCode` and `COMMAND_REGISTRY` with `payload_key="filter"`, `payload_type="int"`, paradigm filter `["fr", "pr", "vi", "omission"]`; supports the new per-device lever routing UI in Labrynth
+- Laser `delay` parameter (command 673) added to `_VALUE_RANGES` validation; laser `rh_lever` mode (684) added to `_COMMAND_STATE_MAP`
 - Session config validation endpoint (`POST /api/validate/config`): validates the assembled session config against 43 deterministic rules before `start_program()` fires; returns structured warnings (`field`, `message`, `severity`) grouped into five rule categories — paradigm required fields, hardware device checks, session limit conflicts, temporal ordering constraints, and Pavlovian-specific rules; degrades gracefully to empty warnings on any internal error so session start is never blocked
 - `validators.py` — pure-Python rule engine; rules cover all five paradigms (FR, PR, VI, Omission, Pavlovian), pump/cue/laser duration-zero detection, temporal ordering (trace interval and lever timeout vs session time limit with ms↔s unit conversion), Pavlovian CS-tone frequency identity, trial count firmware limit (128) enforcement, cue + trace interval vs ITI-min overlap, and cue pulse misconfiguration
 

@@ -54,8 +54,10 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     # --- Laser parameters ---
     671: ("LASER", "frequency", _USE_VALUE),
     672: ("LASER", "duration", _USE_VALUE),
+    673: ("LASER", "onset_delay", _USE_VALUE),
     681: ("LASER", "mode", "contingent"),
     682: ("LASER", "mode", "independent"),
+    684: ("LASER", "mode", "rh_lever"),
     # --- Pavlovian laser ---
     691: ("LASER", "trial_filter", "cs_plus"),
     692: ("LASER", "trial_filter", "cs_minus"),

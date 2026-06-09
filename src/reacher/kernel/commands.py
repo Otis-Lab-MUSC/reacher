@@ -59,11 +59,13 @@ class CommandCode(IntEnum):
     CUE_SET_PULSE_ON = 374
     CUE_SET_PULSE_OFF = 375
     CUE_SET_PIN = 376
+    CUE_SET_LEVER_FILTER = 378  # Per-device lever routing (0=any, 1=RH_only, 2=LH_only)
     CUE2_SET_FREQUENCY = 381
     CUE2_SET_DURATION = 382
     CUE2_SET_PULSE_ON = 384
     CUE2_SET_PULSE_OFF = 385
     CUE2_SET_PIN = 386
+    CUE2_SET_LEVER_FILTER = 388  # Per-device lever routing (0=any, 1=RH_only, 2=LH_only)
 
     # --- Pump (4xx) ---
     PUMP_DISARM = 400
@@ -75,8 +77,10 @@ class CommandCode(IntEnum):
     PUMP_SET_DURATION = 472
     PUMP_SET_TRACE = 473  # deprecated
     PUMP_SET_PIN = 476
+    PUMP_SET_LEVER_FILTER = 478  # Per-device lever routing (0=any, 1=RH_only, 2=LH_only)
     PUMP2_SET_DURATION = 482
     PUMP2_SET_PIN = 486
+    PUMP2_SET_LEVER_FILTER = 488  # Per-device lever routing (0=any, 1=RH_only, 2=LH_only)
 
     # --- Lick Circuit (5xx) ---
     LICK_DISARM = 500
@@ -89,9 +93,11 @@ class CommandCode(IntEnum):
     LASER_TEST = 603
     LASER_SET_FREQUENCY = 671
     LASER_SET_DURATION = 672
+    LASER_SET_ONSET_DELAY = 673
     LASER_SET_PIN = 676
     LASER_MODE_CONTINGENT = 681
     LASER_MODE_INDEPENDENT = 682
+    LASER_TRIGGER_RH_ONLY = 684
     PAV_LASER_CS_PLUS = 691
     PAV_LASER_CS_MINUS = 692
     PAV_LASER_CS_BOTH = 693
@@ -396,10 +402,22 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         "Reassign the primary cue speaker output pin",
         payload_key="pin", payload_type="int",
     ),
+    378: CommandSpec(
+        CommandCode.CUE_SET_LEVER_FILTER, "CUE_SET_LEVER_FILTER",
+        "Set primary cue lever routing filter (0=any, 1=RH_only, 2=LH_only)",
+        payload_key="filter", payload_type="int",
+        paradigms=["fr", "pr", "vi", "omission"],
+    ),
     386: CommandSpec(
         CommandCode.CUE2_SET_PIN, "CUE2_SET_PIN",
         "Reassign the secondary cue speaker output pin",
         payload_key="pin", payload_type="int",
+    ),
+    388: CommandSpec(
+        CommandCode.CUE2_SET_LEVER_FILTER, "CUE2_SET_LEVER_FILTER",
+        "Set secondary cue lever routing filter (0=any, 1=RH_only, 2=LH_only)",
+        payload_key="filter", payload_type="int",
+        paradigms=["fr", "pr", "vi", "omission"],
     ),
 
     # --- Pump ---
@@ -448,10 +466,22 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         "Reassign the primary pump output pin",
         payload_key="pin", payload_type="int",
     ),
+    478: CommandSpec(
+        CommandCode.PUMP_SET_LEVER_FILTER, "PUMP_SET_LEVER_FILTER",
+        "Set primary pump lever routing filter (0=any, 1=RH_only, 2=LH_only)",
+        payload_key="filter", payload_type="int",
+        paradigms=["fr", "pr", "vi", "omission"],
+    ),
     486: CommandSpec(
         CommandCode.PUMP2_SET_PIN, "PUMP2_SET_PIN",
         "Reassign the secondary pump output pin",
         payload_key="pin", payload_type="int",
+    ),
+    488: CommandSpec(
+        CommandCode.PUMP2_SET_LEVER_FILTER, "PUMP2_SET_LEVER_FILTER",
+        "Set secondary pump lever routing filter (0=any, 1=RH_only, 2=LH_only)",
+        payload_key="filter", payload_type="int",
+        paradigms=["fr", "pr", "vi", "omission"],
     ),
 
     # --- Lick Circuit ---
@@ -497,6 +527,12 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         payload_key="duration", payload_type="int",
         paradigms=["fr", "pr", "vi", "omission", "pavlovian"],
     ),
+    673: CommandSpec(
+        CommandCode.LASER_SET_ONSET_DELAY, "LASER_SET_ONSET_DELAY",
+        "Set laser onset delay (ms) from RH lever press in RH-only mode",
+        payload_key="delay", payload_type="int",
+        paradigms=["fr", "pr", "vi", "omission"],
+    ),
     681: CommandSpec(
         CommandCode.LASER_MODE_CONTINGENT, "LASER_MODE_CONTINGENT",
         "Set laser to contingent mode (triggered by lever press)",
@@ -506,6 +542,11 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.LASER_MODE_INDEPENDENT, "LASER_MODE_INDEPENDENT",
         "Set laser to independent mode (free-running)",
         paradigms=["fr", "pr", "vi", "omission", "pavlovian"],
+    ),
+    684: CommandSpec(
+        CommandCode.LASER_TRIGGER_RH_ONLY, "LASER_TRIGGER_RH_ONLY",
+        "Set laser to RH-lever-only mode (fires on RH press, no cue, no pump)",
+        paradigms=["fr", "pr", "vi", "omission"],
     ),
     676: CommandSpec(
         CommandCode.LASER_SET_PIN, "LASER_SET_PIN",
