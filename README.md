@@ -72,10 +72,16 @@ reacher/
 │   ├── kernel/
 │   │   ├── reacher.py          # Core REACHER class (serial I/O, threading, data)
 │   │   └── commands.py         # CommandCode enum, CommandSpec, COMMAND_REGISTRY
-│   └── uploader/
-│       └── uploader.py         # FirmwareUploader (avrdude wrapper)
+│   ├── uploader/
+│   │   └── uploader.py         # FirmwareUploader (avrdude wrapper)
+│   └── hex/<board>/*.hex       # Committed firmware artifacts (package data, shipped in wheel)
+├── firmware/                   # Arduino firmware source (folded in from reacher-firmware)
+│   ├── compile.sh             # Builds all 5 paradigms -> ../src/reacher/hex/<board>/
+│   ├── fr/ pr/ vi/ omission/ pavlovian/   # Per-paradigm sketches
+│   └── libraries/REACHERDevices/          # Shared C++ device library + Commands.h
 └── tests/
     ├── test_commands.py
+    ├── test_command_parity.py # Asserts Commands.h matches the CommandCode enum
     ├── test_session_manager.py
     ├── test_api.py
     └── core/
@@ -107,11 +113,21 @@ The `SessionManager` coordinates multiple independent `REACHER` instances:
 
 ### Firmware Uploader
 
-The `FirmwareUploader` wraps `avrdude` to flash compiled `.hex` files onto Arduino UNOs:
+The `FirmwareUploader` wraps `avrdude` to flash compiled `.hex` files onto the Arduino (Mega 2560, ATmega2560; legacy UNO artifacts still ship):
 
-- Target: ATmega328P, programmer: `arduino`, baud: 115200
 - Async subprocess execution with progress parsing from `avrdude` stderr
-- Hex file resolution: PyInstaller bundle (`_MEIPASS/hex/`) or development path (`../firmware/hex/`)
+- Hex resolution order: PyInstaller bundle (`_MEIPASS/hex/`) → `REACHER_HEX_DIR` → package data (`src/reacher/hex/`, canonical) → cwd `firmware/hex/` → `~/.reacher/hex` GitHub cache. Set `REACHER_SKIP_HEX_FETCH=1` to disable the network fallback on airgapped hosts.
+
+### Firmware Source
+
+Firmware source lives in `firmware/` (folded in from the now-archived `Otis-Lab-MUSC/reacher-firmware`). Five Arduino sketches share the `REACHERDevices` C++ library. `firmware/Commands.h` and `kernel/commands.py` are kept in lockstep — `tests/test_command_parity.py` fails on drift.
+
+```bash
+arduino-cli core install arduino:avr   # one-time toolchain install
+bash firmware/compile.sh               # recompile -> src/reacher/hex/<board>/ (commit the result)
+```
+
+The compiled `hex/<board>/*.hex` files are **committed** package data (`pyproject.toml` glob `hex/**/*.hex`) and ship inside the wheel — there is no firmware build step in CI. Firmware version strings (`library.properties` + each sketch's `SendIdentification()`) are stamped by `scripts/bump-version.py` from the package version; recompile hex after bumping. The microscope timestamp pin (INT0) is fixed in firmware and not remappable.
 
 ---
 

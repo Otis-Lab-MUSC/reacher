@@ -27,6 +27,22 @@ VERSION_FILES: list[tuple[Path, str, str]] = [
         r'^(__version__\s*=\s*")([^"]+)(")',
         r'\g<1>{version}\3',
     ),
+    # Firmware: library manifest + the version each sketch reports over serial
+    # in SendIdentification(). After bumping these, recompile the hex artifacts
+    # (bash firmware/compile.sh) so the shipped binaries report the new version.
+    (
+        ROOT / "firmware" / "libraries" / "REACHERDevices" / "library.properties",
+        r'^(version=)(\S+)()$',
+        r'\g<1>{version}\3',
+    ),
+    *[
+        (
+            ROOT / "firmware" / sketch / f"{sketch}.ino",
+            r'(\\"version\\":\\"v)([^\\"]+)(\\")',
+            r'\g<1>{version}\3',
+        )
+        for sketch in ("fr", "pr", "vi", "omission", "pavlovian")
+    ],
 ]
 
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")

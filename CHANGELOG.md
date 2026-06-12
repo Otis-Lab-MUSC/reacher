@@ -9,8 +9,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Firmware source folded into this repo** at `firmware/` (sketches, `libraries/REACHERDevices/`, `compile.sh`, Doxyfile) — imported from the now-archived `Otis-Lab-MUSC/reacher-firmware` at `5c63fa7`. `firmware/compile.sh` writes hex into the committed package-data tree `src/reacher/hex/<board>/`; mega hex recompiled to report v2.4.0
+- `tests/test_command_parity.py` — parses `firmware/libraries/REACHERDevices/src/Commands.h` and asserts parity with the `CommandCode` enum (skips when firmware source is absent, e.g. installed-wheel runs); `KNOWN_BACKEND_ONLY` whitelists the `CUE_SET_PULSE_*` codes (374/375/384/385) that the Pavlovian UI sends but no sketch parses yet
 - `GET /api/serial/ports` now includes a `portBoards` map (`{device: board_id | null}`) alongside the `ports` list; uses `detect_board_from_port()` USB VID/PID lookup so Labrynth can auto-fill the firmware upload board selector without a separate API call
 - Validation rules 37–40 in `_check_temporal()`: warn when a lever's `timeout` is shorter than a contingent cue's onset delay + duration; when `timeout == 0` the warning is unconditional — back-to-back presses are guaranteed to overlap cue playback
+
+### Changed
+- Firmware version is now coupled to the package version: `scripts/bump-version.py` also stamps `firmware/libraries/REACHERDevices/library.properties` and each sketch's `SendIdentification()` string (recompile hex after a bump). Fixed the prior v2.0.0/v2.1.0 sketch-vs-library mismatch — all now report v2.4.0
+- Firmware uploader hex resolution: dropped the stale monorepo cwd candidates (`labrynth/firmware/hex`, `reacher-firmware/hex`); the GitHub recovery fetch now targets `Otis-Lab-MUSC/reacher` (`src/reacher/hex`) since `reacher-firmware` was archived. Package data remains the canonical source
 
 ---
 

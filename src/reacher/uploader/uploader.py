@@ -24,9 +24,11 @@ PARADIGMS = ("fr", "pr", "vi", "omission", "pavlovian")
 
 # GitHub source for pre-compiled hex files.  Set REACHER_SKIP_HEX_FETCH=1 to
 # disable network fetching (airgapped deployments must pre-populate hex dirs).
-_FIRMWARE_REPO = "Otis-Lab-MUSC/reacher-firmware"
+# Firmware source and hex artifacts live in this repo (firmware/ +
+# src/reacher/hex/) since the reacher-firmware repo was archived.
+_FIRMWARE_REPO = "Otis-Lab-MUSC/reacher"
 _FIRMWARE_BRANCH = "develop"  # Will migrate to "main" in a future pass
-_FIRMWARE_RAW_BASE = f"https://raw.githubusercontent.com/{_FIRMWARE_REPO}/{_FIRMWARE_BRANCH}/hex"
+_FIRMWARE_RAW_BASE = f"https://raw.githubusercontent.com/{_FIRMWARE_REPO}/{_FIRMWARE_BRANCH}/src/reacher/hex"
 _HEX_CACHE_DIR = os.path.expanduser("~/.reacher/hex")
 _CACHE_MAX_AGE_S = 86400  # 24 hours — re-download cached hex files older than this
 
@@ -58,9 +60,10 @@ def _frozen_base() -> Optional[str]:
 def _fetch_hex_from_github() -> Optional[str]:
     """Download all hex files from GitHub and cache them in ~/.reacher/hex/.
 
-    The ``reacher-firmware`` repo uses a board-aware subdirectory layout
-    (``hex/{board}/{paradigm}.hex``). Downloaded files are stored in the
-    matching local cache at ``~/.reacher/hex/{board}/{paradigm}.hex``.
+    The ``reacher`` repo ships hex artifacts as package data in a board-aware
+    subdirectory layout (``src/reacher/hex/{board}/{paradigm}.hex``).
+    Downloaded files are stored in the matching local cache at
+    ``~/.reacher/hex/{board}/{paradigm}.hex``.
 
     Returns the cache directory path on success, None if fetching is disabled
     (``REACHER_SKIP_HEX_FETCH=1``) or if all downloads fail.
@@ -130,11 +133,9 @@ class FirmwareUploader:
         candidates = [
             # Package data (pip-installed with hex files as package data) — CANONICAL
             ("package-data", pkg_hex),
-            # CWD-relative (running from labrynth/ or a project root)
+            # CWD-relative (legacy layout: running from a checkout that keeps
+            # hex under firmware/hex)
             ("cwd/firmware/hex", os.path.join(os.getcwd(), "firmware", "hex")),
-            # Monorepo root (running `reacher` from REACHER/)
-            ("cwd/labrynth/firmware/hex", os.path.join(os.getcwd(), "labrynth", "firmware", "hex")),
-            ("cwd/reacher-firmware/hex", os.path.join(os.getcwd(), "reacher-firmware", "hex")),
             # Home directory fallback
             ("~/REACHER/hex", os.path.expanduser("~/REACHER/hex")),
             # GitHub-fetched cache (populated by _fetch_hex_from_github)

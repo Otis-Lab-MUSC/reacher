@@ -41,7 +41,7 @@ python -m build
 | `REACHER_PORT` | `6229` | HTTP/WebSocket port |
 | `REACHER_HOST` | `0.0.0.0` | Bind address (the parent `CLAUDE.md` lists `127.0.0.1` — code default is `0.0.0.0`) |
 | `REACHER_STATIC_DIR` | `web/dist/` | React frontend directory |
-| `REACHER_HEX_DIR` | `firmware/hex/` | Pre-compiled firmware hex files |
+| `REACHER_HEX_DIR` | package data (`src/reacher/hex/`) | Override dir for pre-compiled firmware hex files |
 | `REACHER_CORS_ORIGINS` | None | Extra allowed CORS origins (comma-separated) |
 | `REACHER_API_KEY` | auto-generated | Bearer token; auto-written to `~/.reacher/api_key` if unset |
 | `REACHER_AVRDUDE_PATH` | system PATH | Path to `avrdude` binary (set during PyInstaller packaging) |
@@ -82,7 +82,10 @@ Persistent per-port Arduino pin remapping at `~/.reacher/pin_overrides.json` (mo
 - `monitor.py` (`reacher-monitor` script) — Rich-based terminal dashboard showing pairing code, health, and session state; designed to run on the host's local display independently of any SSH session.
 
 ### Firmware Uploader (`src/reacher/uploader/`)
-Wraps `avrdude` to flash Arduino firmware. Handles PyInstaller frozen mode path resolution (`_MEIPASS/hex/`) and streams upload progress via callback. `boards.py` is the board-profile registry — each entry maps a `board_id` to a display name, an Arduino CLI FQBN, and the `avrdude` argument tuple. Adding a new board is a single entry in `BOARD_PROFILES`.
+Wraps `avrdude` to flash Arduino firmware. Handles PyInstaller frozen mode path resolution (`_MEIPASS/hex/`) and streams upload progress via callback. `boards.py` is the board-profile registry — each entry maps a `board_id` to a display name, an Arduino CLI FQBN, and the `avrdude` argument tuple. Adding a new board is a single entry in `BOARD_PROFILES`. Hex resolution prefers package data (`src/reacher/hex/`) as canonical; the GitHub fallback fetches from this repo (`Otis-Lab-MUSC/reacher`, `src/reacher/hex/`) for bare `pip install` hosts.
+
+### Firmware Source (`firmware/`)
+Arduino firmware source, folded in from the archived `Otis-Lab-MUSC/reacher-firmware`. Five sketches (`fr/ pr/ vi/ omission/ pavlovian/`) share `libraries/REACHERDevices/`. `firmware/libraries/REACHERDevices/src/Commands.h` is the firmware-side command list mirrored by `kernel/commands.py`; **edit both together** when adding a command — `tests/test_command_parity.py` enforces parity. `firmware/compile.sh` writes hex into the committed package-data tree `src/reacher/hex/<board>/` (run `arduino-cli core install arduino:avr` once, then `bash firmware/compile.sh`; commit the refreshed hex). Firmware version strings are stamped by `scripts/bump-version.py` — never hand-edit, and recompile hex after a bump. Target board is Mega 2560; `uno/` hex is legacy. The microscope timestamp pin (INT0) is fixed in firmware and must not be exposed as remappable. See `firmware/CLAUDE.md` and `firmware/README.md` for paradigm/hardware detail.
 
 ### systemd integration
 `systemd/reacher@.service` and `systemd/reacher-monitor@.service` are templated unit files (`%i` = username) for running the API and the dashboard as services on Linux hosts (e.g. a lab Raspberry Pi).
@@ -124,7 +127,7 @@ Tests use `pytest` with `asyncio_mode=auto` (configured in `pyproject.toml`). Th
 
 - `docs/setup-guide.md` — end-user setup walkthrough (host install, pairing, systemd).
 - `scripts/install.sh` — host-side installer.
-- `scripts/bump-version.py` — single source of truth for the package version; updates `pyproject.toml` (and any mirrored version strings) in one shot.
+- `scripts/bump-version.py` — single source of truth for the package version; updates `pyproject.toml`, `src/reacher/__init__.py`, and the firmware version strings (`firmware/libraries/REACHERDevices/library.properties` + each sketch's `SendIdentification()`) in one shot. After bumping, recompile firmware hex (`bash firmware/compile.sh`) so the shipped binaries report the new version.
 
 ## Data Output
 

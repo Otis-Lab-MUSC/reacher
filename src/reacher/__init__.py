@@ -8,4 +8,4 @@ from .kernel.commands import (
     build_command_payload,
 )
 
-__version__ = "2.3.2-dev"
+__version__ = "2.4.0"
