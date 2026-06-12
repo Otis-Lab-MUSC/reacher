@@ -5,7 +5,7 @@ Adding a new board requires only a new entry in BOARD_PROFILES.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from serial.tools import list_ports
 

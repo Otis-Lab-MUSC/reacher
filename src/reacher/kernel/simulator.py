@@ -8,7 +8,6 @@ import json
 import queue
 import random
 import threading
-import time
 import logging
 from typing import Optional
 
@@ -469,8 +468,6 @@ class FirmwareSimulator:
         for trial_type in trials:
             if not self._running or self._stop_event.is_set():
                 break
-
-            freq = self.pav_cs_plus_freq if trial_type == "CS_PLUS" else self.pav_cs_minus_freq
 
             # Cue onset
             if self.cue_armed:

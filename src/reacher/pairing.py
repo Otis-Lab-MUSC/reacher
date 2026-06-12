@@ -42,15 +42,15 @@ def _print_code(code: str) -> None:
     import sys
     use_box = getattr(sys.stdout, "encoding", "ascii").lower().replace("-", "") in ("utf8", "utf16", "utf32")
     if use_box:
-        print(f"\n  ╔══════════════════════════════════════╗")
+        print("\n  ╔══════════════════════════════════════╗")
         print(f"  ║   PAIRING CODE :  {formatted:<18} ║")
-        print(f"  ║   Rotates every 5 minutes            ║")
-        print(f"  ╚══════════════════════════════════════╝\n")
+        print("  ║   Rotates every 5 minutes            ║")
+        print("  ╚══════════════════════════════════════╝\n")
     else:
-        print(f"\n  +--------------------------------------+")
+        print("\n  +--------------------------------------+")
         print(f"  |  PAIRING CODE :  {formatted:<19}|")
-        print(f"  |  Rotates every 5 minutes             |")
-        print(f"  +--------------------------------------+\n")
+        print("  |  Rotates every 5 minutes             |")
+        print("  +--------------------------------------+\n")
 
 
 def _rotate() -> None:

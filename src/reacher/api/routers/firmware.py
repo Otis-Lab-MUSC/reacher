@@ -122,7 +122,7 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
         instance._firmware_ready.clear()
         instance.send_command(102)  # IDENTIFY
     except Exception as e:
-        _logger.error("Post-upload reconnect failed for session %s: %s", [ADDRESS], e, exc_info=True)
+        _logger.error("Post-upload reconnect failed for session %s: %s", session_id, e, exc_info=True)
         sm.set_state(session_id, "idle")
         raise HTTPException(status_code=500, detail="Post-upload reconnect failed")
 

@@ -126,10 +126,10 @@ def _status_panel(state: _State) -> Panel:
     else:
         body = Text()
         body.append("  ONLINE\n\n", style="bold green")
-        body.append(f"  Sessions:       ", style="dim")
+        body.append("  Sessions:       ", style="dim")
         body.append(str(h.get("active_sessions", 0)), style="white")
         dropped = h.get("dropped_events", 0)
-        body.append(f"\n  Dropped events: ", style="dim")
+        body.append("\n  Dropped events: ", style="dim")
         body.append(str(dropped), style="yellow" if dropped else "dim")
     return Panel(body, title="[bold]Server[/bold]", box=box.ROUNDED, padding=(0, 1))
 

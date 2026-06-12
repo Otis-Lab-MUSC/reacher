@@ -1,6 +1,5 @@
 """Serial connection endpoints."""
 
-import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Request

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from reacher.api.app import create_app
 from reacher.api.middleware.auth import API_KEY
-from reacher.api.routers.validators import ValidateConfigRequest, ValidationWarning, run_validation
+from reacher.api.routers.validators import ValidateConfigRequest, run_validation
 
 AUTH = {"Authorization": f"Bearer {API_KEY}"}
 

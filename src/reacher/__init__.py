@@ -9,3 +9,14 @@ from .kernel.commands import (
 )
 
 __version__ = "3.0.0-alpha.1"
+
+__all__ = [
+    "REACHER",
+    "COMMAND_REGISTRY",
+    "CommandCode",
+    "CommandSpec",
+    "PARADIGMS",
+    "get_commands_for_paradigm",
+    "build_command_payload",
+    "__version__",
+]

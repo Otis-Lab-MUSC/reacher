@@ -10,7 +10,6 @@ import platform
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
