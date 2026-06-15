@@ -10,6 +10,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.0.0-beta.3] - 2026-06-15
+
+### Fixed
+- Infusion-limit counter (`_infusion_count`) now increments for operant-paradigm sessions (FR/PR/VI/Omission); the counter checked only for `device == "PUMP"` but operant firmware emits `device: "PUMP_1"`, so `check_limit_met()` was permanently unsatisfied for these paradigms ([labrynth#45](https://github.com/Otis-Lab-MUSC/labrynth/issues/45))
+
+---
+
 ## [3.0.0-alpha.1] - 2026-06-12
 
 _First release of the **v3** line and the first public release since `v1.1.1`.
