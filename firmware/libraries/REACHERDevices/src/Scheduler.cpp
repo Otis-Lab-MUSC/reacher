@@ -78,10 +78,15 @@ void Scheduler::RegisterMicroscope(Microscope* mic) {
 
 void Scheduler::Update(uint32_t now) {
   if (!sessionPaused) {
-    // Tick time-based triggers
-    for (uint8_t i = 0; i < MAX_TRIGGERS; i++) {
-      if (triggers[i].OnTick(now)) {
-        FireChain(triggers[i].chainIndex, now);
+    // Only evaluate time-based triggers during an active session or test mode.
+    // Without this guard, a stale absenceStart surviving EndSession() can fire
+    // the chain immediately when the operator arms devices for the next session
+    // (Fix: issue #13 — defense-in-depth layer; EndSession() Reset() is primary).
+    if (sessionActive || testMode) {
+      for (uint8_t i = 0; i < MAX_TRIGGERS; i++) {
+        if (triggers[i].OnTick(now)) {
+          FireChain(triggers[i].chainIndex, now);
+        }
       }
     }
 
@@ -451,6 +456,12 @@ void Scheduler::EndSession(uint32_t now) {
   // Clear pending queue
   for (uint8_t i = 0; i < MAX_PENDING; i++) {
     pending[i].active = false;
+  }
+
+  // Reset trigger state so stale absenceStart cannot fire the chain in the
+  // pre-session window before the next SESSION_START (Fix: issue #13).
+  for (uint8_t i = 0; i < MAX_TRIGGERS; i++) {
+    triggers[i].Reset();
   }
 
   // Force all outputs off

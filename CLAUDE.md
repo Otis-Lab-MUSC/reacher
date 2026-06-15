@@ -127,7 +127,7 @@ Tests use `pytest` with `asyncio_mode=auto` (configured in `pyproject.toml`). Th
 
 - `docs/setup-guide.md` — end-user setup walkthrough (host install, pairing, systemd).
 - `scripts/install.sh` — host-side installer.
-- `scripts/bump-version.py` — single source of truth for the package version; updates `pyproject.toml`, `src/reacher/__init__.py`, and the firmware version strings (`firmware/libraries/REACHERDevices/library.properties` + each sketch's `SendIdentification()`) in one shot. After bumping, recompile firmware hex (`bash firmware/compile.sh`) so the shipped binaries report the new version.
+- `scripts/bump-version.py` — single source of truth for the package version; updates `pyproject.toml`, `src/reacher/__init__.py`, the firmware version strings (`firmware/libraries/REACHERDevices/library.properties` + each sketch's `SendIdentification()`), and the `README.md` version badge + wheel-install example in one shot. Derived spellings are handled automatically — the badge is shields.io-escaped (`3.0.0-alpha.1` → `3.0.0--alpha.1`) and the wheel name is PEP 440 normalized (`3.0.0-alpha.1` → `3.0.0a1`); `--check` (which CI runs against the bare tag) validates all forms. After bumping, recompile firmware hex (`bash firmware/compile.sh`) so the shipped binaries report the new version.
 
 ## Data Output
 
