@@ -366,6 +366,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 logger.debug("WS unknown message type from %s: %s", session_id, parsed.get("type"))
                 continue
             logger.debug("WS ping from %s", session_id)
+            await websocket.send_text(json.dumps({"type": "pong", "session_id": session_id}))
     except WebSocketDisconnect:
         pass
     finally:
