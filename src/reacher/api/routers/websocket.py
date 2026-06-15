@@ -42,6 +42,7 @@ _WATCHDOG_INTERVAL = 10  # seconds between polls
 _WATCHDOG_TIMEOUT = 300  # 5 minutes idle → soft suspend
 _WATCHDOG_HARD_KILL_TIMEOUT = 3300  # 55 min more → hard kill (total: 60 min from last connection)
 _server_suspended = False
+_session_orphaned = False
 
 
 def total_connections() -> int:
@@ -75,6 +76,28 @@ def _trigger_suspend():
     for sid in list(_connections.keys()):
         enqueue_event(sid, "server_suspended", {
             "reason": "watchdog_timeout",
+            "hard_kill_in": _WATCHDOG_HARD_KILL_TIMEOUT,
+        })
+
+
+def _notify_orphaned():
+    """Notify clients that a session has been orphaned without marking the server as suspended.
+
+    Sent when an active session has had no WS clients for _SESSION_ORPHAN_TIMEOUT_ACTIVE
+    seconds. Unlike _trigger_suspend(), this does NOT set _server_suspended, so the process
+    remains fully alive and clients can reconnect without a page reload.
+    """
+    global _session_orphaned
+    if _session_orphaned:
+        return
+    _session_orphaned = True
+    logger.info(
+        "Watchdog: session orphaned (no connections for %ds with active session) — notifying clients",
+        _SESSION_ORPHAN_TIMEOUT_ACTIVE,
+    )
+    for sid in list(_connections.keys()):
+        enqueue_event(sid, "session_orphaned", {
+            "reason": "no_clients",
             "hard_kill_in": _WATCHDOG_HARD_KILL_TIMEOUT,
         })
 
@@ -118,11 +141,11 @@ async def _watchdog():
             idle = time.monotonic() - _last_connection_time
             if _any_session_active():
                 if idle >= _SESSION_ORPHAN_TIMEOUT_ACTIVE:
-                    if not _server_suspended:
+                    if not _session_orphaned:
                         logger.info(
-                            "Watchdog: no connections for %.0fs with active sessions — suspending", idle
+                            "Watchdog: no connections for %.0fs with active sessions — notifying orphan", idle
                         )
-                        _trigger_suspend()
+                        _notify_orphaned()
                     elif idle >= _SESSION_ORPHAN_TIMEOUT_ACTIVE + _WATCHDOG_HARD_KILL_TIMEOUT:
                         logger.info(
                             "Watchdog: hard-kill timeout reached with active sessions — shutting down",
@@ -315,10 +338,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     _last_connection_time = time.monotonic()
     _session_disconnect_times.pop(session_id, None)
     _app_ref = websocket.app
-    global _server_suspended
+    global _server_suspended, _session_orphaned
     if _server_suspended:
         _server_suspended = False
         logger.info("WS reconnect from %s — clearing suspended state", session_id)
+    if _session_orphaned:
+        _session_orphaned = False
+        logger.info("WS reconnect from %s — clearing orphaned state", session_id)
     _ensure_broadcast_worker()
     if _orphan_task is None or _orphan_task.done():
         _orphan_task = asyncio.get_running_loop().create_task(_orphan_cleanup())
