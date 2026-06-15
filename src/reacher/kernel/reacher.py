@@ -762,7 +762,7 @@ class REACHER:
                 or entry_dict.get('device') == 'CONTROLLER':
             with self.thread_lock:
                 self.behavior_data.append(entry_dict)
-                if entry_dict.get('device') == 'PUMP' and entry_dict.get('event') == 'INFUSION':
+                if entry_dict.get('device') in ('PUMP', 'PUMP_1') and entry_dict.get('event') == 'INFUSION':
                     self._infusion_count += 1
                 # Fix: F-002 — Warn when data lists grow dangerously large
                 total = len(self.behavior_data) + len(self.frame_data) + len(self.slm_data)
