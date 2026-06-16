@@ -260,7 +260,7 @@ The backend's `COMMAND_REGISTRY` contains 71 `CommandSpec` entries with paradigm
 ### From a wheel file
 
 ```bash
-pip install reacher-3.0.0b4-py3-none-any.whl
+pip install reacher2p-3.0.0b4-py3-none-any.whl
 ```
 
 ### From source
@@ -370,7 +370,7 @@ The data export destination can be customized per session via the File API.
 | uvicorn[standard] | ≥0.29 | ASGI server |
 | websockets | ≥12.0 | WebSocket protocol support |
 
-### Optional (tray extra: `pip install reacher[tray]`)
+### Optional (tray extra: `pip install reacher2p[tray]`)
 
 | Package | Version | Purpose |
 |---|---|---|

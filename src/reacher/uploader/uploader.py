@@ -156,7 +156,7 @@ class FirmwareUploader:
             return chosen[1]
 
         # No local hex directory found — try fetching from GitHub once.
-        # This handles remote Pis that only have `pip install reacher` with no
+        # This handles remote Pis that only have `pip install reacher2p` with no
         # firmware submodule or bundled hex files.
         fetched = _fetch_hex_from_github()
         if fetched:

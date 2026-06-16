@@ -104,7 +104,7 @@ VERSION_FILES: list[tuple[Path, str, str, "callable"]] = [
     # README wheel-install example (PEP 440 normalized filename).
     (
         ROOT / "README.md",
-        r"(pip install reacher-)(\S+?)(-py3-none-any\.whl)",
+        r"(pip install reacher2p-)(\S+?)(-py3-none-any\.whl)",
         r"\g<1>{version}\3",
         pep440,
     ),

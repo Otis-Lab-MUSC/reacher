@@ -134,10 +134,10 @@ install_reacher() {
     if command -v reacher >/dev/null 2>&1; then
         CURRENT=$(reacher --version 2>/dev/null || echo "unknown")
         info "Upgrading REACHER (current: ${CURRENT})..."
-        pipx upgrade reacher || pipx install reacher --force
+        pipx upgrade reacher2p || pipx install reacher2p --force
     else
         info "Installing REACHER..."
-        pipx install reacher
+        pipx install reacher2p
     fi
 
     # Verify
