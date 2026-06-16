@@ -212,3 +212,59 @@ class TestBehaviorSinceEndpoint:
         body = resp.json()
         assert len(body["data"]) == 0
         assert body["total"] == 1
+
+
+class TestSessionStateSnapshotOnConnect:
+    """Fix #15: a client connecting to /ws/{sid} immediately receives the current
+    session_state, so a late-connecting proxy relay learns that the session is
+    already running instead of staying stuck at the browser's default 'idle'.
+    """
+
+    @pytest.fixture
+    def api_client(self):
+        with patch("reacher.session_manager.REACHER") as MockReacher, patch("os.makedirs"):
+            mock_instance = Mock()
+            mock_instance.program_running = False
+            mock_instance.ser = Mock()
+            mock_instance.ser.is_open = False
+            mock_instance.get_firmware_information.return_value = {}
+            mock_instance.get_behavior_data.return_value = []
+            mock_instance.get_frame_data.return_value = []
+            mock_instance.get_frame_timestamps_count.return_value = 0
+            mock_instance.get_hardware_settings.return_value = []
+            mock_instance.get_program_running.return_value = False
+            mock_instance.get_filename.return_value = None
+            mock_instance.get_data_destination.return_value = None
+            mock_instance.get_detected_paradigm.return_value = None
+            mock_instance.make_destination_folder.return_value = "/tmp/reacher_test"
+            MockReacher.return_value = mock_instance
+            app = create_app()
+            with TestClient(app) as c:
+                yield c
+
+    def _create_session(self, api_client):
+        resp = api_client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
+        return resp.json()["session_id"]
+
+    def test_running_state_sent_on_connect(self, api_client):
+        """A session promoted to 'running' before the WS connects still reports
+        'running' as the first message — the core of the proxy late-connect fix."""
+        sid = self._create_session(api_client)
+        api_client.app.state.session_manager.set_state(sid, "running")
+
+        with api_client.websocket_connect(f"/ws/{sid}?token={API_KEY}") as wsconn:
+            msg = json.loads(wsconn.receive_text())
+
+        assert msg["type"] == "session_state"
+        assert msg["session_id"] == sid
+        assert msg["data"]["state"] == "running"
+
+    def test_idle_default_state_sent_on_connect(self, api_client):
+        """A freshly created session reports its 'idle' default on connect."""
+        sid = self._create_session(api_client)
+
+        with api_client.websocket_connect(f"/ws/{sid}?token={API_KEY}") as wsconn:
+            msg = json.loads(wsconn.receive_text())
+
+        assert msg["type"] == "session_state"
+        assert msg["data"]["state"] == "idle"
