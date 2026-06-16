@@ -75,7 +75,11 @@ async def ws_relay(ws: WebSocket, device_id: str, session_id: str):
     # a real WS error to the browser (code 1011) so reconnectAttempt accumulates
     # and the client's give-up logic fires instead of looping silently forever.
     try:
-        upstream = await websockets.connect(upstream_url, open_timeout=10)
+        # ping_interval=None: rely on uvicorn's server-side keepalive on the Pi
+        # rather than running a second, independent library-level ping on the
+        # relay's upstream socket — the two ping layers can race and silently
+        # tear down the upstream under load (Fix #15, secondary hardening).
+        upstream = await websockets.connect(upstream_url, open_timeout=10, ping_interval=None)
     except Exception as exc:
         logger.error(
             "WS relay upstream connect failed for %s/%s url=%s: %s",

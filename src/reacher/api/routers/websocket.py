@@ -227,6 +227,14 @@ async def _broadcast_worker():
             session_id = msg.get("session_id", "")
             payload = json.dumps(msg)
 
+            # Fix #15 (diagnostic): a fanout with 0 subscribers means the event
+            # is dropped on the floor — the signature of the proxy late-connect
+            # race. Gated behind DEBUG so it is silent in normal operation.
+            logger.debug(
+                "WS fanout sid=%s type=%s subscribers=%d",
+                session_id, msg.get("type"), len(_connections.get(session_id, set())),
+            )
+
             dead: Set[WebSocket] = set()
             for ws in _connections.get(session_id, set()):
                 try:
@@ -349,6 +357,26 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     if _orphan_task is None or _orphan_task.done():
         _orphan_task = asyncio.get_running_loop().create_task(_orphan_cleanup())
     logger.info("WebSocket connected for session %s", session_id)
+
+    # Fix #15: snapshot the current session state to this just-connected client.
+    # State transitions (idle->uploading->connected->running) are broadcast as
+    # they happen; a client that connects *after* a transition never sees it. In
+    # proxy/IoT mode the WS relay always connects late (after an async ws-token
+    # fetch), so the Pi fans those transitions to an empty client set and the
+    # browser session stays "idle" — pushEvent then silently drops every event.
+    # Replaying the live state on connect lets any client (relay, direct browser,
+    # or a reconnect) immediately learn the real state.
+    try:
+        sm = websocket.app.state.session_manager
+        info = sm._sessions.get(session_id)
+        if info is not None:
+            await websocket.send_text(json.dumps({
+                "type": "session_state",
+                "session_id": session_id,
+                "data": {"state": info.state},
+            }))
+    except Exception:
+        logger.debug("session_state snapshot on connect failed for %s", session_id, exc_info=True)
 
     try:
         while True:
