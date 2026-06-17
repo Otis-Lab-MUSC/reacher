@@ -3,8 +3,11 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "reacher"
-version = "3.0.0-beta.3"
+# Distribution name on PyPI is "reacher2p" (the "reacher" name was already
+# taken by an unrelated project). The import package stays "reacher", so
+# `pip install reacher2p` still exposes `import reacher` / `python -m reacher`.
+name = "reacher2p"
+version = "3.0.0-beta.4"
 description = "REACHER — Rodent Experiment Application Controls and Handling Ecosystem for Research"
 readme = "README.md"
 license = "MIT"

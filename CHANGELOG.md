@@ -10,6 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.0.0-beta.4] - 2026-06-16
+
+### Fixed
+- Proxy/IoT-mode remote sessions no longer receive zero behavioral events. The WebSocket endpoint now replays the current `session_state` to each client immediately on connect, so a late-connecting proxy relay (or any reconnect) learns a running session instead of staying stuck at the browser's default `idle` — previously the Pi broadcast its `idle → connected → running` transitions to an empty client set before the relay connected, and the frontend silently dropped every event ([labrynth#15](https://github.com/Otis-Lab-MUSC/labrynth/issues/15))
+- WebSocket relay upstream connection now disables the library-level ping (`ping_interval=None`), relying on uvicorn's server-side keepalive to avoid a second ping layer racing it into a silent teardown under load
+
+---
+
 ## [3.0.0-beta.3] - 2026-06-15
 
 ### Fixed

@@ -22,8 +22,8 @@ the source files, so the tag is the source of truth and cannot drift.
 The workflow marks a GitHub Release as a prerelease when the tag contains
 `-alpha`, `-beta`, or `-rc`. PyPI treats PEP 440 prerelease versions
 (`3.1.0a1`, `3.1.0b1`, `3.1.0rc1`) as prereleases automatically — `pip install
-reacher` skips them unless `--pre` is passed or the dependency pin requests one
-(e.g. `reacher>=3.0.0a1`).
+reacher2p` skips them unless `--pre` is passed or the dependency pin requests one
+(e.g. `reacher2p>=3.0.0a1`).
 
 ## Cutting a release
 
@@ -66,5 +66,6 @@ succeed independently of PyPI, so you can re-run just the failed job with
 
 ## Downstream
 
-`labrynth` pins `reacher>=X.Y.Z` in its `pyproject.toml`. After a `reacher`
-release, bump that pin in labrynth to ship the new backend + firmware.
+`labrynth` pins `reacher2p>=X.Y.Z` in its `pyproject.toml` (PyPI distribution
+name; the import package is still `reacher`). After a `reacher` release, bump
+that pin in labrynth to ship the new backend + firmware.

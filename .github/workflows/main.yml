@@ -115,10 +115,10 @@ jobs:
 
             ```bash
             # From PyPI (recommended)
-            pipx install reacher
+            pipx install reacher2p
 
             # Or with pip
-            pip install reacher==${{ needs.version-check.outputs.version }}
+            pip install reacher2p==${{ needs.version-check.outputs.version }}
             ```
 
             ## Raspberry Pi / Headless
@@ -130,7 +130,7 @@ jobs:
             ## Upgrade
 
             ```bash
-            pipx upgrade reacher
+            pipx upgrade reacher2p
             ```
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

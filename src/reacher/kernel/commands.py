@@ -268,7 +268,6 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         "Enable/disable counterbalancing",
         payload_key="enabled", payload_type="bool",
         paradigms=["pavlovian"],
-        deprecated=True,
     ),
     213: CommandSpec(
         CommandCode.PAV_CUE_DURATION, "PAV_CUE_DURATION",
@@ -287,7 +286,6 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         "Consumption window duration (ms)",
         payload_key="duration", payload_type="int",
         paradigms=["pavlovian"],
-        deprecated=True,
     ),
     216: CommandSpec(
         CommandCode.PAV_ITI_MEAN, "PAV_ITI_MEAN",
@@ -312,7 +310,6 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         "Pulse configuration for Pavlovian paradigm",
         payload_key="config", payload_type="int",
         paradigms=["pavlovian"],
-        deprecated=True,
     ),
     220: CommandSpec(
         CommandCode.SET_TRACE_INTERVAL, "SET_TRACE_INTERVAL",

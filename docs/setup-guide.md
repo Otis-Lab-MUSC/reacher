@@ -10,7 +10,7 @@ If you already have Python 3.10+ installed, the fastest path is:
 
 ```bash
 # Install (isolated — no system packages affected)
-pipx install reacher
+pipx install reacher2p
 
 # Run
 reacher
