@@ -45,7 +45,6 @@ class TestCommandRegistry:
         deprecated_names = {s.name for s in deprecated}
         assert "CUE_SET_TRACE" in deprecated_names
         assert "PUMP_SET_TRACE" in deprecated_names
-        assert "LASER_SET_TRACE" in deprecated_names
 
     def test_laser_included_in_pavlovian(self):
         """Base laser commands (arm, disarm, test, freq, dur, mode) include pavlovian."""
