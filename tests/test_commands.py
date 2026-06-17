@@ -45,7 +45,6 @@ class TestCommandRegistry:
         deprecated_names = {s.name for s in deprecated}
         assert "CUE_SET_TRACE" in deprecated_names
         assert "PUMP_SET_TRACE" in deprecated_names
-        assert "LASER_SET_TRACE" in deprecated_names
 
     def test_laser_included_in_pavlovian(self):
         """Base laser commands (arm, disarm, test, freq, dur, mode) include pavlovian."""
@@ -64,6 +63,23 @@ class TestGetCommandsForParadigm:
         cmds = get_commands_for_paradigm("pavlovian")
         for code in range(206, 220):
             assert code in cmds, f"PAV command {code} missing for pavlovian"
+
+    def test_reenabled_pav_params_surface_with_contract(self):
+        """212/215/219 were un-deprecated (commit aa10c70) so the frontend can
+        surface them; assert they are live and carry the payload contract the
+        labrynth Pavlovian panel branches on (bool vs int)."""
+        cmds = get_commands_for_paradigm("pavlovian")
+        expected = {
+            212: ("enabled", "bool"),
+            215: ("duration", "int"),
+            219: ("config", "int"),
+        }
+        for code, (payload_key, payload_type) in expected.items():
+            assert code in cmds, f"re-enabled PAV command {code} missing for pavlovian"
+            spec = cmds[code]
+            assert not spec.deprecated, f"{spec.name} must not be deprecated"
+            assert spec.payload_key == payload_key, f"{spec.name} payload_key drift"
+            assert spec.payload_type == payload_type, f"{spec.name} payload_type drift"
 
     def test_pavlovian_includes_laser(self):
         """Pavlovian paradigm includes base laser commands and pav-specific codes."""
