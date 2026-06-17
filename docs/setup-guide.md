@@ -94,8 +94,8 @@ brew install avrdude
 Download or clone the REACHER repository:
 
 ```
-git clone https://github.com/Otis-Lab-MUSC/REACHER-Suite.git
-cd REACHER-Suite/reacher
+git clone https://github.com/thejoshbq/phoxel-workbench.git
+cd phoxel-workbench/reacher
 ```
 
 If you don't have `git`, you can download the repository as a ZIP file from GitHub and extract it.
@@ -487,7 +487,7 @@ On Windows, `~` refers to `C:\Users\YourUsername`.
 A virtual environment keeps REACHER's dependencies separate from the rest of your system. This is recommended on systems with "externally managed" Python (Ubuntu 23.04+, Fedora 38+, Raspberry Pi OS Bookworm+).
 
 ```
-cd REACHER-Suite/reacher
+cd phoxel-workbench/reacher
 
 # Create the virtual environment
 python3 -m venv .venv
@@ -506,7 +506,7 @@ reacher
 When using a virtual environment with systemd, update the service file's `ExecStart` to use the full path to the venv's binary:
 
 ```
-ExecStart=/path/to/REACHER-Suite/reacher/.venv/bin/reacher
+ExecStart=/path/to/phoxel-workbench/reacher/.venv/bin/reacher
 ```
 
 ---

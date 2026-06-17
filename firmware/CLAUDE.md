@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Operant-conditioning firmware for Arduino Mega 2560 (ATmega2560, 8 KB RAM, 256 KB flash). Five sketches share one C++ library and produce five `.hex` files consumed by the REACHER backend.
 
-This `firmware/` tree lives inside the `reacher` repo (folded in from the now-archived `Otis-Lab-MUSC/reacher-firmware`). `compile.sh` writes hex artifacts up into the backend package-data directory `../src/reacher/hex/<board>/`, which is committed and shipped in the `reacher` wheel. For the wider Suite (paradigm names, command-code ranges, event levels, serial framing), see `../../CLAUDE.md` (workspace) and `../CLAUDE.md` (backend). The README.md here is the canonical reference for hardware pinout, paradigm semantics, command-code list, and Pavlovian parameters — read it before authoring any sketch-level changes.
+This `firmware/` tree lives inside the `reacher` repo (folded in from the now-archived `Otis-Lab-MUSC/reacher-firmware`). `compile.sh` writes hex artifacts up into the backend package-data directory `../src/reacher/hex/<board>/`, which is committed and shipped in the `reacher` wheel. For the wider Workbench (paradigm names, command-code ranges, event levels, serial framing), see `../../CLAUDE.md` (workspace) and `../CLAUDE.md` (backend). The README.md here is the canonical reference for hardware pinout, paradigm semantics, command-code list, and Pavlovian parameters — read it before authoring any sketch-level changes.
 
 ## Commands
 
