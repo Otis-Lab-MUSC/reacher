@@ -10,6 +10,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.0.0-beta.5] - 2026-06-17
+
+### Fixed
+- Re-enabled the Pavlovian `counterbalance` (212), `consumption_window` (215), and `pulse_config` (219) command params in the registry — they had been incorrectly marked deprecated, which hid them from Labrynth's Pavlovian panel. They are now live and carry their documented payload contract ([#21](https://github.com/Otis-Lab-MUSC/reacher/issues/21))
+
+### Changed
+- Rebranded the umbrella project from "REACHER Suite" to "Phoxel Workbench" across documentation. The package name, import name, APIs, and serial protocol are unchanged ([#19](https://github.com/Otis-Lab-MUSC/reacher/issues/19))
+
+### Added
+- Multi-machine validation test suite exercising remote/proxy session control across paired hosts ([#15](https://github.com/Otis-Lab-MUSC/reacher/issues/15), [labrynth#16](https://github.com/Otis-Lab-MUSC/labrynth/issues/16))
+
+---
+
 ## [3.0.0-beta.4] - 2026-06-16
 
 ### Fixed
