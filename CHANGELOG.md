@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [3.0.0-beta.6] - 2026-06-18
+
 ### Added
 - `LASER_TRIGGER_LH_ONLY` (685) — fire the isolated laser on LH-lever presses; mirrored into the Python `CommandCode` enum + registry ([#67](https://github.com/Otis-Lab-MUSC/labrynth/issues/67))
 
