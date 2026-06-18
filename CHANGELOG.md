@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `LASER_TRIGGER_LH_ONLY` (685) — fire the isolated laser on LH-lever presses; mirrored into the Python `CommandCode` enum + registry ([#67](https://github.com/Otis-Lab-MUSC/labrynth/issues/67))
+
+### Changed
+- FR/PR laser routing now uses a configurable `LASER_LEVER_FILTER` (RH or LH) instead of a hardcoded RH source; `LASER_SET_ONSET_DELAY` (673) reconfigures the chain unconditionally so the onset applies in contingent mode too; onset-delay clamp raised to 600000 ms to match cue/pump ([#67](https://github.com/Otis-Lab-MUSC/labrynth/issues/67))
+- Pavlovian scheduler honors the laser onset delay at the REWARD and CUE activation sites, clamped to the active phase window so onset can't bleed into a later phase/trial ([#69](https://github.com/Otis-Lab-MUSC/labrynth/issues/69))
+
+### Fixed
+- `pavlovian.ino` now handles `LASER_SET_ONSET_DELAY` (673) instead of returning a `006` "command not found" ([#69](https://github.com/Otis-Lab-MUSC/labrynth/issues/69))
+
 ---
 
 ## [3.0.0-beta.5] - 2026-06-17
