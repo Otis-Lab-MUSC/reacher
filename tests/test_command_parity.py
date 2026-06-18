@@ -19,16 +19,12 @@ from reacher.kernel.commands import COMMAND_REGISTRY, CommandCode
 REPO_ROOT = Path(__file__).resolve().parent.parent
 COMMANDS_H = REPO_ROOT / "firmware" / "libraries" / "REACHERDevices" / "src" / "Commands.h"
 
-# Backend-only codes with no firmware handler. The Pavlovian UI sends
-# CUE_SET_PULSE_* (374/375/384/385) but no sketch parses them at present —
-# tracked as a known defect; remove entries here once firmware support lands
-# or the backend/frontend drop the commands.
-KNOWN_BACKEND_ONLY = {
-    CommandCode.CUE_SET_PULSE_ON,
-    CommandCode.CUE_SET_PULSE_OFF,
-    CommandCode.CUE2_SET_PULSE_ON,
-    CommandCode.CUE2_SET_PULSE_OFF,
-}
+# Backend-only codes with no firmware handler. Add an entry here (with
+# justification) only when a CommandCode is intentionally backend/frontend-only
+# and no sketch parses it. Empty: every CommandCode currently has a firmware
+# handler. (CUE_SET_PULSE_* 374/375/384/385 were implemented in the Pavlovian
+# sketch — see reacher #24.)
+KNOWN_BACKEND_ONLY: set[CommandCode] = set()
 
 _CONSTEXPR_RE = re.compile(r"^\s*constexpr\s+int\s+(\w+)\s*=\s*(\d+)\s*;", re.MULTILINE)
 

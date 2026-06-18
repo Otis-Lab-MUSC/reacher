@@ -82,6 +82,14 @@ Slm         slm(PIN_SLM_TS);
 uint8_t  LASER_FREQUENCY = 40;
 uint32_t LASER_DURATION  = 5000;
 
+// Cue pulse shadow variables (CS+ = cue, CS- = cue2). pulse_on == 0 means
+// continuous (pulsing disabled). 374/375 set CS+, 384/385 set CS-; each
+// command carries only its own key, so we retain the companion value here.
+uint16_t CUE_PULSE_ON_MS   = 0;    // CS+ continuous by default
+uint16_t CUE_PULSE_OFF_MS  = 0;
+uint16_t CUE2_PULSE_ON_MS  = 200;  // CS- pulsed 200/200 by default (matches PAV_PULSE_CONFIG)
+uint16_t CUE2_PULSE_OFF_MS = 200;
+
 /// Central scheduler instance.
 PavlovianScheduler scheduler;
 
@@ -306,6 +314,30 @@ void ParseCommands() {
             logParamChange(F("CUE2"), F("pulse_on"), (uint32_t)onMs);
             logParamChange(F("CUE2"), F("pulse_off"), (uint32_t)offMs);
             break;
+          }
+
+          // Per-cue, per-direction pulse control (supersedes the CS--only 219
+          // for fine control). Each command carries one key; the companion
+          // value is held in the shadow globals. pulse_on == 0 => continuous.
+          case Cmd::CUE_SET_PULSE_ON: {
+            CUE_PULSE_ON_MS = inputJson["pulse_on"] | (uint16_t)0;
+            cue.SetPulsed(CUE_PULSE_ON_MS > 0, CUE_PULSE_ON_MS, CUE_PULSE_OFF_MS);
+            logParamChange(F("CUE"), F("pulse_on"), (uint32_t)CUE_PULSE_ON_MS); break;
+          }
+          case Cmd::CUE_SET_PULSE_OFF: {
+            CUE_PULSE_OFF_MS = inputJson["pulse_off"] | (uint16_t)0;
+            cue.SetPulsed(CUE_PULSE_ON_MS > 0, CUE_PULSE_ON_MS, CUE_PULSE_OFF_MS);
+            logParamChange(F("CUE"), F("pulse_off"), (uint32_t)CUE_PULSE_OFF_MS); break;
+          }
+          case Cmd::CUE2_SET_PULSE_ON: {
+            CUE2_PULSE_ON_MS = inputJson["pulse_on"] | (uint16_t)0;
+            cue2.SetPulsed(CUE2_PULSE_ON_MS > 0, CUE2_PULSE_ON_MS, CUE2_PULSE_OFF_MS);
+            logParamChange(F("CUE2"), F("pulse_on"), (uint32_t)CUE2_PULSE_ON_MS); break;
+          }
+          case Cmd::CUE2_SET_PULSE_OFF: {
+            CUE2_PULSE_OFF_MS = inputJson["pulse_off"] | (uint16_t)0;
+            cue2.SetPulsed(CUE2_PULSE_ON_MS > 0, CUE2_PULSE_ON_MS, CUE2_PULSE_OFF_MS);
+            logParamChange(F("CUE2"), F("pulse_off"), (uint32_t)CUE2_PULSE_OFF_MS); break;
           }
 
           // Pavlovian laser commands
