@@ -255,7 +255,7 @@ class TestPumpRules:
 class TestCueRules:
     def test_rule_22_primary_cue_freq_zero(self):
         req = _req(hardwareUi={**_pump_ok(), "primaryCue": {"armed": True, "frequency": 0, "duration": 500}})
-        assert _has(run_validation(req), "primaryCue.frequency", "warning")
+        assert _has(run_validation(req), "primaryCue.frequency", "error")
 
     def test_rule_24_primary_cue_duration_zero(self):
         req = _req(hardwareUi={**_pump_ok(), "primaryCue": {"armed": True, "frequency": 8000, "duration": 0}})
@@ -263,7 +263,7 @@ class TestCueRules:
 
     def test_rule_23_secondary_cue_freq_zero(self):
         req = _req(hardwareUi={**_pump_ok(), "secondaryCue": {"armed": True, "frequency": 0, "duration": 500}})
-        assert _has(run_validation(req), "secondaryCue.frequency", "warning")
+        assert _has(run_validation(req), "secondaryCue.frequency", "error")
 
     def test_rule_25_secondary_cue_duration_zero(self):
         req = _req(hardwareUi={**_pump_ok(), "secondaryCue": {"armed": True, "frequency": 4000, "duration": 0}})
@@ -271,7 +271,9 @@ class TestCueRules:
 
     def test_no_cue_warning_when_disarmed(self):
         req = _req(hardwareUi={**_pump_ok(), "primaryCue": {"armed": False, "frequency": 0, "duration": 0}})
-        assert not _has(run_validation(req), "primaryCue.frequency", "warning")
+        result = run_validation(req)
+        assert not _has(result, "primaryCue.frequency", "warning")
+        assert not _has(result, "primaryCue.frequency", "error")
 
 
 # ---------------------------------------------------------------------------

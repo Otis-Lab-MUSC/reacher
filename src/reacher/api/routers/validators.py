@@ -156,14 +156,14 @@ def _check_hardware(req: ValidateConfigRequest) -> list[ValidationWarning]:
     # Rules 22, 24: primary cue
     if _hw(req, "primaryCue", "armed"):
         if (_hw(req, "primaryCue", "frequency") or 0) == 0:
-            warnings.append(_w("primaryCue.frequency", "Primary cue frequency is zero — no audible tone will play"))
+            warnings.append(_e("primaryCue.frequency", "Primary cue frequency cannot be zero when armed"))
         if (_hw(req, "primaryCue", "duration") or 0) == 0:
             warnings.append(_w("primaryCue.duration", "Primary cue duration is zero — tone will be instantaneous"))
 
     # Rules 23, 25: secondary cue
     if _hw(req, "secondaryCue", "armed"):
         if (_hw(req, "secondaryCue", "frequency") or 0) == 0:
-            warnings.append(_w("secondaryCue.frequency", "Secondary cue frequency is zero — no audible tone will play"))
+            warnings.append(_e("secondaryCue.frequency", "Secondary cue frequency cannot be zero when armed"))
         if (_hw(req, "secondaryCue", "duration") or 0) == 0:
             warnings.append(_w("secondaryCue.duration", "Secondary cue duration is zero — tone will be instantaneous"))
 
