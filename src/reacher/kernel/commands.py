@@ -102,6 +102,7 @@ class CommandCode(IntEnum):
     LASER_MODE_CONTINGENT = 681
     LASER_MODE_INDEPENDENT = 682
     LASER_TRIGGER_RH_ONLY = 684
+    LASER_TRIGGER_LH_ONLY = 685
     PAV_LASER_CS_PLUS = 691
     PAV_LASER_CS_MINUS = 692
     PAV_LASER_CS_BOTH = 693
@@ -571,6 +572,11 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     684: CommandSpec(
         CommandCode.LASER_TRIGGER_RH_ONLY, "LASER_TRIGGER_RH_ONLY",
         "Set laser to RH-lever-only mode (fires on RH press, no cue, no pump)",
+        paradigms=["fr", "pr", "vi", "omission"],
+    ),
+    685: CommandSpec(
+        CommandCode.LASER_TRIGGER_LH_ONLY, "LASER_TRIGGER_LH_ONLY",
+        "Set laser to LH-lever-only mode (fires on LH press, no cue, no pump)",
         paradigms=["fr", "pr", "vi", "omission"],
     ),
     676: CommandSpec(
