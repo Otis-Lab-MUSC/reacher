@@ -415,11 +415,15 @@ void PavlovianScheduler::PavTick(uint32_t now) {
           LogPavlovianEvent(F("REWARD_OMITTED"), now);
         }
 
-        // Laser activation during REWARD phase
+        // Laser activation during REWARD phase (onset delay deferred via Activate start ts, #69).
+        // Clamp delay to keep onset within the REWARD window so it can't slip into a later phase/trial.
         if (laser && laser->Armed() && laser->IsContingent() && laserPhase == LaserPhase::REWARD) {
           if (ShouldFireLaser(isCsMinus)) {
-            laser->Activate(now, laser->Duration());
-            LogDeviceActivation(DeviceType::LASER, now, now + laser->Duration());
+            uint32_t laserDelay = laser->OnsetDelay();
+            if (laserDelay >= pavConsumptionMs) laserDelay = (pavConsumptionMs > 1) ? (uint32_t)pavConsumptionMs - 1 : 0;
+            uint32_t laserStart = now + laserDelay;
+            laser->Activate(laserStart, laser->Duration());
+            LogDeviceActivation(DeviceType::LASER, laserStart, laserStart + laser->Duration());
           }
         }
 
@@ -474,11 +478,15 @@ void PavlovianScheduler::PavStartTrial(uint32_t now) {
     LogDeviceActivation(cueType, now, now + pavCueDuration);
   }
 
-  // Laser activation during CUE phase
+  // Laser activation during CUE phase (onset delay deferred via Activate start ts, #69).
+  // Clamp delay to keep onset within the CUE window so it can't slip into a later phase/trial.
   if (laser && laser->Armed() && laser->IsContingent() && laserPhase == LaserPhase::CUE) {
     if (ShouldFireLaser(isCsMinus)) {
-      laser->Activate(now, laser->Duration());
-      LogDeviceActivation(DeviceType::LASER, now, now + laser->Duration());
+      uint32_t laserDelay = laser->OnsetDelay();
+      if (laserDelay >= pavCueDuration) laserDelay = (pavCueDuration > 1) ? (uint32_t)pavCueDuration - 1 : 0;
+      uint32_t laserStart = now + laserDelay;
+      laser->Activate(laserStart, laser->Duration());
+      LogDeviceActivation(DeviceType::LASER, laserStart, laserStart + laser->Duration());
     }
   }
 

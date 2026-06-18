@@ -33,6 +33,7 @@ uint32_t PUMP_DURATION      = DEFAULT_PUMP_DURATION;
 uint8_t  LASER_FREQUENCY    = DEFAULT_LASER_FREQUENCY;
 uint32_t LASER_DURATION     = DEFAULT_LASER_DURATION;
 bool     LASER_RH_ONLY_MODE = false;
+DeviceType LASER_LEVER_FILTER = DeviceType::LEVER_RH;  // Lever isolating the laser in RH/LH-only mode (#67)
 uint32_t TIMEOUT_INTERVAL   = DEFAULT_TIMEOUT_INTERVAL;
 uint32_t TRACE_INTERVAL     = 0;
 uint8_t  PR_STEP            = 1;
@@ -160,7 +161,7 @@ void ReconfigureChain() {
       uint32_t pd = (activePump == &pump2) ? PUMP2_ONSET_DELAY : PUMP_ONSET_DELAY;
       c0->steps[0].offsetMs += CUE_ONSET_DELAY;
       c0->steps[1].offsetMs += CUE_ONSET_DELAY + pd;
-      c0->steps[2].offsetMs += CUE_ONSET_DELAY;
+      c0->steps[2].offsetMs += CUE_ONSET_DELAY + laser.OnsetDelay();
     }
   }
   if (LASER_RH_ONLY_MODE) {
@@ -175,7 +176,7 @@ void ReconfigureChain() {
       t1->initialThreshold = 1;
       t1->pressCount = 0;
       t1->prStep = 0;
-      t1->sourceFilter = DeviceType::LEVER_RH;
+      t1->sourceFilter = LASER_LEVER_FILTER;
       t1->probability = 100;
     }
     Chain* c1 = scheduler.GetChain(1);
@@ -280,15 +281,16 @@ void ParseCommands() {
           case Cmd::CUE2_SET_ONSET_DELAY:
           case Cmd::PUMP_SET_ONSET_DELAY:
           case Cmd::PUMP2_SET_ONSET_DELAY: {
-            uint32_t d = (uint32_t)inputJson["delay"]; if (d > 60000) d = 60000;
-            if      (command == Cmd::LASER_SET_ONSET_DELAY) { laser.SetOnsetDelay(d); if (LASER_RH_ONLY_MODE) ReconfigureChain(); }
+            uint32_t d = (uint32_t)inputJson["delay"]; if (d > 600000) d = 600000;
+            if      (command == Cmd::LASER_SET_ONSET_DELAY) { laser.SetOnsetDelay(d); ReconfigureChain(); }
             else if (command == Cmd::CUE_SET_ONSET_DELAY)   { CUE_ONSET_DELAY = d;   ReconfigureChain(); }
             else if (command == Cmd::CUE2_SET_ONSET_DELAY)  { /* cue2 not in chain */ }
             else if (command == Cmd::PUMP_SET_ONSET_DELAY)  { PUMP_ONSET_DELAY = d;  ReconfigureChain(); }
             else                                             { PUMP2_ONSET_DELAY = d; ReconfigureChain(); }
             break;
           }
-          case Cmd::LASER_TRIGGER_RH_ONLY: LASER_RH_ONLY_MODE = true; ReconfigureChain(); break;
+          case Cmd::LASER_TRIGGER_RH_ONLY: LASER_RH_ONLY_MODE = true; LASER_LEVER_FILTER = DeviceType::LEVER_RH; ReconfigureChain(); break;
+          case Cmd::LASER_TRIGGER_LH_ONLY: LASER_RH_ONLY_MODE = true; LASER_LEVER_FILTER = DeviceType::LEVER_LH; ReconfigureChain(); break;
           // RH lever commands
           case Cmd::LEVER_RH_ARM:          rLever.ArmToggle(true); break;
           case Cmd::LEVER_RH_DISARM:       rLever.ArmToggle(false); break;

@@ -324,6 +324,11 @@ void ParseCommands() {
           case Cmd::PAV_LASER_PHASE_CUE:
             scheduler.SetLaserPhase(LaserPhase::CUE);
             logParamChange(F("LASER"), F("laser_phase"), F("CUE")); break;
+          case Cmd::LASER_SET_ONSET_DELAY: {
+            uint32_t d = (uint32_t)inputJson["delay"]; if (d > 600000) d = 600000;
+            laser.SetOnsetDelay(d);
+            logParamChange(F("LASER"), F("onset_delay"), d); break;
+          }
 
           // Controller commands
           case Cmd::SESSION_START:
