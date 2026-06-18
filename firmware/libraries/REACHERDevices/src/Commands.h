@@ -64,11 +64,15 @@ namespace Cmd {
   constexpr int CUE_SET_FREQUENCY    = 371;
   constexpr int CUE_SET_DURATION     = 372;
   constexpr int CUE_SET_TRACE        = 373;  // deprecated
+  constexpr int CUE_SET_PULSE_ON     = 374;  // CS+ pulse ON duration (ms); 0 = continuous
+  constexpr int CUE_SET_PULSE_OFF    = 375;  // CS+ pulse OFF duration (ms)
   constexpr int CUE_SET_PIN          = 376;
   constexpr int CUE_SET_ONSET_DELAY  = 377;  // Cue onset delay from trigger (ms); operant paradigms
   constexpr int CUE_SET_LEVER_FILTER  = 378;  // Per-device lever routing (0=any, 1=RH_only, 2=LH_only)
   constexpr int CUE2_SET_FREQUENCY   = 381;
   constexpr int CUE2_SET_DURATION    = 382;
+  constexpr int CUE2_SET_PULSE_ON    = 384;  // CS- pulse ON duration (ms); 0 = continuous
+  constexpr int CUE2_SET_PULSE_OFF   = 385;  // CS- pulse OFF duration (ms)
   constexpr int CUE2_SET_ONSET_DELAY  = 387;  // Cue2 onset delay (stored; cue2 absent from operant chains)
   constexpr int CUE2_SET_LEVER_FILTER = 388;
   constexpr int CUE2_SET_PIN         = 386;
