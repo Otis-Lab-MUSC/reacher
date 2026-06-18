@@ -10,6 +10,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.0.0-beta.7] - 2026-06-18
+
+### Added
+- `pavlovian.ino` now implements the CS+/CS- cue pulse command handlers (`CUE_SET_PULSE_ON`/`OFF` and `CUE2_SET_PULSE_ON`/`OFF` — codes 374/375/384/385) that the Pavlovian UI emits, reusing `Cue::SetPulsed` with per-cue/per-direction shadow globals. These codes were declared in the `CommandCode` enum + labrynth metadata but parsed by no sketch, so preset-driven Pavlovian sessions returned a `006` "command not found". `KNOWN_BACKEND_ONLY` is now empty, so `test_command_parity` enforces firmware coverage of every command code ([#24](https://github.com/Otis-Lab-MUSC/reacher/issues/24))
+
+### Fixed
+- An armed primary/secondary cue with `frequency: 0` is now a hard pre-flight validation **error** instead of an acknowledgeable warning, mirroring the existing armed-laser-frequency-0 rule. The config is blocked before session start rather than surfacing a raw HTTP 400 ("frequency must be between 1 and 65535") when the frequency command is emitted; the `hardware.py` per-command range check is left unchanged (defense-in-depth) ([#25](https://github.com/Otis-Lab-MUSC/reacher/issues/25))
+
+---
+
 ## [3.0.0-beta.6] - 2026-06-18
 
 ### Added
