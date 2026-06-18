@@ -106,6 +106,7 @@ namespace Cmd {
   constexpr int LASER_MODE_CONTINGENT  = 681;
   constexpr int LASER_MODE_INDEPENDENT = 682;
   constexpr int LASER_TRIGGER_RH_ONLY  = 684;  // RH lever press fires laser only (no cue, no pump)
+  constexpr int LASER_TRIGGER_LH_ONLY  = 685;  // LH lever press fires laser only (no cue, no pump)
 
   // Pavlovian laser trial assignment
   constexpr int PAV_LASER_CS_PLUS      = 691;  // Fire on CS+ trials only
