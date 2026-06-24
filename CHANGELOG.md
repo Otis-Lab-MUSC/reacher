@@ -10,6 +10,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.0.0] - 2026-06-24
+
+_reacher v3.0.0 stable — first stable and first PyPI release of the v3 line. See each
+beta section below for the full incremental change history._
+
+### Added
+- **Firmware source folded into this repo** at `firmware/` (sketches, `libraries/REACHERDevices/`, `compile.sh`) — imported from the archived `Otis-Lab-MUSC/reacher-firmware`; hex committed as package data at `src/reacher/hex/<board>/`
+- Session config validation endpoint (`POST /api/validate/config`): 43-rule deterministic engine covering paradigm required fields, hardware device checks, session limit conflicts, temporal ordering, and Pavlovian-specific rules; structured warnings with severity levels surfaced in Labrynth's Start Modal
+- Per-device onset-delay commands: `CUE_SET_ONSET_DELAY` (377/387), `PUMP_SET_ONSET_DELAY` (477/487)
+- Per-device lever-routing commands: `CUE_SET_LEVER_FILTER` (378/388), `PUMP_SET_LEVER_FILTER` (478/488), `LASER_TRIGGER_LH_ONLY` (685)
+- `GET /api/serial/ports` now includes a `portBoards` map (VID/PID auto-detect) so Labrynth can pre-fill the firmware upload board selector
+- Temporal validation rules 37–40: warn when lever timeout is shorter than a contingent cue's onset delay + duration
+- Multi-machine validation test suite for remote/proxy session control
+- `pavlovian.ino` CS+/CS− pulse handlers (374/375/384/385)
+
+### Changed
+- Config validator is now a pure-Python rule engine — Ollama/LLM backend and `REACHER_OLLAMA_URL`/`REACHER_OLLAMA_MODEL` env vars removed
+- Firmware version coupled to package version: `bump-version.py` stamps `library.properties` and each sketch's `SendIdentification()`; recompile hex after every bump
+- FR/PR laser routing uses configurable `LASER_LEVER_FILTER` (RH or LH) instead of hardcoded RH; onset-delay clamp raised to 600 000 ms
+- Pavlovian `counterbalance` (212), `consumption_window` (215), and `pulse_config` (219) params re-enabled in the command registry
+- Default upload board changed from UNO to Mega 2560
+- Rebranded umbrella project from "REACHER Suite" to "Phoxel Workbench" across documentation; package name, APIs, and serial protocol unchanged
+
+### Fixed
+- Infusion-limit counter increments for operant paradigms (`PUMP_1`) alongside legacy `PUMP` ([#3.0.0-beta.3](https://github.com/Otis-Lab-MUSC/reacher/issues/))
+- Proxy WebSocket endpoint replays `session_state` on connect — late-connecting relays no longer stay stuck at `idle`
+- Armed cue/secondaryCue with `frequency: 0` is now a pre-flight hard error (blocked before start)
+- In-app update download: Linux asset suffix patterns and `follow_redirects=True` fixed
+
+---
+
 ## [3.0.0-beta.7] - 2026-06-18
 
 ### Added
