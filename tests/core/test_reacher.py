@@ -706,6 +706,202 @@ class TestF010EventLogFsync:
         mock_close_log.assert_called_once()
 
 
+class TestIssue33LogWriteFailureSurfacing:
+    """Issue #33: kernel log-write failure surfacing — throttled WS warnings."""
+
+    def test_write_event_log_failure_emits_warning(self, reacher, mocker):
+        """Write failure increments count and emits throttled warning to WS."""
+        mock_file = Mock()
+        mock_file.closed = False
+        mock_file.fileno.return_value = 99
+        mock_file.write.side_effect = OSError("No space left on device")
+        mocker.patch("builtins.open", return_value=mock_file)
+        mocker.patch("os.fsync")
+
+        cb = Mock()
+        reacher.event_callback = cb
+        reacher.session_id = "sid"
+
+        reacher._write_event_log({"x": 1})
+
+        assert cb.call_count == 1
+        call_args = cb.call_args[0]
+        assert call_args[0] == "sid"
+        assert call_args[1] == "warning"
+        data = call_args[2]
+        assert data["reason"] == "log_write_failure"
+        assert data["log_type"] == "event_log"
+        assert data["failures_since_last_emit"] == 1
+
+    def test_write_event_log_failure_throttled(self, reacher, mocker):
+        """Multiple write failures within 1s throttle window emit only once."""
+        mock_file = Mock()
+        mock_file.closed = False
+        mock_file.fileno.return_value = 99
+        mock_file.write.side_effect = OSError("No space left on device")
+        mocker.patch("builtins.open", return_value=mock_file)
+        mocker.patch("os.fsync")
+
+        cb = Mock()
+        reacher.event_callback = cb
+        reacher.session_id = "sid"
+
+        reacher._write_event_log({"x": 1})
+        reacher._write_event_log({"x": 2})
+
+        assert cb.call_count == 1
+
+    def test_write_event_log_failure_resets_count_after_emit(self, reacher, mocker):
+        """Failure count resets to 0 after emit, then increments on next failure."""
+        mock_file = Mock()
+        mock_file.closed = False
+        mock_file.fileno.return_value = 99
+        mock_file.write.side_effect = OSError("No space left on device")
+        mocker.patch("builtins.open", return_value=mock_file)
+        mocker.patch("os.fsync")
+
+        cb = Mock()
+        reacher.event_callback = cb
+        reacher.session_id = "sid"
+
+        reacher._write_event_log({"x": 1})
+        assert cb.call_count == 1
+
+        reacher._write_event_log({"x": 2})
+        assert cb.call_count == 1
+        assert reacher._log_failure_counts["event_log"] == 1
+
+    def test_write_controller_log_failure_emits_warning(self, reacher, mocker):
+        """Controller log write failure emits warning with correct log_type."""
+        mock_file = Mock()
+        mock_file.closed = False
+        mock_file.fileno.return_value = 99
+        mock_file.write.side_effect = OSError("No space left on device")
+        mocker.patch("builtins.open", return_value=mock_file)
+        mocker.patch("os.fsync")
+
+        cb = Mock()
+        reacher.event_callback = cb
+        reacher.session_id = "sid"
+
+        reacher._write_controller_log({"x": 1})
+
+        assert cb.call_count == 1
+        call_args = cb.call_args[0]
+        assert call_args[0] == "sid"
+        assert call_args[1] == "warning"
+        data = call_args[2]
+        assert data["reason"] == "log_write_failure"
+        assert data["log_type"] == "controller_log"
+        assert data["failures_since_last_emit"] == 1
+
+    def test_close_event_log_failure_emits_warning(self, reacher, mocker):
+        """Close failure emits warning (not throttled) immediately."""
+        handle = mocker.MagicMock()
+        handle.closed = False
+        handle.flush.side_effect = OSError("disk error")
+        reacher._event_log_file = handle
+        mocker.patch("os.fsync")
+
+        cb = Mock()
+        reacher.event_callback = cb
+        reacher.session_id = "sid"
+
+        reacher._close_event_log()
+
+        assert cb.call_count == 1
+        call_args = cb.call_args[0]
+        assert call_args[0] == "sid"
+        assert call_args[1] == "warning"
+        data = call_args[2]
+        assert data["reason"] == "log_close_failure"
+        assert data["log_type"] == "event_log"
+
+    def test_close_controller_log_failure_emits_warning(self, reacher, mocker):
+        """Controller log close failure emits warning with correct log_type."""
+        handle = mocker.MagicMock()
+        handle.closed = False
+        handle.flush.side_effect = OSError("disk error")
+        reacher._controller_log_file = handle
+        mocker.patch("os.fsync")
+
+        cb = Mock()
+        reacher.event_callback = cb
+        reacher.session_id = "sid"
+
+        reacher._close_controller_log()
+
+        assert cb.call_count == 1
+        call_args = cb.call_args[0]
+        assert call_args[0] == "sid"
+        assert call_args[1] == "warning"
+        data = call_args[2]
+        assert data["reason"] == "log_close_failure"
+        assert data["log_type"] == "controller_log"
+
+    def test_write_event_log_failure_no_exception_escapes(self, reacher, mocker):
+        """Write failure is silently caught; broken callback increments emit_failure_count."""
+        mock_file = Mock()
+        mock_file.closed = False
+        mock_file.fileno.return_value = 99
+        mock_file.write.side_effect = OSError("No space left on device")
+        mocker.patch("builtins.open", return_value=mock_file)
+        mocker.patch("os.fsync")
+
+        cb = Mock(side_effect=Exception("Callback error"))
+        reacher.event_callback = cb
+        reacher.session_id = "sid"
+
+        try:
+            reacher._write_event_log({"x": 1})
+        except Exception as e:
+            pytest.fail(f"Unexpected exception: {e}")
+
+        assert reacher.emit_failure_count == 1
+
+    def test_close_event_log_failure_no_emit_when_no_callback(self, reacher, mocker):
+        """Close failure with no callback is a no-op on _emit — no exception, no WS call."""
+        handle = mocker.MagicMock()
+        handle.closed = False
+        handle.flush.side_effect = OSError("disk error")
+        reacher._event_log_file = handle
+        mocker.patch("os.fsync")
+
+        reacher.event_callback = None
+
+        try:
+            reacher._close_event_log()
+        except Exception as e:
+            pytest.fail(f"Unexpected exception: {e}")
+
+        assert reacher.emit_failure_count == 0
+
+    def test_write_event_log_fsync_failure_emits_warning(self, reacher, mocker):
+        """fsync failure in write is caught and emitted as log_write_failure."""
+        mock_file = Mock()
+        mock_file.closed = False
+        mock_file.fileno.return_value = 99
+        mocker.patch("builtins.open", return_value=mock_file)
+        fsync_mock = mocker.patch("os.fsync")
+        fsync_mock.side_effect = OSError("fsync error")
+
+        reacher._EVENT_LOG_FSYNC_INTERVAL = 1
+
+        cb = Mock()
+        reacher.event_callback = cb
+        reacher.session_id = "sid"
+
+        reacher._write_event_log({"x": 1})
+
+        assert cb.call_count == 1
+        call_args = cb.call_args[0]
+        assert call_args[0] == "sid"
+        assert call_args[1] == "warning"
+        data = call_args[2]
+        assert data["reason"] == "log_write_failure"
+        assert data["log_type"] == "event_log"
+
+
 class TestFrameTimestampStopSemantics:
     """Fix FW-002: frame timestamps must be gated by program_flag, not discarded silently."""
 
