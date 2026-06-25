@@ -10,6 +10,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.0.1] - 2026-06-25
+
+### Fixed
+- `REACHER_HOST` now defaults to `127.0.0.1` (loopback); set to `0.0.0.0` to accept LAN connections. Prevents unintended exposure of unauthenticated endpoints on multi-host networks ([#37](https://github.com/Otis-Lab-MUSC/reacher/issues/37))
+- `GET /api/firmware/diagnostics` leaked filesystem paths and a directory listing to unauthenticated callers; endpoint now requires the Bearer token ([#38](https://github.com/Otis-Lab-MUSC/reacher/issues/38))
+- Lifecycle shutdown beacon now refuses to terminate the process while a session is in the `uploading` state, closing a mid-acquisition termination window alongside the existing `running`/`paused` guards ([#39](https://github.com/Otis-Lab-MUSC/reacher/issues/39))
+- Microscope frame-drop counter (`FW-003`) was silently reset at every `ReconfigureChain()` call and never surfaced to the backend; counter now persists across reconfigurations and is emitted in status frames ([#40](https://github.com/Otis-Lab-MUSC/reacher/issues/40))
+- Kernel log-write failures (disk full, permission denied) were swallowed silently; failures now surface as throttled WebSocket warnings so the operator is notified in real time ([#41](https://github.com/Otis-Lab-MUSC/reacher/issues/41))
+- Lever source filter shadows were not reset at session start, causing stale filter state from the previous session to bleed into the next; CUE2 filter chain step added to FR/PR/VI/Omission schedules ([#42](https://github.com/Otis-Lab-MUSC/reacher/issues/42))
+
+---
+
 ## [3.0.0] - 2026-06-24
 
 _reacher v3.0.0 stable — first stable and first PyPI release of the v3 line. See each
