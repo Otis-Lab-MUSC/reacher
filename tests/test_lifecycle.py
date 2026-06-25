@@ -58,7 +58,7 @@ def _app_ref_with_session(state):
 class TestBeaconShutdownGuard:
     """Issue #30: beacon must not kill the process mid-acquisition."""
 
-    @pytest.mark.parametrize("state", ["running", "paused"])
+    @pytest.mark.parametrize("state", ["running", "paused", "uploading"])
     async def test_refuses_shutdown_while_session_active(self, state):
         # Beacon's preconditions met (a client connected then dropped), 0 connections,
         # but a session is recording/paused — the orphaned-but-active attack path.
