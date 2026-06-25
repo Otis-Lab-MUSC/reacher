@@ -36,7 +36,7 @@ async def _delayed_shutdown():
         # Mirror the watchdog guard (Fix F-001): never let the headerless,
         # auth-free beacon kill the process while a session is recording —
         # even if its WS client is momentarily orphaned (total_connections() == 0).
-        logger.info("Shutdown beacon: session running/paused — refusing shutdown (mid-acquisition guard)")
+        logger.info("Shutdown beacon: session active (running/paused/uploading) — refusing shutdown")
         return
     if total_connections() == 0:
         logger.info("Grace period elapsed with 0 connections — shutting down")

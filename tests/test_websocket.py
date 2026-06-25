@@ -68,8 +68,9 @@ class TestWatchdogF001:
 
     async def test_watchdog_defers_when_upload_active(self):
         # Issue #36: watchdog must not fire while avrdude is mid-flash (uploading state).
+        # idle must exceed _WATCHDOG_TIMEOUT (300s) so the deferral branch actually executes.
         ws._had_connections = True
-        ws._last_connection_time = time.monotonic() - 150
+        ws._last_connection_time = time.monotonic() - (ws._WATCHDOG_TIMEOUT + 30)
         ws._connections.clear()  # 0 connections
 
         mock_session = Mock()
@@ -140,6 +141,58 @@ class TestWatchdogF001:
 
         mock_suspend.assert_called_once()
         mock_shutdown.assert_not_called()
+
+
+class TestOrphanCleanupF002:
+    """Issue #36: orphan cleanup must not destroy a session mid-flash (uploading state)."""
+
+    def setup_method(self):
+        ws._session_disconnect_times.clear()
+
+    def teardown_method(self):
+        ws._session_disconnect_times.clear()
+
+    async def test_orphan_uses_extended_timeout_for_uploading_session(self):
+        # Session is past the short 60s timeout but within the 600s extended timeout.
+        sid = "sess_upload"
+        ws._session_disconnect_times[sid] = time.monotonic() - 90  # 90s > 60s, < 600s
+
+        mock_session = Mock()
+        mock_session.state = "uploading"
+        mock_sm = Mock()
+        mock_sm._sessions = {sid: mock_session}
+        mock_app = Mock()
+        mock_app.state.session_manager = mock_sm
+        ws._app_ref = mock_app
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            mock_sleep.side_effect = [None, asyncio.CancelledError()]
+            with pytest.raises(asyncio.CancelledError):
+                await ws._orphan_cleanup()
+
+        mock_sm.destroy_session.assert_not_called()
+
+    async def test_orphan_destroys_idle_session_after_short_timeout(self):
+        # A session in "idle" state should be destroyed after 60s.
+        sid = "sess_idle"
+        ws._session_disconnect_times[sid] = time.monotonic() - 90  # 90s > 60s
+
+        mock_session = Mock()
+        mock_session.state = "idle"
+        mock_sm = Mock()
+        mock_sm._sessions = {sid: mock_session}
+        mock_app = Mock()
+        mock_app.state.session_manager = mock_sm
+        ws._app_ref = mock_app
+        ws._loop = asyncio.get_event_loop()
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            mock_sleep.side_effect = [None, asyncio.CancelledError()]
+            with patch("reacher.api.routers.hardware.release_session"):
+                with pytest.raises(asyncio.CancelledError):
+                    await ws._orphan_cleanup()
+
+        mock_sm.destroy_session.assert_called_once_with(sid)
 
 
 class TestBroadcastWorkerF004:

@@ -287,7 +287,7 @@ def _ensure_broadcast_worker():
 # Per-session last-disconnect timestamps for orphan cleanup
 _session_disconnect_times: Dict[str, float] = {}
 _SESSION_ORPHAN_TIMEOUT = 60  # seconds with 0 WS clients before destroying a session
-_SESSION_ORPHAN_TIMEOUT_ACTIVE = 600  # extended timeout for running/paused sessions
+_SESSION_ORPHAN_TIMEOUT_ACTIVE = 600  # extended timeout for running/paused/uploading sessions
 _orphan_task = None
 
 
@@ -300,13 +300,13 @@ async def _orphan_cleanup():
         for sid, ts in list(_session_disconnect_times.items()):
             if sid in _connections:
                 continue
-            # Use extended timeout for running/paused sessions
+            # Use extended timeout for running/paused/uploading sessions
             timeout = _SESSION_ORPHAN_TIMEOUT
             if _app_ref is not None:
                 try:
                     sm = _app_ref.state.session_manager
                     info = sm._sessions.get(sid)
-                    if info and info.state in ("running", "paused"):
+                    if info and info.state in ("running", "paused", "uploading"):
                         timeout = _SESSION_ORPHAN_TIMEOUT_ACTIVE
                 except Exception:
                     pass
