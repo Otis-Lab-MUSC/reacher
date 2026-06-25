@@ -66,6 +66,33 @@ class TestWatchdogF001:
 
             mock_shutdown.assert_not_called()
 
+    async def test_watchdog_defers_when_upload_active(self):
+        # Issue #36: watchdog must not fire while avrdude is mid-flash (uploading state).
+        ws._had_connections = True
+        ws._last_connection_time = time.monotonic() - 150
+        ws._connections.clear()  # 0 connections
+
+        mock_session = Mock()
+        mock_session.state = "uploading"
+        mock_sm = Mock()
+        mock_sm._sessions = {"sess1": mock_session}
+        mock_app = Mock()
+        mock_app.state.session_manager = mock_sm
+        ws._app_ref = mock_app
+
+        call_count = [0]
+
+        async def mock_sleep(duration):
+            call_count[0] += 1
+            if call_count[0] >= 2:
+                raise asyncio.CancelledError()
+
+        with patch.object(ws, "_trigger_shutdown") as mock_shutdown, patch("asyncio.sleep", side_effect=mock_sleep):
+            with pytest.raises(asyncio.CancelledError):
+                await ws._watchdog()
+
+            mock_shutdown.assert_not_called()
+
     async def test_watchdog_shuts_down_when_no_active_sessions(self):
         # Idle well past WATCHDOG_TIMEOUT + WATCHDOG_HARD_KILL_TIMEOUT (120 + 1800 = 1920s)
         # so the watchdog reaches the hard-kill branch in a single pass.
