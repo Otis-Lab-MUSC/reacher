@@ -124,6 +124,12 @@ class REACHER:
         self._queue_overflow_count: int = 0
         self._last_queue_overflow_emit: float = float("-inf")
 
+        # Fix: #33 — Surface log-write failures to the operator via WS warning.
+        # Throttle per log_type (1 s) and accumulate a consecutive-failure count
+        # so a ENOSPC storm emits one event/sec with the run total, not one per write.
+        self._last_log_failure_emit: Dict[str, float] = {}
+        self._log_failure_counts: Dict[str, int] = {"event_log": 0, "controller_log": 0}
+
         # Fix 7.4: track cumulative event_callback failures so the API layer
         # can surface degraded WS/observer health without risking recursion
         # (a broken callback is the one channel we can't use to self-report).
@@ -891,6 +897,16 @@ class REACHER:
                 self._event_log_write_count = 0
         except Exception:
             self.logger.warning("Failed to write event log entry", exc_info=True)
+            self._log_failure_counts["event_log"] += 1
+            _now = time.monotonic()
+            if _now - self._last_log_failure_emit.get("event_log", float("-inf")) > 1.0:
+                self._last_log_failure_emit["event_log"] = _now
+                self._emit("warning", {
+                    "reason": "log_write_failure",
+                    "log_type": "event_log",
+                    "failures_since_last_emit": self._log_failure_counts["event_log"],
+                })
+                self._log_failure_counts["event_log"] = 0
 
     def _close_event_log(self) -> None:
         """Flush and close the persistent event log file handle."""
@@ -901,6 +917,7 @@ class REACHER:
                 self._event_log_file.close()
             except Exception:
                 self.logger.warning("Failed to close event log", exc_info=True)
+                self._emit("warning", {"reason": "log_close_failure", "log_type": "event_log"})
 
     def _write_controller_log(self, data: dict) -> None:
         """Append a JSON line to controller_log.json (Fix 4.9).
@@ -920,6 +937,16 @@ class REACHER:
                 self._controller_log_write_count = 0
         except Exception:
             self.logger.warning("Failed to write controller log", exc_info=True)
+            self._log_failure_counts["controller_log"] += 1
+            _now = time.monotonic()
+            if _now - self._last_log_failure_emit.get("controller_log", float("-inf")) > 1.0:
+                self._last_log_failure_emit["controller_log"] = _now
+                self._emit("warning", {
+                    "reason": "log_write_failure",
+                    "log_type": "controller_log",
+                    "failures_since_last_emit": self._log_failure_counts["controller_log"],
+                })
+                self._log_failure_counts["controller_log"] = 0
 
     def _close_controller_log(self) -> None:
         """Flush and close the persistent controller log file handle."""
@@ -930,6 +957,7 @@ class REACHER:
                 self._controller_log_file.close()
             except Exception:
                 self.logger.warning("Failed to close controller log", exc_info=True)
+                self._emit("warning", {"reason": "log_close_failure", "log_type": "controller_log"})
 
     def _export_segment(self, behavior: list, suffix: str = "") -> str:
         """Write behavior_events{suffix}.csv to the session log directory.
