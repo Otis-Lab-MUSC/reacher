@@ -276,7 +276,7 @@ def create_app() -> FastAPI:
     app.include_router(session.router, prefix="/api/sessions", tags=["sessions"], dependencies=api_deps)
     app.include_router(serial.router, prefix="/api/serial", tags=["serial"], dependencies=api_deps)
     app.include_router(firmware.router, prefix="/api/firmware", tags=["firmware"], dependencies=api_deps)
-    app.include_router(firmware.diagnostics_router, prefix="/api/firmware", tags=["firmware"])
+    app.include_router(firmware.diagnostics_router, prefix="/api/firmware", tags=["firmware"], dependencies=api_deps)
     app.include_router(hardware.router, prefix="/api/hardware", tags=["hardware"], dependencies=api_deps)
     app.include_router(program.router, prefix="/api/program", tags=["program"], dependencies=api_deps)
     app.include_router(data.router, prefix="/api/data", tags=["data"], dependencies=api_deps)
