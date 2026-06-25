@@ -592,7 +592,7 @@ class FirmwareSimulator:
             return
         self._send({
             "level": "008", "device": "MICROSCOPE", "pin": 10,
-            "event": "TIMESTAMP", "timestamp": self._clock,
+            "event": "TIMESTAMP", "timestamp": self._clock, "missed": 0,
         })
 
 
