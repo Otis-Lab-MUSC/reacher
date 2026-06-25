@@ -763,3 +763,44 @@ class TestFrameTimestampStopSemantics:
         reacher.update_frame_events({"timestamp": 5050})
         assert len(reacher.behavior_data) == 1
         assert reacher.frame_data == [5050]
+
+    # Fix: FW-003 — missed-frame counter tests
+    def test_frame_event_clean_emits_missed_zero(self, reacher, mocker):
+        """Normal frame (missed=0) is emitted with missed:0; no warning logged."""
+        mocker.patch("builtins.open", mocker.mock_open())
+        mocker.patch("os.fsync")
+        emit_calls = []
+        reacher._emit = lambda event, data: emit_calls.append((event, data))
+        warn_calls = []
+        reacher.logger.warning = lambda msg: warn_calls.append(msg)
+        reacher.program_flag.clear()
+        reacher.update_frame_events({"timestamp": 1000, "missed": 0})
+        assert reacher.frame_data == [1000]
+        assert emit_calls == [("frame", {"timestamp": 1000, "missed": 0})]
+        assert warn_calls == []
+
+    def test_frame_event_with_drops_warns_and_emits(self, reacher, mocker):
+        """Frame with missed>0 logs a warning and emits missed count; frame_data still updated."""
+        mocker.patch("builtins.open", mocker.mock_open())
+        mocker.patch("os.fsync")
+        emit_calls = []
+        reacher._emit = lambda event, data: emit_calls.append((event, data))
+        warn_calls = []
+        reacher.logger.warning = lambda msg: warn_calls.append(msg)
+        reacher.program_flag.clear()
+        reacher.update_frame_events({"timestamp": 2000, "missed": 2})
+        assert reacher.frame_data == [2000]
+        assert emit_calls == [("frame", {"timestamp": 2000, "missed": 2})]
+        assert len(warn_calls) == 1
+        assert "Dropped 2" in warn_calls[0] and "2000" in warn_calls[0]
+
+    def test_frame_event_backward_compat_no_missed_key(self, reacher, mocker):
+        """Old firmware events without 'missed' key default to missed=0 without error."""
+        mocker.patch("builtins.open", mocker.mock_open())
+        mocker.patch("os.fsync")
+        emit_calls = []
+        reacher._emit = lambda event, data: emit_calls.append((event, data))
+        reacher.program_flag.clear()
+        reacher.update_frame_events({"timestamp": 9999})
+        assert reacher.frame_data == [9999]
+        assert emit_calls == [("frame", {"timestamp": 9999, "missed": 0})]

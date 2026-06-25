@@ -791,11 +791,15 @@ class REACHER:
         if self.program_flag.is_set():
             return
         ts = int(event.get('timestamp'))
-        self._write_event_log({"type": "frame", "timestamp": ts})
+        missed = int(event.get('missed', 0))
+        self._write_event_log({"type": "frame", "timestamp": ts, "missed": missed})
         with self.thread_lock:
             self.frame_data.append(ts)
-        self.logger.info("--> Updated frame data")
-        self._emit("frame", {"timestamp": ts})
+        if missed > 0:
+            self.logger.warning(f"--> Dropped {missed} microscope frame(s) before timestamp {ts}")
+        else:
+            self.logger.info("--> Updated frame data")
+        self._emit("frame", {"timestamp": ts, "missed": missed})
 
     def update_slm_events(self, event: dict) -> None:
         if self.program_flag.is_set():
