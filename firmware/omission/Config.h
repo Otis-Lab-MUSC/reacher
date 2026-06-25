@@ -26,16 +26,18 @@ static constexpr uint32_t DEFAULT_LASER_DURATION     = 5000;
 ///
 /// Reward fires after the animal withholds pressing for `absenceMs` milliseconds.
 /// Any lever press resets the absence timer. No timeout is applied.
-/// Cue, pump, and laser fire simultaneously (no trace interval).
+/// Cue, cue2, pump, and laser fire simultaneously (no trace interval).
 /// @param sched Scheduler to configure
-/// @param cue Cue device
+/// @param cue Primary cue device
+/// @param cue2 Secondary cue device
 /// @param pump Pump device
 /// @param laser Laser device
 /// @param absenceMs Required absence duration (ms) before reward fires
 /// @param cueFilter Per-action lever source filter for the CUE step (NONE = any)
+/// @param cue2Filter Per-action lever source filter for the CUE_2 step (NONE = any)
 /// @param pumpFilter Per-action lever source filter for the PUMP step (NONE = any)
 /// @param pump2Filter Per-action lever source filter when pumpTarget is PUMP_2 (NONE = any)
-inline void configureOmission(Scheduler& sched, Cue& cue, Pump& pump, Laser& laser, uint32_t absenceMs, DeviceType pumpTarget = DeviceType::PUMP, DeviceType cueFilter = DeviceType::NONE, DeviceType pumpFilter = DeviceType::NONE, DeviceType pump2Filter = DeviceType::NONE) {
+inline void configureOmission(Scheduler& sched, Cue& cue, Cue& cue2, Pump& pump, Laser& laser, uint32_t absenceMs, DeviceType pumpTarget = DeviceType::PUMP, DeviceType cueFilter = DeviceType::NONE, DeviceType cue2Filter = DeviceType::NONE, DeviceType pumpFilter = DeviceType::NONE, DeviceType pump2Filter = DeviceType::NONE) {
   Trigger* t = sched.GetTrigger(0);
   if (t) {
     t->type = TriggerType::ABSENCE_TIMER;
@@ -52,7 +54,7 @@ inline void configureOmission(Scheduler& sched, Cue& cue, Pump& pump, Laser& las
 
   Chain* c = sched.GetChain(0);
   if (c) {
-    c->numSteps = 3;
+    c->numSteps = 4;
 
     c->steps[0].type = ActionType::ACTIVATE_DEVICE;
     c->steps[0].target = DeviceType::CUE;
@@ -61,16 +63,22 @@ inline void configureOmission(Scheduler& sched, Cue& cue, Pump& pump, Laser& las
     c->steps[0].param = cue.Duration();
 
     c->steps[1].type = ActionType::ACTIVATE_DEVICE;
-    c->steps[1].target = pumpTarget;
-    c->steps[1].sourceFilter = (pumpTarget == DeviceType::PUMP_2) ? pump2Filter : pumpFilter;
+    c->steps[1].target = DeviceType::CUE_2;
+    c->steps[1].sourceFilter = cue2Filter;
     c->steps[1].offsetMs = 0;
-    c->steps[1].param = pump.Duration();
+    c->steps[1].param = cue2.Duration();
 
     c->steps[2].type = ActionType::ACTIVATE_DEVICE;
-    c->steps[2].target = DeviceType::LASER;
-    c->steps[2].sourceFilter = DeviceType::NONE;
+    c->steps[2].target = pumpTarget;
+    c->steps[2].sourceFilter = (pumpTarget == DeviceType::PUMP_2) ? pump2Filter : pumpFilter;
     c->steps[2].offsetMs = 0;
-    c->steps[2].param = laser.Duration();
+    c->steps[2].param = pump.Duration();
+
+    c->steps[3].type = ActionType::ACTIVATE_DEVICE;
+    c->steps[3].target = DeviceType::LASER;
+    c->steps[3].sourceFilter = DeviceType::NONE;
+    c->steps[3].offsetMs = 0;
+    c->steps[3].param = laser.Duration();
   }
 }
 

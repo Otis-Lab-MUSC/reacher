@@ -45,6 +45,7 @@ uint32_t PUMP2_ONSET_DELAY = 0;
 
 // Per-device lever source filter shadows — survive ReconfigureChain()
 DeviceType CUE_SOURCE_FILTER   = DeviceType::NONE;
+DeviceType CUE2_SOURCE_FILTER  = DeviceType::NONE;
 DeviceType PUMP_SOURCE_FILTER  = DeviceType::NONE;
 DeviceType PUMP2_SOURCE_FILTER = DeviceType::NONE;
 
@@ -124,7 +125,7 @@ void setup() {
   lLever.SetActiveLever(false);
 
   scheduler.SetTimeoutInterval(TIMEOUT_INTERVAL);
-  configureProgressiveRatio(scheduler, cue, *activePump, laser, 1, PR_STEP, DeviceType::LEVER_RH, TRACE_INTERVAL, activePumpTarget);
+  configureProgressiveRatio(scheduler, cue, cue2, *activePump, laser, 1, PR_STEP, DeviceType::LEVER_RH, TRACE_INTERVAL, activePumpTarget);
 
   SendIdentification();
   wdt_enable(WDTO_8S);
@@ -154,19 +155,20 @@ void ReconfigureChain() {
   Trigger* t = scheduler.GetTrigger(0);
   uint8_t currentRatio = t ? t->threshold : 1;
   DeviceType timeoutTarget = (activeLever == &rLever) ? DeviceType::LEVER_RH : DeviceType::LEVER_LH;
-  configureProgressiveRatio(scheduler, cue, *activePump, laser, currentRatio, PR_STEP, timeoutTarget, TRACE_INTERVAL, activePumpTarget, CUE_SOURCE_FILTER, PUMP_SOURCE_FILTER, PUMP2_SOURCE_FILTER);
+  configureProgressiveRatio(scheduler, cue, cue2, *activePump, laser, currentRatio, PR_STEP, timeoutTarget, TRACE_INTERVAL, activePumpTarget, CUE_SOURCE_FILTER, CUE2_SOURCE_FILTER, PUMP_SOURCE_FILTER, PUMP2_SOURCE_FILTER);
   {
     Chain* c0 = scheduler.GetChain(0);
-    if (c0 && c0->numSteps >= 3) {
+    if (c0 && c0->numSteps >= 4) {
       uint32_t pd = (activePump == &pump2) ? PUMP2_ONSET_DELAY : PUMP_ONSET_DELAY;
       c0->steps[0].offsetMs += CUE_ONSET_DELAY;
-      c0->steps[1].offsetMs += CUE_ONSET_DELAY + pd;
-      c0->steps[2].offsetMs += CUE_ONSET_DELAY + laser.OnsetDelay();
+      c0->steps[1].offsetMs += CUE_ONSET_DELAY;
+      c0->steps[2].offsetMs += CUE_ONSET_DELAY + pd;
+      c0->steps[3].offsetMs += CUE_ONSET_DELAY + laser.OnsetDelay();
     }
   }
   if (LASER_RH_ONLY_MODE) {
     Chain* c = scheduler.GetChain(0);
-    if (c && c->numSteps >= 3) c->steps[2].type = ActionType::NONE;
+    if (c && c->numSteps >= 4) c->steps[3].type = ActionType::NONE;
     Trigger* t1 = scheduler.GetTrigger(1);
     if (t1) {
       t1->type = TriggerType::PRESS_COUNT;
@@ -195,9 +197,14 @@ void ReconfigureChain() {
 }
 
 void StartSession() {
+  CUE_SOURCE_FILTER   = DeviceType::NONE;
+  CUE2_SOURCE_FILTER  = DeviceType::NONE;
+  PUMP_SOURCE_FILTER  = DeviceType::NONE;
+  PUMP2_SOURCE_FILTER = DeviceType::NONE;
   SESSION_START_TIMESTAMP = millis();
   microscope.Trigger();
   scheduler.StartSession(SESSION_START_TIMESTAMP);
+  ReconfigureChain();
 
   Serial.println(F("{\"level\":\"007\",\"device\":\"CONTROLLER\",\"event\":\"START\",\"timestamp\":0}"));
 
@@ -284,7 +291,7 @@ void ParseCommands() {
             uint32_t d = (uint32_t)inputJson["delay"]; if (d > 600000) d = 600000;
             if      (command == Cmd::LASER_SET_ONSET_DELAY) { laser.SetOnsetDelay(d); ReconfigureChain(); }
             else if (command == Cmd::CUE_SET_ONSET_DELAY)   { CUE_ONSET_DELAY = d;   ReconfigureChain(); }
-            else if (command == Cmd::CUE2_SET_ONSET_DELAY)  { /* cue2 not in chain */ }
+            else if (command == Cmd::CUE2_SET_ONSET_DELAY)  { /* cue2 uses CUE_ONSET_DELAY; no separate CUE2_ONSET_DELAY shadow yet */ }
             else if (command == Cmd::PUMP_SET_ONSET_DELAY)  { PUMP_ONSET_DELAY = d;  ReconfigureChain(); }
             else                                             { PUMP2_ONSET_DELAY = d; ReconfigureChain(); }
             break;
@@ -388,6 +395,7 @@ void ParseCommands() {
             if (val == 1) srcFilter = DeviceType::LEVER_RH;
             else if (val == 2) srcFilter = DeviceType::LEVER_LH;
             if (command == Cmd::CUE_SET_LEVER_FILTER)        CUE_SOURCE_FILTER  = srcFilter;
+            else if (command == Cmd::CUE2_SET_LEVER_FILTER)  CUE2_SOURCE_FILTER = srcFilter;
             else if (command == Cmd::PUMP_SET_LEVER_FILTER)  PUMP_SOURCE_FILTER = srcFilter;
             else if (command == Cmd::PUMP2_SET_LEVER_FILTER) PUMP2_SOURCE_FILTER = srcFilter;
             ReconfigureChain();

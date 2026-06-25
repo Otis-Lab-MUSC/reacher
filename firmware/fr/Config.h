@@ -26,18 +26,20 @@ static constexpr uint32_t DEFAULT_TIMEOUT_INTERVAL   = 20000;
 
 /// @brief Configure a Fixed Ratio schedule (single trigger, single chain).
 ///
-/// N active lever presses -> reward chain (cue -> pump + laser after trace).
+/// N active lever presses -> reward chain (cue + cue2 -> pump + laser after trace).
 /// @param sched Scheduler to configure
-/// @param cue Cue device (duration used for chain timing)
+/// @param cue Primary cue device (duration used for chain timing)
+/// @param cue2 Secondary cue device
 /// @param pump Pump device (duration used for chain timing)
 /// @param laser Laser device (duration used for chain timing)
 /// @param ratio Number of presses required per reward
 /// @param timeoutTarget Which lever receives the post-reward timeout
 /// @param traceInterval Delay between cue offset and reward onset (ms)
 /// @param cueFilter Per-action lever source filter for the CUE step (NONE = any)
+/// @param cue2Filter Per-action lever source filter for the CUE_2 step (NONE = any)
 /// @param pumpFilter Per-action lever source filter for the PUMP step (NONE = any)
 /// @param pump2Filter Per-action lever source filter when pumpTarget is PUMP_2 (NONE = any)
-inline void configureFixedRatio(Scheduler& sched, Cue& cue, Pump& pump, Laser& laser, uint8_t ratio, DeviceType timeoutTarget, uint32_t traceInterval, DeviceType pumpTarget = DeviceType::PUMP, DeviceType cueFilter = DeviceType::NONE, DeviceType pumpFilter = DeviceType::NONE, DeviceType pump2Filter = DeviceType::NONE) {
+inline void configureFixedRatio(Scheduler& sched, Cue& cue, Cue& cue2, Pump& pump, Laser& laser, uint8_t ratio, DeviceType timeoutTarget, uint32_t traceInterval, DeviceType pumpTarget = DeviceType::PUMP, DeviceType cueFilter = DeviceType::NONE, DeviceType cue2Filter = DeviceType::NONE, DeviceType pumpFilter = DeviceType::NONE, DeviceType pump2Filter = DeviceType::NONE) {
   Trigger* t = sched.GetTrigger(0);
   if (t) {
     t->type = TriggerType::PRESS_COUNT;
@@ -56,7 +58,7 @@ inline void configureFixedRatio(Scheduler& sched, Cue& cue, Pump& pump, Laser& l
 
   Chain* c = sched.GetChain(0);
   if (c) {
-    c->numSteps = 4;
+    c->numSteps = 5;
 
     c->steps[0].type = ActionType::ACTIVATE_DEVICE;
     c->steps[0].target = DeviceType::CUE;
@@ -65,22 +67,28 @@ inline void configureFixedRatio(Scheduler& sched, Cue& cue, Pump& pump, Laser& l
     c->steps[0].param = cue.Duration();
 
     c->steps[1].type = ActionType::ACTIVATE_DEVICE;
-    c->steps[1].target = pumpTarget;
-    c->steps[1].sourceFilter = (pumpTarget == DeviceType::PUMP_2) ? pump2Filter : pumpFilter;
-    c->steps[1].offsetMs = cue.Duration() + traceInterval;
-    c->steps[1].param = pump.Duration();
+    c->steps[1].target = DeviceType::CUE_2;
+    c->steps[1].sourceFilter = cue2Filter;
+    c->steps[1].offsetMs = 0;
+    c->steps[1].param = cue2.Duration();
 
     c->steps[2].type = ActionType::ACTIVATE_DEVICE;
-    c->steps[2].target = DeviceType::LASER;
-    c->steps[2].sourceFilter = DeviceType::NONE;
+    c->steps[2].target = pumpTarget;
+    c->steps[2].sourceFilter = (pumpTarget == DeviceType::PUMP_2) ? pump2Filter : pumpFilter;
     c->steps[2].offsetMs = cue.Duration() + traceInterval;
-    c->steps[2].param = laser.Duration();
+    c->steps[2].param = pump.Duration();
 
-    c->steps[3].type = ActionType::SET_TIMEOUT;
-    c->steps[3].target = timeoutTarget;
+    c->steps[3].type = ActionType::ACTIVATE_DEVICE;
+    c->steps[3].target = DeviceType::LASER;
     c->steps[3].sourceFilter = DeviceType::NONE;
-    c->steps[3].offsetMs = 0;
-    c->steps[3].param = sched.TimeoutInterval();
+    c->steps[3].offsetMs = cue.Duration() + traceInterval;
+    c->steps[3].param = laser.Duration();
+
+    c->steps[4].type = ActionType::SET_TIMEOUT;
+    c->steps[4].target = timeoutTarget;
+    c->steps[4].sourceFilter = DeviceType::NONE;
+    c->steps[4].offsetMs = 0;
+    c->steps[4].param = sched.TimeoutInterval();
   }
 }
 
