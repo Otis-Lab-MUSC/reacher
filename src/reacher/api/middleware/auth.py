@@ -67,8 +67,10 @@ def verify_ws_token(websocket: WebSocket) -> bool:
 
     Fix: PY-005 — The token is passed via URL query parameter because the
     WebSocket API does not support custom headers on the upgrade request.
-    This is acceptable for localhost-only usage; the token may appear in
-    server access logs but REACHER is not exposed to the network.
+    This is acceptable when REACHER binds to loopback (the default); the
+    token may appear in server access logs but stays local to the machine.
+    If REACHER_HOST is set to a non-loopback address for LAN access,
+    treat the token as a network-visible credential.
     """
     token = websocket.query_params.get("token")
     return token == API_KEY

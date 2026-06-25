@@ -8,6 +8,11 @@ Type=simple
 User=%i
 # %i is the username passed at enable time, e.g. `systemctl enable reacher@pi`
 Environment="PATH=/home/%i/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# REACHER binds to loopback by default (127.0.0.1). Uncomment the line below
+# for LAN/multi-machine peripheral mode. Note: this exposes unauthenticated
+# endpoints (/api/lifecycle/shutdown, /api/firmware/diagnostics) and makes
+# the WebSocket token visible to server access logs.
+#Environment="REACHER_HOST=0.0.0.0"
 ExecStart=reacher
 Restart=on-failure
 RestartSec=5

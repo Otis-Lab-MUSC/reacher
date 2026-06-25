@@ -32,7 +32,7 @@ from .routers import update as update_router, validate as validate_router
 logger = logging.getLogger(__name__)
 
 PORT = int(os.getenv("REACHER_PORT", "6229"))
-HOST = os.getenv("REACHER_HOST", "0.0.0.0")
+HOST = os.getenv("REACHER_HOST", "127.0.0.1")
 WS_PING_INTERVAL = int(os.getenv("REACHER_WS_PING_INTERVAL", "20"))
 WS_PING_TIMEOUT = int(os.getenv("REACHER_WS_PING_TIMEOUT", "60"))
 
@@ -86,7 +86,9 @@ async def _post_broker_registration(
     Called when ``REACHER_BROKER_URL`` is set — used on networks where mDNS
     multicast is blocked (e.g. university managed switches).  The local
     outbound IP is determined via the routing table so the primary can reach
-    this device even if ``REACHER_HOST`` is bound to ``0.0.0.0``.
+    this device.  When ``REACHER_HOST`` is loopback (the default) the
+    registered URL will be unreachable from the primary; combine
+    ``REACHER_BROKER_URL`` with ``REACHER_HOST=0.0.0.0`` for LAN access.
     """
     from .. import discovery as _discovery
     local_ip = _discovery._get_local_ip() or "127.0.0.1"
@@ -205,7 +207,18 @@ async def lifespan(app: FastAPI):
     # Subnet scan fallback: finds peers even when mDNS/zeroconf is unavailable
     scan_task = asyncio.create_task(discovery.run_scan_loop(http_client, PORT, DEVICE_ID))
 
-    logger.info("REACHER API v%s starting on port %d", __version__, PORT)
+    logger.info("REACHER API v%s listening on %s:%d", __version__, HOST, PORT)
+    if HOST == "127.0.0.1" and not _resolve_static_dir():
+        logger.warning(
+            "Bound to loopback — remote peers cannot connect. "
+            "Set REACHER_HOST=0.0.0.0 for LAN access."
+        )
+    if broker_url and HOST == "127.0.0.1":
+        logger.warning(
+            "REACHER_BROKER_URL is set but REACHER_HOST is loopback; "
+            "the registered URL will be unreachable from the primary. "
+            "Set REACHER_HOST=0.0.0.0 for LAN access."
+        )
     # Only open the browser if a frontend is actually available — avoids opening
     # to a blank 404 on headless Pis running the bare API without a bundled UI.
     if _resolve_static_dir():
