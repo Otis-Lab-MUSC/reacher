@@ -438,7 +438,7 @@ These are optional. The defaults work for most setups.
 | Variable | Default | What it does |
 |----------|---------|-------------|
 | `REACHER_PORT` | `6229` | The port the server listens on |
-| `REACHER_HOST` | `0.0.0.0` | The network interface to bind to. `0.0.0.0` means all interfaces (recommended for remote access) |
+| `REACHER_HOST` | `127.0.0.1` | The network interface to bind to. Defaults to loopback (localhost-only). Set to `0.0.0.0` to accept connections from other machines on the network — note that this exposes unauthenticated endpoints and makes the WebSocket token visible to server access logs. |
 | `REACHER_API_KEY` | Auto-generated | Override the API key instead of using the auto-generated one |
 | `REACHER_BROKER_URL` | Not set | URL of a REACHER broker for networks where automatic discovery doesn't work (e.g., university networks) |
 | `REACHER_CORS_ORIGINS` | Not set | Extra allowed origins for cross-origin requests (comma-separated) |

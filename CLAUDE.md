@@ -39,7 +39,7 @@ python -m build
 | Variable | Default | Purpose |
 |---|---|---|
 | `REACHER_PORT` | `6229` | HTTP/WebSocket port |
-| `REACHER_HOST` | `0.0.0.0` | Bind address (the parent `CLAUDE.md` lists `127.0.0.1` — code default is `0.0.0.0`) |
+| `REACHER_HOST` | `127.0.0.1` | Bind address. Defaults to loopback. Set to `0.0.0.0` to accept LAN connections (exposes unauthenticated endpoints and makes the WS token network-visible). |
 | `REACHER_STATIC_DIR` | `web/dist/` | React frontend directory |
 | `REACHER_HEX_DIR` | package data (`src/reacher/hex/`) | Override dir for pre-compiled firmware hex files |
 | `REACHER_CORS_ORIGINS` | None | Extra allowed CORS origins (comma-separated) |
