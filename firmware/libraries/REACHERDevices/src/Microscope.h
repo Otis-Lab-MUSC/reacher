@@ -62,6 +62,7 @@ private:
   // is preserved by keeping this pin fixed.
   int8_t timestampPin;            ///< ISR input pin (INT0, pin 2 — fixed)
   volatile bool received;         ///< ISR flag: true when new frame signal captured
+  volatile uint8_t missedFrames;  ///< ISR counter: frames dropped since last HandleFrameSignal() consume
   bool armed;                     ///< True when microscope logging is active
   volatile uint32_t timestamp;    ///< ISR-captured frame timestamp (session-relative)
   volatile uint32_t offset;       ///< Session start offset (volatile — read in ISR)
@@ -77,7 +78,7 @@ private:
   static Microscope* instance;    ///< Singleton for ISR dispatch
 
   /// @brief Serialize frame timestamp to serial JSON (level 008).
-  void LogOutput(uint32_t ts);
+  void LogOutput(uint32_t ts, uint8_t missed);
 };
 
 #endif // MICROSCOPE_H

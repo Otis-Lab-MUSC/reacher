@@ -14,6 +14,7 @@ Microscope::Microscope(int8_t triggerPin, int8_t timestampPin) {
   pinMode(this->timestampPin, INPUT_PULLUP); // Prevent floating when disconnected
   attachInterrupt(digitalPinToInterrupt(this->timestampPin), TimestampISR, RISING);
   received = false;
+  missedFrames = 0;
   armed = false;
   timestamp = 0;
   offset = 0;
@@ -26,6 +27,10 @@ Microscope::Microscope(int8_t triggerPin, int8_t timestampPin) {
 
 void Microscope::TimestampISR() {
   if (instance) {
+    if (instance->received) {
+      // Fix: FW-003 — saturate at 255 so the backend always sees "at least N dropped"
+      if (instance->missedFrames < 255) instance->missedFrames++;
+    }
     instance->received = true;
     instance->timestamp = millis() - instance->offset;
   }
@@ -35,9 +40,11 @@ void Microscope::HandleFrameSignal() {
   if (armed && !paused && received) {
     noInterrupts();
     received = false;
-    uint32_t ts = timestamp; // atomic copy of volatile 32-bit value
+    uint32_t ts = timestamp;        // atomic copy of volatile 32-bit value
+    uint8_t missed = missedFrames;
+    missedFrames = 0;
     interrupts();
-    LogOutput(ts);
+    LogOutput(ts, missed);
   }
 }
 
@@ -87,7 +94,8 @@ void Microscope::Pause(uint32_t now) {
   pauseStart = now;
   paused = true;
   noInterrupts();
-  received = false;    // drop any in-flight ISR capture
+  received = false;      // drop any in-flight ISR capture
+  missedFrames = 0;      // clear stale drop count at session boundary
   interrupts();
 }
 
@@ -96,6 +104,7 @@ void Microscope::Resume(uint32_t now) {
   noInterrupts();
   offset += (now - pauseStart);  // emitted ts = millis() - offset stays session-live across pause
   received = false;              // discard any stray ISR capture from the pause interval
+  missedFrames = 0;              // clear stale drop count at resume boundary
   interrupts();
   paused = false;
   Trigger();           // 50ms pulse — toggles scope to resume scanning
@@ -112,10 +121,12 @@ byte Microscope::TimestampPin() const {
   return timestampPin;
 }
 
-void Microscope::LogOutput(uint32_t ts) {
+void Microscope::LogOutput(uint32_t ts, uint8_t missed) {
   Serial.print(F("{\"level\":\"008\",\"device\":\"MICROSCOPE\",\"pin\":"));
   Serial.print(timestampPin);
   Serial.print(F(",\"event\":\"TIMESTAMP\",\"timestamp\":"));
   Serial.print(ts);
+  Serial.print(F(",\"missed\":"));
+  Serial.print(missed);
   Serial.println('}');
 }
