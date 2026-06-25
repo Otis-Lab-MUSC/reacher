@@ -59,6 +59,14 @@ class TestAuthEndpoints:
         resp = client.get("/health")
         assert resp.status_code == 200
 
+    def test_firmware_diagnostics_requires_auth(self, client):
+        resp = client.get("/api/firmware/diagnostics")
+        assert resp.status_code == 401
+
+    def test_firmware_diagnostics_auth_ok(self, client):
+        resp = client.get("/api/firmware/diagnostics", headers=AUTH_HEADER)
+        assert resp.status_code == 200
+
 
 class TestSessionEndpoints:
     def test_list_sessions_empty(self, client):

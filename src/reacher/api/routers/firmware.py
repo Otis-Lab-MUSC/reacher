@@ -19,7 +19,7 @@ from . import websocket as ws_mod
 _MAX_HEX_SIZE = 200 * 1024  # 200 KB — hex files are typically 15-40 KB
 
 router = APIRouter()
-diagnostics_router = APIRouter()  # Registered without auth in app.py
+diagnostics_router = APIRouter()
 _logger = logging.getLogger(__name__)
 _uploader = FirmwareUploader()
 
