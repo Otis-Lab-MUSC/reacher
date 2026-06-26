@@ -43,7 +43,7 @@ uint32_t CUE_ONSET_DELAY   = 0;
 uint32_t PUMP_ONSET_DELAY  = 0;
 uint32_t PUMP2_ONSET_DELAY = 0;
 
-// Per-device lever source filter shadows — survive ReconfigureChain()
+// Per-device lever source filter shadows — set by cmds 378/388/478/488; survive StartSession() and ReconfigureChain()
 DeviceType CUE_SOURCE_FILTER   = DeviceType::NONE;
 DeviceType CUE2_SOURCE_FILTER  = DeviceType::NONE;
 DeviceType PUMP_SOURCE_FILTER  = DeviceType::NONE;
@@ -197,10 +197,6 @@ void ReconfigureChain() {
 }
 
 void StartSession() {
-  CUE_SOURCE_FILTER   = DeviceType::NONE;
-  CUE2_SOURCE_FILTER  = DeviceType::NONE;
-  PUMP_SOURCE_FILTER  = DeviceType::NONE;
-  PUMP2_SOURCE_FILTER = DeviceType::NONE;
   SESSION_START_TIMESTAMP = millis();
   microscope.Trigger();
   scheduler.StartSession(SESSION_START_TIMESTAMP);
