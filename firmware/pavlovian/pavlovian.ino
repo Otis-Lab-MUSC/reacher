@@ -127,7 +127,7 @@ void onLeverRelease(DeviceType source) {
 
 /// @brief Send SCPI-style identification JSON (reusable for boot, *IDN?, and Cmd::IDENTIFY).
 void SendIdentification() {
-  Serial.println(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"sketch\":\"pavlovian.ino\",\"version\":\"v3.0.1\",\"baud_rate\":115200,\"schedule\":\"PAVLOVIAN\"}"));
+  Serial.println(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"sketch\":\"pavlovian.ino\",\"version\":\"v3.0.2\",\"baud_rate\":115200,\"schedule\":\"PAVLOVIAN\"}"));
 }
 
 /// @brief Arduino setup — initialize serial, register devices, configure Pavlovian defaults.

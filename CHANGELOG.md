@@ -10,6 +10,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.0.2] - 2026-06-26
+
+### Fixed
+- Firmware: lever source filter shadows (`CUE_SOURCE_FILTER`, `CUE2_SOURCE_FILTER`,
+  `PUMP_SOURCE_FILTER`, `PUMP2_SOURCE_FILTER`) were unconditionally reset to `NONE`
+  in `StartSession()`, silently discarding any per-device filter configuration sent
+  via cmds 378/388/478/488 before session start and making the Lever Filter UI
+  controls non-functional end-to-end across FR, PR, VI, and Omission paradigms;
+  filters now survive `StartSession()` and are correctly baked into the reward chain
+  by the subsequent `ReconfigureChain()` call ([#43](https://github.com/Otis-Lab-MUSC/reacher/issues/43))
+
+---
+
 ## [3.0.1] - 2026-06-25
 
 ### Fixed
