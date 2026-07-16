@@ -35,7 +35,6 @@ namespace Cmd {
   constexpr int SET_OMISSION_INTERVAL = 203;
   constexpr int SET_VI_INTERVAL      = 204;
   constexpr int SET_PR_STEP          = 205;
-  constexpr int SET_TRACE_INTERVAL   = 220;
   constexpr int SET_ACTIVE_PUMP      = 221;
 
   // Pavlovian parameters (206-219)

@@ -43,7 +43,6 @@ class CommandCode(IntEnum):
     PAV_ITI_MAX = 218
     PAV_PULSE_CONFIG = 219
 
-    SET_TRACE_INTERVAL = 220
     SET_ACTIVE_PUMP = 221
 
     # --- Cue (3xx) ---
@@ -312,11 +311,6 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         payload_key="config", payload_type="int",
         paradigms=["pavlovian"],
     ),
-    220: CommandSpec(
-        CommandCode.SET_TRACE_INTERVAL, "SET_TRACE_INTERVAL",
-        "Set trace interval (ms)",
-        payload_key="interval", payload_type="int",
-    ),
     221: CommandSpec(
         CommandCode.SET_ACTIVE_PUMP, "SET_ACTIVE_PUMP",
         "Select which pump fires in the reward chain (pump2=false → primary, pump2=true → secondary)",
@@ -555,9 +549,9 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     ),
     673: CommandSpec(
         CommandCode.LASER_SET_ONSET_DELAY, "LASER_SET_ONSET_DELAY",
-        "Set laser onset delay (ms) from RH lever press in RH-only mode",
+        "Set laser onset delay (ms) from trigger onset",
         payload_key="delay", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission"],
+        paradigms=["fr", "pr", "vi", "omission", "pavlovian"],
     ),
     681: CommandSpec(
         CommandCode.LASER_MODE_CONTINGENT, "LASER_MODE_CONTINGENT",

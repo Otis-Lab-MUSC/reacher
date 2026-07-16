@@ -155,9 +155,12 @@ void ReconfigureChain() {
     Chain* c0 = scheduler.GetChain(0);
     if (c0 && c0->numSteps >= 4) {
       uint32_t pd = (activePump == &pump2) ? PUMP2_ONSET_DELAY : PUMP_ONSET_DELAY;
+      // Each device's offset originates from press onset via its own delay only —
+      // no device's timing depends on another device's onset/duration.
       c0->steps[0].offsetMs = CUE_ONSET_DELAY;
       c0->steps[1].offsetMs = CUE_ONSET_DELAY;
       c0->steps[2].offsetMs = pd;
+      c0->steps[3].offsetMs = laser.OnsetDelay();
     }
   }
   if (LASER_RH_ONLY_MODE) {
