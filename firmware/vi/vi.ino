@@ -215,7 +215,7 @@ void StartSession() {
   reportDeviceConfig(F("LASER"), laser.Armed(), LASER_FREQUENCY, LASER_DURATION);
   reportDeviceConfig(F("LICK"), lickCircuit.Armed());
   reportDeviceConfig(F("MICROSCOPE"), microscope.Armed());
-  reportDeviceConfig(F("SLM"), slm.Armed());
+  reportDeviceConfig(F("SLM"), slm.Armed(), slm.LaserFrequency(), slm.LaserDuration());
   reportDeviceLever(F("LEVER_RH"), rLever.Armed(), rLever.IsReinforced());
   reportDeviceLever(F("LEVER_LH"), lLever.Armed(), lLever.IsReinforced());
 
@@ -385,6 +385,12 @@ void ParseCommands() {
             uint8_t p = (uint8_t)constrain((int)(inputJson["pin"] | 11), 8, 13);
             slm.SetPin((int8_t)p); break;
           }
+          case Cmd::SLM_SET_LASER_FREQUENCY:
+            slm.SetLaserFrequency((uint32_t)inputJson["frequency"]);
+            logParamChange(F("SLM"), F("frequency"), slm.LaserFrequency()); break;
+          case Cmd::SLM_SET_LASER_DURATION:
+            slm.SetLaserDuration((uint32_t)inputJson["duration"]);
+            logParamChange(F("SLM"), F("duration"), slm.LaserDuration()); break;
 
           default:
             Serial.println(F("{\"level\":\"006\",\"desc\":\"Command not found\"}"));

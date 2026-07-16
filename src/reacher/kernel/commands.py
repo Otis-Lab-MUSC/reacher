@@ -117,6 +117,9 @@ class CommandCode(IntEnum):
     # --- SLM (11xx) ---
     SLM_DISARM = 1100
     SLM_ARM = 1101
+    # Bookkeeping only — records what the laser should have been doing; not tied to actual LASER control.
+    SLM_SET_LASER_FREQUENCY = 1102
+    SLM_SET_LASER_DURATION = 1103
     # Timestamp pin is configurable within PCINT0 group (Arduino pins 8–13).
     SLM_SET_PIN = 1176
 
@@ -702,6 +705,16 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     1101: CommandSpec(
         CommandCode.SLM_ARM, "SLM_ARM",
         "Arm the SLM timestamp plugin",
+    ),
+    1102: CommandSpec(
+        CommandCode.SLM_SET_LASER_FREQUENCY, "SLM_SET_LASER_FREQUENCY",
+        "Record the laser frequency (Hz) the SLM sync should correspond to (bookkeeping only)",
+        payload_key="frequency", payload_type="int",
+    ),
+    1103: CommandSpec(
+        CommandCode.SLM_SET_LASER_DURATION, "SLM_SET_LASER_DURATION",
+        "Record the laser duration (ms) the SLM sync should correspond to (bookkeeping only)",
+        payload_key="duration", payload_type="int",
     ),
     1176: CommandSpec(
         CommandCode.SLM_SET_PIN, "SLM_SET_PIN",

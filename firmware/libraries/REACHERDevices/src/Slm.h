@@ -39,6 +39,15 @@ public:
   /// enables the new PCINT0 bit, and emits a level-000 config event.
   void SetPin(int8_t newPin);
 
+  /// @brief Record the laser frequency (Hz) this SLM sync corresponds to.
+  /// Bookkeeping only — not tied to actual LASER control.
+  void SetLaserFrequency(uint32_t hz);
+  /// @brief Record the laser duration (ms) this SLM sync corresponds to.
+  /// Bookkeeping only — not tied to actual LASER control.
+  void SetLaserDuration(uint32_t ms);
+  uint32_t LaserFrequency() const;
+  uint32_t LaserDuration() const;
+
   bool Armed() const;
   byte TimestampPin() const;
 
@@ -51,6 +60,8 @@ private:
   volatile uint32_t timestamp;    ///< ISR-captured timestamp (session-relative ms)
   volatile uint32_t offset;       ///< Session start offset (volatile — read in ISR)
   volatile bool lastPinState;     ///< Previous PINB state for the pin — RISING guard
+  uint32_t laserFrequency;        ///< Bookkeeping only — recorded laser frequency (Hz)
+  uint32_t laserDuration;         ///< Bookkeeping only — recorded laser duration (ms)
 
   /// @brief Serialize SLM timestamp to serial JSON (level 009).
   void LogOutput(uint32_t ts);
