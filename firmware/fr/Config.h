@@ -26,7 +26,8 @@ static constexpr uint32_t DEFAULT_TIMEOUT_INTERVAL   = 20000;
 
 /// @brief Configure a Fixed Ratio schedule (single trigger, single chain).
 ///
-/// N active lever presses -> reward chain (cue + cue2 -> pump + laser after trace).
+/// N active lever presses -> reward chain (cue, cue2, pump, laser each fire at
+/// press onset + their own per-device onset delay, applied in ReconfigureChain()).
 /// @param sched Scheduler to configure
 /// @param cue Primary cue device (duration used for chain timing)
 /// @param cue2 Secondary cue device
@@ -34,12 +35,11 @@ static constexpr uint32_t DEFAULT_TIMEOUT_INTERVAL   = 20000;
 /// @param laser Laser device (duration used for chain timing)
 /// @param ratio Number of presses required per reward
 /// @param timeoutTarget Which lever receives the post-reward timeout
-/// @param traceInterval Delay between cue offset and reward onset (ms)
 /// @param cueFilter Per-action lever source filter for the CUE step (NONE = any)
 /// @param cue2Filter Per-action lever source filter for the CUE_2 step (NONE = any)
 /// @param pumpFilter Per-action lever source filter for the PUMP step (NONE = any)
 /// @param pump2Filter Per-action lever source filter when pumpTarget is PUMP_2 (NONE = any)
-inline void configureFixedRatio(Scheduler& sched, Cue& cue, Cue& cue2, Pump& pump, Laser& laser, uint8_t ratio, DeviceType timeoutTarget, uint32_t traceInterval, DeviceType pumpTarget = DeviceType::PUMP, DeviceType cueFilter = DeviceType::NONE, DeviceType cue2Filter = DeviceType::NONE, DeviceType pumpFilter = DeviceType::NONE, DeviceType pump2Filter = DeviceType::NONE) {
+inline void configureFixedRatio(Scheduler& sched, Cue& cue, Cue& cue2, Pump& pump, Laser& laser, uint8_t ratio, DeviceType timeoutTarget, DeviceType pumpTarget = DeviceType::PUMP, DeviceType cueFilter = DeviceType::NONE, DeviceType cue2Filter = DeviceType::NONE, DeviceType pumpFilter = DeviceType::NONE, DeviceType pump2Filter = DeviceType::NONE) {
   Trigger* t = sched.GetTrigger(0);
   if (t) {
     t->type = TriggerType::PRESS_COUNT;
@@ -75,13 +75,13 @@ inline void configureFixedRatio(Scheduler& sched, Cue& cue, Cue& cue2, Pump& pum
     c->steps[2].type = ActionType::ACTIVATE_DEVICE;
     c->steps[2].target = pumpTarget;
     c->steps[2].sourceFilter = (pumpTarget == DeviceType::PUMP_2) ? pump2Filter : pumpFilter;
-    c->steps[2].offsetMs = cue.Duration() + traceInterval;
+    c->steps[2].offsetMs = 0;
     c->steps[2].param = pump.Duration();
 
     c->steps[3].type = ActionType::ACTIVATE_DEVICE;
     c->steps[3].target = DeviceType::LASER;
     c->steps[3].sourceFilter = DeviceType::NONE;
-    c->steps[3].offsetMs = cue.Duration() + traceInterval;
+    c->steps[3].offsetMs = 0;
     c->steps[3].param = laser.Duration();
 
     c->steps[4].type = ActionType::SET_TIMEOUT;

@@ -34,7 +34,6 @@ uint8_t  LASER_FREQUENCY    = DEFAULT_LASER_FREQUENCY;
 uint32_t LASER_DURATION     = DEFAULT_LASER_DURATION;
 bool     LASER_RH_ONLY_MODE = false;
 uint32_t TIMEOUT_INTERVAL   = DEFAULT_TIMEOUT_INTERVAL;
-uint32_t TRACE_INTERVAL     = 0;
 uint32_t VI_INTERVAL        = 15000;
 
 // Per-device onset delay shadows (ms) — survive ReconfigureChain()
@@ -124,7 +123,7 @@ void setup() {
   lLever.SetActiveLever(false);
 
   scheduler.SetTimeoutInterval(TIMEOUT_INTERVAL);
-  configureVariableInterval(scheduler, cue, cue2, *activePump, laser, VI_INTERVAL, DeviceType::LEVER_RH, TRACE_INTERVAL, activePumpTarget);
+  configureVariableInterval(scheduler, cue, cue2, *activePump, laser, VI_INTERVAL, DeviceType::LEVER_RH, activePumpTarget);
 
   SendIdentification();
   wdt_enable(WDTO_8S);
@@ -152,15 +151,17 @@ void loop() {
 
 void ReconfigureChain() {
   DeviceType timeoutTarget = (activeLever == &rLever) ? DeviceType::LEVER_RH : DeviceType::LEVER_LH;
-  configureVariableInterval(scheduler, cue, cue2, *activePump, laser, VI_INTERVAL, timeoutTarget, TRACE_INTERVAL, activePumpTarget, CUE_SOURCE_FILTER, CUE2_SOURCE_FILTER, PUMP_SOURCE_FILTER, PUMP2_SOURCE_FILTER);
+  configureVariableInterval(scheduler, cue, cue2, *activePump, laser, VI_INTERVAL, timeoutTarget, activePumpTarget, CUE_SOURCE_FILTER, CUE2_SOURCE_FILTER, PUMP_SOURCE_FILTER, PUMP2_SOURCE_FILTER);
   {
     Chain* c0 = scheduler.GetChain(0);
     if (c0 && c0->numSteps >= 4) {
       uint32_t pd = (activePump == &pump2) ? PUMP2_ONSET_DELAY : PUMP_ONSET_DELAY;
+      // Each device's offset originates from press onset via its own delay only —
+      // no device's timing depends on another device's onset/duration.
       c0->steps[0].offsetMs += CUE_ONSET_DELAY;
       c0->steps[1].offsetMs += CUE_ONSET_DELAY;
-      c0->steps[2].offsetMs += CUE_ONSET_DELAY + pd;
-      c0->steps[3].offsetMs += CUE_ONSET_DELAY;
+      c0->steps[2].offsetMs += pd;
+      c0->steps[3].offsetMs += laser.OnsetDelay();
     }
   }
   if (LASER_RH_ONLY_MODE) {
@@ -205,9 +206,7 @@ void StartSession() {
   Serial.print(TIMEOUT_INTERVAL);
   Serial.print(F(",\"active_lever\":\""));
   Serial.print((activeLever == &rLever) ? F("RH") : F("LH"));
-  Serial.print(F("\",\"trace_interval\":"));
-  Serial.print(TRACE_INTERVAL);
-  Serial.println('}');
+  Serial.println(F("\"}"));
 
   reportDeviceConfig(F("CUE"), cue.Armed(), CUE_FREQUENCY, CUE_DURATION);
   reportDeviceConfig(F("CUE2"), cue2.Armed(), cue2.Frequency(), cue2.Duration());
@@ -216,7 +215,7 @@ void StartSession() {
   reportDeviceConfig(F("LASER"), laser.Armed(), LASER_FREQUENCY, LASER_DURATION);
   reportDeviceConfig(F("LICK"), lickCircuit.Armed());
   reportDeviceConfig(F("MICROSCOPE"), microscope.Armed());
-  reportDeviceConfig(F("SLM"), slm.Armed());
+  reportDeviceConfig(F("SLM"), slm.Armed(), slm.LaserFrequency(), slm.LaserDuration());
   reportDeviceLever(F("LEVER_RH"), rLever.Armed(), rLever.IsReinforced());
   reportDeviceLever(F("LEVER_LH"), lLever.Armed(), lLever.IsReinforced());
 
@@ -320,10 +319,6 @@ void ParseCommands() {
           case Cmd::SET_VI_INTERVAL:
             VI_INTERVAL = inputJson["interval"]; ReconfigureChain();
             logParamChange(F("CONTROLLER"), F("vi_interval"), VI_INTERVAL); break;
-          case Cmd::SET_TRACE_INTERVAL:
-            TRACE_INTERVAL = inputJson["interval"];
-            ReconfigureChain();
-            logParamChange(F("CONTROLLER"), F("trace_interval"), TRACE_INTERVAL); break;
           case Cmd::SET_ACTIVE_PUMP: {
             bool usePump2 = inputJson["pump2"] | false;
             activePump = usePump2 ? &pump2 : &pump;
@@ -390,6 +385,12 @@ void ParseCommands() {
             uint8_t p = (uint8_t)constrain((int)(inputJson["pin"] | 11), 8, 13);
             slm.SetPin((int8_t)p); break;
           }
+          case Cmd::SLM_SET_LASER_FREQUENCY:
+            slm.SetLaserFrequency((uint32_t)inputJson["frequency"]);
+            logParamChange(F("SLM"), F("frequency"), slm.LaserFrequency()); break;
+          case Cmd::SLM_SET_LASER_DURATION:
+            slm.SetLaserDuration((uint32_t)inputJson["duration"]);
+            logParamChange(F("SLM"), F("duration"), slm.LaserDuration()); break;
 
           default:
             Serial.println(F("{\"level\":\"006\",\"desc\":\"Command not found\"}"));

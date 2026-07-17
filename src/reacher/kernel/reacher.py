@@ -82,6 +82,11 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     # --- SLM ---
     1100: ("SLM", "armed", False),
     1101: ("SLM", "armed", True),
+    # Field names match the "frequency"/"duration" keys reportDeviceConfig()'s
+    # 4-arg overload emits at SESSION_START, so the optimistic command-send
+    # update and the firmware's own config report land on the same keys.
+    1102: ("SLM", "frequency", _USE_VALUE),
+    1103: ("SLM", "duration", _USE_VALUE),
     1176: ("SLM", "pin", _USE_VALUE),
 }
 

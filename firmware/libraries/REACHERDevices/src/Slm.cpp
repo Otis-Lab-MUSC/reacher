@@ -15,6 +15,8 @@ Slm::Slm(int8_t timestampPin) {
   timestamp   = 0;
   offset      = 0;
   lastPinState = (digitalRead(this->timestampPin) == HIGH);
+  laserFrequency = 0;
+  laserDuration  = 0;
   instance    = this;
 
   // Enable PCINT0 group interrupt for the configured pin.
@@ -78,6 +80,11 @@ void Slm::SetPin(int8_t newPin) {
   Serial.print(timestampPin);
   Serial.println('}');
 }
+
+void Slm::SetLaserFrequency(uint32_t hz) { laserFrequency = hz; }
+void Slm::SetLaserDuration(uint32_t ms)  { laserDuration = ms; }
+uint32_t Slm::LaserFrequency() const { return laserFrequency; }
+uint32_t Slm::LaserDuration() const  { return laserDuration; }
 
 bool Slm::Armed() const { return armed; }
 

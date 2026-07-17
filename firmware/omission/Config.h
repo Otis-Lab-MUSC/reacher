@@ -26,7 +26,8 @@ static constexpr uint32_t DEFAULT_LASER_DURATION     = 5000;
 ///
 /// Reward fires after the animal withholds pressing for `absenceMs` milliseconds.
 /// Any lever press resets the absence timer. No timeout is applied.
-/// Cue, cue2, pump, and laser fire simultaneously (no trace interval).
+/// Cue, cue2, pump, and laser each fire at press onset + their own per-device
+/// onset delay, applied in ReconfigureChain().
 /// @param sched Scheduler to configure
 /// @param cue Primary cue device
 /// @param cue2 Secondary cue device

@@ -35,7 +35,6 @@ namespace Cmd {
   constexpr int SET_OMISSION_INTERVAL = 203;
   constexpr int SET_VI_INTERVAL      = 204;
   constexpr int SET_PR_STEP          = 205;
-  constexpr int SET_TRACE_INTERVAL   = 220;
   constexpr int SET_ACTIVE_PUMP      = 221;
 
   // Pavlovian parameters (206-219)
@@ -130,6 +129,9 @@ namespace Cmd {
   // --- SLM (11xx) ---
   constexpr int SLM_DISARM           = 1100;
   constexpr int SLM_ARM              = 1101;
+  // Bookkeeping only — records what the laser should have been doing; not tied to actual LASER control.
+  constexpr int SLM_SET_LASER_FREQUENCY = 1102;
+  constexpr int SLM_SET_LASER_DURATION  = 1103;
   // Timestamp pin is configurable within PCINT0 group (Arduino pins 8–13).
   constexpr int SLM_SET_PIN          = 1176;
 
