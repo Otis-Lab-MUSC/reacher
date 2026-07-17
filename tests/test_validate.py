@@ -369,24 +369,10 @@ class TestLimitRules:
 
 
 # ---------------------------------------------------------------------------
-# Rules 34–36: temporal ordering
+# Rules 35–36: temporal ordering
 # ---------------------------------------------------------------------------
 
 class TestTemporalRules:
-    def test_rule_34_trace_exceeds_time_limit(self):
-        req = _req(
-            paradigmSettings={"traceInterval": 3_700_000},  # ms — over 1 hour
-            limitSettings={"limitType": "Time", "timeLimit": 3600},  # 3600 s = 3,600,000 ms
-        )
-        assert _has(run_validation(req), "paradigmSettings.traceInterval", "error")
-
-    def test_rule_34_trace_within_limit_is_fine(self):
-        req = _req(
-            paradigmSettings={"traceInterval": 500},
-            limitSettings={"limitType": "Time", "timeLimit": 3600},
-        )
-        assert not _has(run_validation(req), "paradigmSettings.traceInterval", "error")
-
     def test_rule_35_rh_lever_timeout_exceeds_limit(self):
         req = _req(
             hardwareUi={"rhLever": {"armed": True, "timeout": 3_700_000}, **_pump_ok()},
@@ -403,10 +389,10 @@ class TestTemporalRules:
 
     def test_temporal_skipped_for_non_time_limit(self):
         req = _req(
-            paradigmSettings={"traceInterval": 99_999_999},
+            hardwareUi={"rhLever": {"armed": True, "timeout": 99_999_999}},
             limitSettings={"limitType": "Infusion", "infusionLimit": 50},
         )
-        assert not _has(run_validation(req), "paradigmSettings.traceInterval", "error")
+        assert not _has(run_validation(req), "hardwareUi.rhLever.timeout", "warning")
 
 
 # ---------------------------------------------------------------------------

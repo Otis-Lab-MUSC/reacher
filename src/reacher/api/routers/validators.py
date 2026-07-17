@@ -264,14 +264,6 @@ def _check_temporal(req: ValidateConfigRequest) -> list[ValidationWarning]:
 
     time_limit_ms = time_limit * 1000
 
-    # Rule 34: trace interval exceeds session time limit
-    trace_interval = _ps(req, "traceInterval") or 0
-    if trace_interval > time_limit_ms:
-        warnings.append(_e(
-            "paradigmSettings.traceInterval",
-            "Trace interval (ms) exceeds the session time limit — the reward chain will never complete",
-        ))
-
     # Rule 35: RH lever timeout exceeds session time limit
     if _hw(req, "rhLever", "armed") and (_hw(req, "rhLever", "timeout") or 0) > time_limit_ms:
         warnings.append(_w(

@@ -10,6 +10,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.1.0] - 2026-07-17
+
+### Fixed
+- Firmware: PUMP and LASER onset timing in fr/pr/vi/omission was hardcoded relative to
+  when CUE finished, not the lever press itself; each output device (CUE, PUMP, LASER)
+  now fires at press onset + its own independent per-device delay only, with no
+  dependency on another device's onset or duration. Fixes a pre-existing inconsistency
+  where `vi.ino` only applied the laser onset delay in RH-only mode and `omission.ino`
+  never applied it at all. Pavlovian's own scheduler/timing model is untouched
+  ([#45](https://github.com/Otis-Lab-MUSC/reacher/issues/45))
+- `_VALUE_RANGES["delay"]` validation bound was `(0, 60000)`, ten times too low versus
+  firmware's actual `(0, 600000)` clamp and all three devices' frontend maximums
+- Command 673 (`LASER_SET_ONSET_DELAY`) incorrectly excluded `pavlovian` from its
+  paradigm list even though Pavlovian already sends it
+- `omission.ino`/`vi.ino` still clamped incoming onset-delay values to 60000ms while
+  the backend now accepts up to 600000ms (matching fr/pr/pavlovian's firmware clamp) —
+  values above 60000ms would silently truncate on those two paradigms with no error
+  reported back, caught during the v3.1.0 pre-release audit
+- Removed an orphaned session-config validation rule that still checked a
+  `paradigmSettings.traceInterval` field against the session time limit; the field
+  (and the reward-chain semantics it validated) no longer exist after the
+  `TRACE_INTERVAL` removal above, so the rule was dead code
+
+### Removed
+- `TRACE_INTERVAL` global and the `SET_TRACE_INTERVAL` command (220) from fr/pr/vi —
+  superseded by per-device onset delays; any resulting cue-to-reward gap is now
+  inferred and labeled in the Labrynth timeline rather than stored as a separate
+  parameter (operant paradigms only; Pavlovian's own `PAV_TRACE_INTERVAL` is untouched)
+
+### Added
+- SLM SYNC: `SLM_SET_LASER_FREQUENCY` (1102) and `SLM_SET_LASER_DURATION` (1103)
+  commands and inert storage fields on the `Slm` class, wired into all five sketches,
+  so a session record captures what the laser's frequency/duration should have been —
+  for post-hoc reconciliation, not tied to real laser control
+  ([#45](https://github.com/Otis-Lab-MUSC/reacher/issues/45))
+
+---
+
 ## [3.0.2] - 2026-06-26
 
 ### Fixed

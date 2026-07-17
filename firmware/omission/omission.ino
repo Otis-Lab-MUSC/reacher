@@ -90,7 +90,7 @@ void onLeverRelease(DeviceType source) {
 }
 
 void SendIdentification() {
-  Serial.println(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"sketch\":\"omission.ino\",\"version\":\"v3.0.2\",\"baud_rate\":115200,\"schedule\":\"OMISSION\"}"));
+  Serial.println(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"sketch\":\"omission.ino\",\"version\":\"v3.1.0\",\"baud_rate\":115200,\"schedule\":\"OMISSION\"}"));
 }
 
 void setup() {
@@ -277,7 +277,7 @@ void ParseCommands() {
           case Cmd::CUE2_SET_ONSET_DELAY:
           case Cmd::PUMP_SET_ONSET_DELAY:
           case Cmd::PUMP2_SET_ONSET_DELAY: {
-            uint32_t d = (uint32_t)inputJson["delay"]; if (d > 60000) d = 60000;
+            uint32_t d = (uint32_t)inputJson["delay"]; if (d > 600000) d = 600000;
             if      (command == Cmd::LASER_SET_ONSET_DELAY) { laser.SetOnsetDelay(d); if (LASER_RH_ONLY_MODE) ReconfigureChain(); }
             else if (command == Cmd::CUE_SET_ONSET_DELAY)   { CUE_ONSET_DELAY = d;   ReconfigureChain(); }
             else if (command == Cmd::CUE2_SET_ONSET_DELAY)  { /* cue2 uses CUE_ONSET_DELAY; no separate CUE2_ONSET_DELAY shadow yet */ }

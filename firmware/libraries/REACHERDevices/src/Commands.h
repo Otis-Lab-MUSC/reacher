@@ -104,7 +104,7 @@ namespace Cmd {
   constexpr int LASER_TEST           = 603;
   constexpr int LASER_SET_FREQUENCY  = 671;
   constexpr int LASER_SET_DURATION   = 672;
-  constexpr int LASER_SET_ONSET_DELAY = 673;  // Delay (ms) from RH press to laser onset in RH-only mode
+  constexpr int LASER_SET_ONSET_DELAY = 673;  // Delay (ms) from trigger onset to laser onset
   constexpr int LASER_SET_PIN        = 676;
   constexpr int LASER_MODE_CONTINGENT  = 681;
   constexpr int LASER_MODE_INDEPENDENT = 682;
