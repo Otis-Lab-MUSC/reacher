@@ -163,6 +163,53 @@ class TestValidator:
         v = pin_overrides.validate_pin(376, 50, None)
         assert v is not None and v["error"] == "pin_out_of_range"
 
+    def test_slm_default_pin_ok_on_mega(self):
+        # SLM (1176) requires PCINT0/PORTB; default pin 11 (PB5) is valid on Mega.
+        assert pin_overrides.validate_pin(1176, 11, "mega") is None
+
+    def test_slm_all_mega_pcint0_pins_ok(self):
+        # On the Mega the PCINT0/PORTB pins exposed for SLM are 10–13.
+        for pin in (10, 11, 12, 13):
+            assert pin_overrides.validate_pin(1176, pin, "mega") is None
+
+    @pytest.mark.parametrize("pin", [8, 9])
+    def test_slm_pins_8_9_rejected_on_mega(self, pin):
+        # Pins 8/9 are PORTH on the Mega — not PCINT-capable; the old UNO-derived
+        # 8–13 range wrongly allowed them, which is the bug this test guards.
+        v = pin_overrides.validate_pin(1176, pin, "mega")
+        assert v is not None
+        assert v["error"] == "pin_out_of_range"
+        assert v["component"] == "slm"
+
+    def test_slm_pin_11_still_ok_on_uno(self):
+        # UNO PCINT0 is genuinely PB0–PB5 == pins 8–13; keep that path valid.
+        assert pin_overrides.validate_pin(1176, 8, "uno") is None
+        assert pin_overrides.validate_pin(1176, 11, "uno") is None
+
+    @pytest.mark.parametrize("pin", [8, 9])
+    def test_slm_unknown_board_rejects_uno_only_pins(self, pin):
+        # Board detection returns None for clone/unrecognized USB IDs, including
+        # on real Mega hardware. Falling back to the wider UNO set would offer
+        # 8/9, which are PORTH on a Mega and cannot raise PCINT0_vect — and the
+        # firmware would then reject them. Unknown board must use the set that
+        # is valid on both boards.
+        v = pin_overrides.validate_pin(1176, pin, None)
+        assert v is not None
+        assert v["error"] == "pin_out_of_range"
+        assert v["component"] == "slm"
+
+    def test_slm_unknown_board_allows_shared_pcint0_pins(self):
+        # 10–13 are valid PCINT0 pins on UNO and Mega alike.
+        for pin in (10, 11, 12, 13):
+            assert pin_overrides.validate_pin(1176, pin, None) is None
+
+    def test_unknown_board_still_uses_uno_digital_and_pwm(self):
+        # The pcint0 exception must not widen the other sets: a Mega-only pin
+        # is still rejected when the board is unknown.
+        v = pin_overrides.validate_pin(476, 30, None)
+        assert v is not None and v["error"] == "pin_out_of_range"
+        assert pin_overrides.validate_pin(376, 11, None) is None
+
 
 class TestComponentMap:
     def test_all_components_have_codes(self):
