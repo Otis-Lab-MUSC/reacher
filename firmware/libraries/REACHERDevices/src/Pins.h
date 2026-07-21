@@ -21,8 +21,10 @@ constexpr int8_t PIN_LEVER_LH        = 13;
 constexpr int8_t PIN_LICK_CIRCUIT    = 5;
 /// Microscope frame timestamp ISR input (INT0)
 constexpr int8_t PIN_MICROSCOPE_TS   = 2;
-/// SLM timestamp PCINT input (PCINT0 group, PB3). Note: pin 11 is also SPI MOSI;
-/// avoid when SPI peripherals are in use. Remappable to any pin 8–13 at runtime.
+/// SLM timestamp PCINT input. On the Mega 2560 target, pin 11 is PB5 / PCINT5.
+/// (The Mega's SPI bus is on 50–53, not 11 — that is an UNO pinout.) Remappable
+/// at runtime to any PCINT0/PORTB pin; the backend exposes 10–13 on the Mega.
+/// Note 10 and 13 are the default lever pins — the backend rejects collisions.
 constexpr int8_t PIN_SLM_TS          = 11;
 
 /// Primary tone output (PWM capable)

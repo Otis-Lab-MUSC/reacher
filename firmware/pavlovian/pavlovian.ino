@@ -112,7 +112,7 @@ void ReconfigureScheduler();
 void SendIdentification();
 
 #ifdef __AVR_ATmega2560__
-ISR(PCINT0_vect) { Slm::instance->HandlePCINT(); }
+ISR(PCINT0_vect) { if (Slm::instance) Slm::instance->HandlePCINT(); }
 #endif
 
 /// @brief Callback: forward lever press to scheduler.
@@ -403,8 +403,15 @@ void ParseCommands() {
             slm.SetLaserDuration((uint32_t)inputJson["duration"]);
             logParamChange(F("SLM"), F("duration"), slm.LaserDuration()); break;
           case Cmd::SLM_SET_PIN: {
-            uint8_t p = (uint8_t)constrain((int)(inputJson["pin"] | 11), 8, 13);
-            slm.SetPin((int8_t)p); break;
+            // Pass the request through unclamped so Slm::SetPin's PCINT0-group
+            // guard can reject it with a level-006 error instead of silently
+            // substituting a different pin. Bound only to the int8_t range for
+            // representability: 0 and 127 are not PCINT0 pins, so an
+            // out-of-range request can never land on a valid one.
+            int req = inputJson["pin"] | 11;
+            if (req < 0)   req = 0;
+            if (req > 127) req = 127;
+            slm.SetPin((int8_t)req); break;
           }
 #endif
 
