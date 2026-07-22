@@ -19,16 +19,25 @@ Slm::Slm(int8_t timestampPin) {
   laserDuration  = 0;
   instance    = this;
 
-  // Enable PCINT0 group interrupt for the configured pin.
-  // The PCINT0 group covers PB0–PB5 (Arduino pins 8–13).
+  // Enable the PCINT0 group interrupt for the configured pin. The default
+  // pin (Pins.h) is a compile-time PORTB pin, so no runtime guard is needed
+  // here — SetPin() enforces the PCINT0-group constraint at runtime.
+  applyPinRegisters();
+}
+
+void Slm::applyPinRegisters() {
+  // Board-correct pin->register mapping via the Arduino core macros, rather
+  // than assuming the UNO "PB0–PB5 == pins 8–13" layout. On the Mega 2560,
+  // pins 10–13 map to PB4–PB7; digitalPinToPCMSKbit() yields the right bit.
+  pinInputReg = portInputRegister(digitalPinToPort(timestampPin));
+  pinBitMask  = digitalPinToBitMask(timestampPin);
+  PCMSK0 |= (1 << digitalPinToPCMSKbit(timestampPin));
   PCICR  |= (1 << PCIE0);
-  PCMSK0 |= (1 << (this->timestampPin - 8));
 }
 
 void Slm::HandlePCINT() {
-  // Read the current state of the configured pin from PINB.
-  // PCINT0 group: Arduino pin N -> PINB bit (N - 8).
-  bool pinHigh = (PINB >> (timestampPin - 8)) & 1;
+  // Read the current level of the configured pin from its cached PINx register.
+  bool pinHigh = (*pinInputReg & pinBitMask) != 0;
 
   // Capture only on RISING edge (LOW -> HIGH transition).
   if (pinHigh && !lastPinState) {
@@ -62,19 +71,29 @@ void Slm::SetOffset(uint32_t offset) {
 }
 
 void Slm::SetPin(int8_t newPin) {
-  // Disable interrupt for the old pin.
-  PCMSK0 &= ~(1 << (timestampPin - 8));
-  if (PCMSK0 == 0) {
-    PCICR &= ~(1 << PCIE0);  // no PCINT0 pins remain — disable group
+  // The single ISR vector is PCINT0_vect, so the pin must be in the PCINT0
+  // group (PORTB) — pins 10–13 on the Mega. Reject anything else and keep
+  // the current pin so capture is never silently misrouted.
+  if (digitalPinToPCMSK(newPin) != &PCMSK0) {
+    Serial.print(F("{\"level\":\"006\",\"device\":\"SLM\",\"error\":\"pin_not_pcint0\",\"value\":"));
+    Serial.print(newPin);
+    Serial.println('}');
+    return;
   }
 
+  // Assumes it is called from loop()-level code (ParseCommands) with interrupts
+  // enabled and no outer critical section — the unconditional interrupts() below
+  // would otherwise re-enable them early. True for every current call site.
+  noInterrupts();
+  // Disable interrupt for the old pin, then swap in the new one atomically so
+  // the ISR never sees a half-updated (pinInputReg, pinBitMask, timestampPin).
+  PCMSK0 &= ~(1 << digitalPinToPCMSKbit(timestampPin));
   timestampPin = newPin;
   pinMode(timestampPin, INPUT_PULLUP);
   lastPinState = (digitalRead(timestampPin) == HIGH);
-
-  // Enable interrupt for the new pin.
-  PCICR  |= (1 << PCIE0);
-  PCMSK0 |= (1 << (timestampPin - 8));
+  received     = false;  // discard any stale capture from the old pin
+  applyPinRegisters();
+  interrupts();
 
   Serial.print(F("{\"level\":\"000\",\"device\":\"SLM\",\"param\":\"timestamp_pin\",\"value\":"));
   Serial.print(timestampPin);

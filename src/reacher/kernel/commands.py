@@ -120,7 +120,8 @@ class CommandCode(IntEnum):
     # Bookkeeping only — records what the laser should have been doing; not tied to actual LASER control.
     SLM_SET_LASER_FREQUENCY = 1102
     SLM_SET_LASER_DURATION = 1103
-    # Timestamp pin is configurable within PCINT0 group (Arduino pins 8–13).
+    # Timestamp pin is configurable within the PCINT0/PORTB group: pins 10–13 on
+    # the Mega 2560 target (8–13 on an UNO). See pin_overrides.MEGA_PCINT0.
     SLM_SET_PIN = 1176
 
     # --- RH Lever (10xx) ---
@@ -718,7 +719,7 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     ),
     1176: CommandSpec(
         CommandCode.SLM_SET_PIN, "SLM_SET_PIN",
-        "Reassign the SLM timestamp input pin (PCINT0 group, Arduino pins 8–13)",
+        "Reassign the SLM timestamp input pin (PCINT0/PORTB group — pins 10–13 on the Mega, 8–13 on the UNO)",
         payload_key="pin", payload_type="int",
     ),
 }

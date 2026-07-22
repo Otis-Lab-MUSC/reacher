@@ -132,7 +132,8 @@ namespace Cmd {
   // Bookkeeping only — records what the laser should have been doing; not tied to actual LASER control.
   constexpr int SLM_SET_LASER_FREQUENCY = 1102;
   constexpr int SLM_SET_LASER_DURATION  = 1103;
-  // Timestamp pin is configurable within PCINT0 group (Arduino pins 8–13).
+  // Timestamp pin is configurable within the PCINT0/PORTB group: pins 10–13 on
+  // the Mega 2560 target (8–13 on an UNO). Slm::SetPin rejects anything else.
   constexpr int SLM_SET_PIN          = 1176;
 
   // --- RH Lever (10xx) ---

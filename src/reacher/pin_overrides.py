@@ -46,13 +46,16 @@ _cache: dict[str, dict] = {}
 UNO_DIGITAL = frozenset(range(2, 14))
 UNO_PWM = frozenset({3, 5, 6, 9, 10, 11})
 UNO_INT = frozenset({2, 3})
-# PCINT0 group covers PB0–PB5 (Arduino pins 8–13) on both UNO and Mega.
-# SLM timestamp input must be in this group for the ISR(PCINT0_vect) handler.
+# SLM timestamp input must be in the PCINT0 group (PORTB) for the fixed
+# ISR(PCINT0_vect) handler. The PORTB pin map differs by board:
+#   UNO  (ATmega328):  PB0–PB5 == pins 8–13
+#   Mega (ATmega2560): PB4–PB7 == pins 10–13 (pins 8/9 are PORTH, not PCINT-capable;
+#                      PB0–PB3 == 53/52/51/50 are the SPI bus and not exposed here).
 UNO_PCINT0 = frozenset(range(8, 14))
 MEGA_DIGITAL = frozenset(range(2, 54))
 MEGA_PWM = frozenset(range(2, 14)) | {44, 45, 46}
 MEGA_INT = frozenset({2, 3, 18, 19, 20, 21})
-MEGA_PCINT0 = frozenset(range(8, 14))
+MEGA_PCINT0 = frozenset({10, 11, 12, 13})
 
 
 @dataclass(frozen=True)
@@ -62,7 +65,7 @@ class PinConstraint:
     component_key: str          # canonical key used by the bulk-pins endpoint
     requires_pwm: bool = False
     requires_interrupt: bool = False
-    requires_pcint: bool = False  # must be in PCINT0 group (pins 8–13) for ISR
+    requires_pcint: bool = False  # must be in PCINT0/PORTB group (10–13 on Mega) for ISR
 
 
 # Map command code -> PinConstraint. Cue/Cue2/Laser drive PWM; Microscope
@@ -93,10 +96,23 @@ COMPONENT_KEYS: tuple[str, ...] = tuple(SET_PIN_CODE_FOR.keys())
 def board_sets(
     board: Optional[str],
 ) -> tuple[frozenset[int], frozenset[int], frozenset[int], frozenset[int]]:
-    """Return (digital, pwm, interrupt, pcint0) sets for a board. Defaults to UNO."""
+    """Return (digital, pwm, interrupt, pcint0) sets for a board.
+
+    Falls back to UNO constraints when the board is unknown, since they are the
+    narrower set for digital/pwm/interrupt and therefore the safe default.
+
+    The PCINT0 set is the exception: UNO_PCINT0 (8-13) is *wider* than
+    MEGA_PCINT0 (10-13), so falling back to it would advertise pins 8/9 as valid
+    for the SLM. Those are PORTH on a Mega and cannot raise PCINT0_vect at all,
+    and board detection legitimately returns None for clone/unrecognized USB IDs
+    on real Mega hardware. MEGA_PCINT0 is valid on *both* boards (it is a subset
+    of UNO_PCINT0), so it is the correct conservative choice when we don't know.
+    """
     if board and board.lower() == "mega":
         return MEGA_DIGITAL, MEGA_PWM, MEGA_INT, MEGA_PCINT0
-    return UNO_DIGITAL, UNO_PWM, UNO_INT, UNO_PCINT0
+    if board and board.lower() == "uno":
+        return UNO_DIGITAL, UNO_PWM, UNO_INT, UNO_PCINT0
+    return UNO_DIGITAL, UNO_PWM, UNO_INT, MEGA_PCINT0
 
 
 def validate_pin(code: int, pin: int, board: Optional[str]) -> Optional[dict]:
@@ -109,7 +125,7 @@ def validate_pin(code: int, pin: int, board: Optional[str]) -> Optional[dict]:
     if constraint is None:
         return None
     digital, pwm, interrupt, pcint0 = board_sets(board)
-    # For PCINT-only devices, valid pins are the PCINT0 group, not all digital pins.
+    # For PCINT-only devices, valid pins are the PCINT0/PORTB group, not all digital pins.
     valid_range = pcint0 if constraint.requires_pcint else digital
     if pin not in valid_range:
         return {

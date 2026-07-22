@@ -79,7 +79,7 @@ void EndSession();
 void ReconfigureChain();
 void SendIdentification();
 
-ISR(PCINT0_vect) { Slm::instance->HandlePCINT(); }
+ISR(PCINT0_vect) { if (Slm::instance) Slm::instance->HandlePCINT(); }
 
 void onLeverPress(DeviceType source, uint32_t timestamp) {
   scheduler.OnInputEvent(source, timestamp);
@@ -373,8 +373,15 @@ void ParseCommands() {
           case Cmd::SLM_ARM:    slm.ArmToggle(true); break;
           case Cmd::SLM_DISARM: slm.ArmToggle(false); break;
           case Cmd::SLM_SET_PIN: {
-            uint8_t p = (uint8_t)constrain((int)(inputJson["pin"] | 11), 8, 13);
-            slm.SetPin((int8_t)p); break;
+            // Pass the request through unclamped so Slm::SetPin's PCINT0-group
+            // guard can reject it with a level-006 error instead of silently
+            // substituting a different pin. Bound only to the int8_t range for
+            // representability: 0 and 127 are not PCINT0 pins, so an
+            // out-of-range request can never land on a valid one.
+            int req = inputJson["pin"] | 11;
+            if (req < 0)   req = 0;
+            if (req > 127) req = 127;
+            slm.SetPin((int8_t)req); break;
           }
           case Cmd::SLM_SET_LASER_FREQUENCY:
             slm.SetLaserFrequency((uint32_t)inputJson["frequency"]);
