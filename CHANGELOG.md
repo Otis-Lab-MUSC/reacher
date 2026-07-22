@@ -10,6 +10,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.1.1] - 2026-07-22
+
+_SLM SYNC never captured a timestamp on the Mega 2560: the pin-change interrupt was armed on the wrong port bit._
+
+### Fixed
+- Firmware: `Slm` derived its PCINT registers with hand-rolled `timestampPin - 8`
+  arithmetic, which is only valid on the ATmega328 (UNO), where PORTB is PB0–PB5 ==
+  pins 8–13. On the Mega 2560 PORTB is PB4–PB7 == pins 10–13, so the default pin 11
+  armed `PCMSK0` bit 3 — physical pin 50 — and the ISR polled that same wrong bit.
+  No edge on the actual SLM input was ever observed, so `HandleTimestampSignal()`
+  never emitted a level-`009` event and the SLM timestamp stream was silently empty.
+  The register/bit/mask are now derived from the Arduino core macros
+  (`digitalPinToPort` / `portInputRegister` / `digitalPinToBitMask` /
+  `digitalPinToPCMSKbit`), mirroring how `Microscope` uses `digitalPinToInterrupt`
+  to stay board-portable ([#47](https://github.com/Otis-Lab-MUSC/reacher/issues/47))
+- Firmware: `Slm::SetPin` now rejects any pin outside the PCINT0 group with a
+  level-`006` `pin_not_pcint0` error and keeps the current pin. Previously each
+  sketch pre-clamped the request with `constrain(pin, 10, 13)`, which made the guard
+  unreachable and silently mapped an out-of-group request onto a different valid pin
+  — a request for pin 8 became pin 10 (the right-hand lever) and was reported back as
+  success ([#47](https://github.com/Otis-Lab-MUSC/reacher/issues/47))
+- Firmware: `Slm`'s ISR-shared `pinInputReg` and `pinBitMask` are now correctly
+  `volatile`-qualified. They are written from `SetPin()` in main context and read
+  inside `PCINT0_vect`, and this core builds with `-flto`, so the missing qualifiers
+  were a live miscompilation risk. `ISR(PCINT0_vect)` also null-guards the singleton,
+  matching `Microscope::TimestampISR`
+- Backend: `MEGA_PCINT0` narrowed from `8–13` to `{10, 11, 12, 13}` — the Mega's
+  non-SPI PORTB pins. Pins 8/9 are PORTH on that part and cannot raise `PCINT0_vect`
+  at all, so the old range advertised two pins the firmware could never capture on
+  ([#47](https://github.com/Otis-Lab-MUSC/reacher/issues/47))
+- Backend: `board_sets()` now falls back to `MEGA_PCINT0` rather than `UNO_PCINT0`
+  when the board is unknown. It remains UNO-first for the digital/PWM/interrupt sets
+  (those are the narrower, safer default), but the PCINT0 relation is inverted —
+  `UNO_PCINT0` is the *wider* set, and board detection legitimately returns `None`
+  for clone/unrecognized USB IDs on real Mega hardware. `MEGA_PCINT0` is a subset of
+  `UNO_PCINT0`, so it is the only choice valid on both boards
+- Docs: the `SLM_SET_PIN` comment in `Commands.h`, the mirrored comment in
+  `kernel/commands.py`, and the user-facing `CommandSpec` description all said
+  "Arduino pins 8–13". The description in particular told operators 8/9 were legal
+  when `validate_pin` now rejects them on a Mega. All three now state the board split:
+  PCINT0/PORTB group — 10–13 on the Mega, 8–13 on the UNO
+
+---
+
 ## [3.1.0] - 2026-07-17
 
 ### Fixed
