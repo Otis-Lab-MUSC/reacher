@@ -87,20 +87,26 @@ All pin assignments are defined in `libraries/REACHERDevices/src/Pins.h`:
 - `TIMEOUT` — press during the post-reward timeout period
 - `INACTIVE` — press on the non-reinforced lever
 
-**Default configuration** (`fr/Config.h`):
+**Default configuration** (`fr/Config.h`) — the board ships blank: every value
+below is `0` until explicitly configured, so arming a device produces no
+observable output (no tone, no infusion, no laser pulse) until it is set:
 
 | Parameter | Default | Description |
 |---|---|---|
 | Ratio | 1 | Number of active presses required per reward |
-| Cue frequency | 8000 Hz | Primary tone frequency |
-| Cue duration | 1600 ms | Tone duration |
-| Pump duration | 2000 ms | Infusion duration |
-| Laser frequency | 40 Hz | Laser oscillation frequency |
-| Laser duration | 5000 ms | Laser pulse duration |
-| Timeout | 20000 ms | Post-reward timeout interval |
-| Trace interval | 0 ms | Delay between cue offset and pump onset |
+| Cue frequency | 0 Hz | Primary tone frequency |
+| Cue duration | 0 ms | Tone duration |
+| Pump duration | 0 ms | Infusion duration |
+| Laser frequency | 0 Hz | Laser oscillation frequency |
+| Laser duration | 0 ms | Laser pulse duration |
+| Timeout | 0 ms | Post-reward timeout interval |
+| Cue/Pump/Laser onset delay | 0 ms | Delay from press onset to each device's own activation |
 
-**Reward chain:** Cue (immediate) → Pump (after cue + trace) → Laser (after cue + trace) → Timeout (immediate)
+**Reward chain:** Cue, Pump, and Laser each fire at `press onset + their own
+onset delay` (`CUE_SET_ONSET_DELAY` 377 / `PUMP_SET_ONSET_DELAY` 477 /
+`LASER_SET_ONSET_DELAY` 673) — no device's timing is relative to another
+device's duration or onset. To make the pump fire right after the cue tone
+ends, set the pump's onset delay equal to the cue's duration.
 
 ---
 
