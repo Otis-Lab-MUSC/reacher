@@ -11,18 +11,18 @@
 #include <Pump.h>
 #include <Laser.h>
 
-/// Default cue tone frequency in Hz.
-static constexpr uint32_t DEFAULT_CUE_FREQUENCY      = 8000;
-/// Default cue tone duration in ms.
-static constexpr uint32_t DEFAULT_CUE_DURATION       = 1600;
-/// Default syringe pump infusion duration in ms.
-static constexpr uint32_t DEFAULT_PUMP_DURATION      = 2000;
-/// Default laser oscillation frequency in Hz.
-static constexpr uint8_t  DEFAULT_LASER_FREQUENCY    = 40;
-/// Default laser activation duration in ms.
-static constexpr uint32_t DEFAULT_LASER_DURATION     = 5000;
-/// Default post-reward timeout interval in ms.
-static constexpr uint32_t DEFAULT_TIMEOUT_INTERVAL   = 20000;
+/// Default cue tone frequency in Hz. Zero until explicitly configured.
+static constexpr uint32_t DEFAULT_CUE_FREQUENCY      = 0;
+/// Default cue tone duration in ms. Zero until explicitly configured.
+static constexpr uint32_t DEFAULT_CUE_DURATION       = 0;
+/// Default syringe pump infusion duration in ms. Zero until explicitly configured.
+static constexpr uint32_t DEFAULT_PUMP_DURATION      = 0;
+/// Default laser oscillation frequency in Hz. Zero until explicitly configured.
+static constexpr uint8_t  DEFAULT_LASER_FREQUENCY    = 0;
+/// Default laser activation duration in ms. Zero until explicitly configured.
+static constexpr uint32_t DEFAULT_LASER_DURATION     = 0;
+/// Default post-reward timeout interval in ms. Zero until explicitly configured.
+static constexpr uint32_t DEFAULT_TIMEOUT_INTERVAL   = 0;
 
 /// @brief Configure a Fixed Ratio schedule (single trigger, single chain).
 ///
