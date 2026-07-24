@@ -47,6 +47,27 @@ for board in mega; do
     done
 done
 
+# Arduino UNO — lite FR-only build (RAM/flash constrained; see firmware/CLAUDE.md)
+UNO_FQBN="arduino:avr:uno"
+UNO_DIR="$HEX_DIR/uno"
+mkdir -p "$UNO_DIR"
+echo "==> Compiling fr_lite for uno ($UNO_FQBN)..."
+arduino-cli compile \
+    --fqbn "$UNO_FQBN" \
+    --libraries "$LIB_DIR" \
+    --output-dir "$UNO_DIR" \
+    "$SCRIPT_DIR/fr_lite/fr_lite.ino"
+
+if [ -f "$UNO_DIR/fr_lite.ino.hex" ]; then
+    mv "$UNO_DIR/fr_lite.ino.hex" "$UNO_DIR/fr_lite.hex"
+fi
+
+rm -f "$UNO_DIR/fr_lite.ino.elf" "$UNO_DIR/fr_lite.ino.with_bootloader.hex" \
+      "$UNO_DIR/fr_lite.ino.eep" "$UNO_DIR/fr_lite.ino.with_bootloader.bin" \
+      "$UNO_DIR/fr_lite.ino.map"
+
+echo "    -> $UNO_DIR/fr_lite.hex"
+
 echo ""
 echo "All paradigms compiled successfully for MEGA."
 ls -lh "$HEX_DIR"/*/*.hex

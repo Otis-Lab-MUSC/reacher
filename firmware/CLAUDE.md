@@ -9,7 +9,7 @@ This `firmware/` tree lives inside the `reacher` repo (folded in from the now-ar
 ## Commands
 
 ```bash
-./compile.sh                        # builds all 5 paradigms (mega) -> ../src/reacher/hex/mega/<paradigm>.hex
+./compile.sh                        # builds all 5 paradigms (mega) + fr_lite (uno) -> ../src/reacher/hex/{mega,uno}/<paradigm>.hex
 arduino-cli core install arduino:avr  # one-time: install AVR toolchain
 doxygen Doxyfile                    # regenerate docs/ (git-ignored)
 
@@ -21,7 +21,7 @@ arduino-cli compile --fqbn arduino:avr:mega:cpu=atmega2560 --libraries libraries
 arduino-cli upload -p /dev/ttyUSB0 --fqbn arduino:avr:mega:cpu=atmega2560 --input-file ../src/reacher/hex/mega/fr.hex
 ```
 
-There is no Arduino-side test framework — verification is done in-loop on hardware. From the backend, `tests/test_command_parity.py` asserts `Commands.h` matches the Python `CommandCode` enum. The committed `../src/reacher/hex/<board>/*.hex` files are tracked artifacts the backend ships; **recompile and commit them** when firmware logic or library code changes (run `bash compile.sh`). The `uno/` hex set is legacy (compile.sh builds mega only); leave existing uno artifacts untouched until UNO is formally dropped.
+There is no Arduino-side test framework — verification is done in-loop on hardware. From the backend, `tests/test_command_parity.py` asserts `Commands.h` matches the Python `CommandCode` enum. The committed `../src/reacher/hex/<board>/*.hex` files are tracked artifacts the backend ships; **recompile and commit them** when firmware logic or library code changes (run `bash compile.sh`). The `uno/` hex set includes the new `fr_lite.hex` (built by compile.sh); the legacy uno hex artifacts for the five full paradigms (fr.hex, pr.hex, vi.hex, omission.hex, pavlovian.hex) are left untouched in `uno/` for backwards compatibility.
 
 **Versioning is coupled to the `reacher` package version.** `library.properties` and each sketch's `SendIdentification()` version string are stamped by `../scripts/bump-version.py`; after a bump, recompile the hex so the shipped binaries report the new version.
 

@@ -18,14 +18,15 @@
 
 ## Overview
 
-This repository contains Arduino C++ firmware implementing five behavioral paradigms for head-fixed rodent operant conditioning experiments. Each paradigm is compiled into a standalone `.hex` file that can be uploaded to an Arduino UNO via the REACHER frontend UI or manually via `arduino-cli`/`avrdude`.
+This repository contains Arduino C++ firmware implementing behavioral paradigms for head-fixed rodent operant conditioning experiments. Each paradigm is compiled into a standalone `.hex` file that can be uploaded to an Arduino via the REACHER frontend UI or manually via `arduino-cli`/`avrdude`.
 
 **Paradigms:**
-- **Fixed Ratio (FR)** — reward after N active lever presses
-- **Progressive Ratio (PR)** — reward threshold increases by a configurable step after each delivery
-- **Variable Interval (VI)** — reward available during a random window within each fixed interval
-- **Omission** — reward delivered after the animal withholds pressing for a specified duration
-- **Pavlovian** — classical conditioning with CS+/CS- trials, cues, and probabilistic reward delivery
+- **Fixed Ratio (FR)** — reward after N active lever presses (MEGA only)
+- **Progressive Ratio (PR)** — reward threshold increases by a configurable step after each delivery (MEGA only)
+- **Variable Interval (VI)** — reward available during a random window within each fixed interval (MEGA only)
+- **Omission** — reward delivered after the animal withholds pressing for a specified duration (MEGA only)
+- **Pavlovian** — classical conditioning with CS+/CS- trials, cues, and probabilistic reward delivery (MEGA only)
+- **Fixed Ratio Lite (FR_LITE)** — UNO-compatible Fixed Ratio without two-photon sync (Microscope/SLM); all other devices identical to FR
 
 ---
 
@@ -334,7 +335,7 @@ cd reacher/firmware
 ./compile.sh
 ```
 
-The script compiles all five paradigms (`fr`, `pr`, `vi`, `omission`, `pavlovian`) using the local `libraries/` directory and writes `.hex` files into the backend package-data tree at `../src/reacher/hex/<board>/` (committed and shipped in the wheel):
+The script compiles all paradigms using the local `libraries/` directory and writes `.hex` files into the backend package-data tree at `../src/reacher/hex/<board>/` (committed and shipped in the wheel):
 
 ```
 src/reacher/hex/mega/
@@ -343,9 +344,12 @@ src/reacher/hex/mega/
 ├── vi.hex
 ├── omission.hex
 └── pavlovian.hex
+
+src/reacher/hex/uno/
+└── fr_lite.hex
 ```
 
-Target board: `arduino:avr:mega:cpu=atmega2560` (Arduino Mega 2560, ATmega2560).
+Target boards: `arduino:avr:mega:cpu=atmega2560` (Arduino Mega 2560, ATmega2560) for the five full paradigms, and `arduino:avr:uno` (Arduino UNO, ATmega328P) for fr_lite.
 
 ---
 
