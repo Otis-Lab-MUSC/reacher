@@ -2,7 +2,7 @@
 
 **FastAPI server, serial communication kernel, and session manager for the REACHER ecosystem**
 
-[![Version](https://img.shields.io/badge/version-3.1.1-blue)](https://github.com/Otis-Lab-MUSC/reacher/releases)
+[![Version](https://img.shields.io/badge/version-3.2.0-blue)](https://github.com/Otis-Lab-MUSC/reacher/releases)
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.13-blue)](https://www.python.org)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Changelog](https://img.shields.io/badge/changelog-CHANGELOG.md-orange)](CHANGELOG.md)
@@ -260,7 +260,7 @@ The backend's `COMMAND_REGISTRY` contains 71 `CommandSpec` entries with paradigm
 ### From a wheel file
 
 ```bash
-pip install reacher2p-3.1.1-py3-none-any.whl
+pip install reacher2p-3.2.0-py3-none-any.whl
 ```
 
 ### From source

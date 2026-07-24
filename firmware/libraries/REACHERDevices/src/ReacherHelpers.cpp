@@ -200,12 +200,19 @@ bool handleCommonDeviceCommand(DeviceSet& ds, int command, JsonDocument& inputJs
       if (ds.laser) { ds.laser->SetMode(false); logParamChange(F("LASER"), F("mode"), F("INDEPENDENT")); } break;
 
     // --- Microscope ---
+    // Boards without a microscope (e.g. fr_lite on UNO) report these as unhandled,
+    // matching how SLM commands (absent from this shared helper) already fall
+    // through to the sketch's own "Command not found" default, rather than
+    // silently acking a command that changed nothing.
     case Cmd::MICROSCOPE_ARM:
-      if (ds.microscope) ds.microscope->ArmToggle(true); break;
+      if (!ds.microscope) return false;
+      ds.microscope->ArmToggle(true); break;
     case Cmd::MICROSCOPE_DISARM:
-      if (ds.microscope) ds.microscope->ArmToggle(false); break;
+      if (!ds.microscope) return false;
+      ds.microscope->ArmToggle(false); break;
     case Cmd::MICROSCOPE_TEST:
-      if (ds.microscope) { ds.microscope->Trigger(); logParamChange(F("MICROSCOPE"), F("test"), F("FIRED")); } break;
+      if (!ds.microscope) return false;
+      ds.microscope->Trigger(); logParamChange(F("MICROSCOPE"), F("test"), F("FIRED")); break;
 
     // --- Pin reassignment (suffix x76) ---
     // Backend validates board / role / collisions; firmware clamps to 2-53.
@@ -235,7 +242,7 @@ bool handleCommonDeviceCommand(DeviceSet& ds, int command, JsonDocument& inputJs
       ds.laser->SetPin((int8_t)p); break;
     }
     case Cmd::MICROSCOPE_SET_TRIG_PIN: {
-      if (!ds.microscope) break;
+      if (!ds.microscope) return false;
       uint32_t p = clampParam(inputJson, "pin", 2, 53);
       ds.microscope->SetTriggerPin((int8_t)p); break;
     }

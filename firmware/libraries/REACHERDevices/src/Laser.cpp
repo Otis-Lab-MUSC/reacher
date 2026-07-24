@@ -156,6 +156,14 @@ void Laser::Off() {
 }
 
 void Laser::UpdateHalfCycle(uint32_t currentTimestamp) {
+  // Unconfigured (frequency == 0, the FR blank-state default): stay off rather
+  // than divide by zero and cast +/-inf to uint32_t (undefined behavior).
+  if (frequency == 0) {
+    halfCycleStartTimestamp = currentTimestamp;
+    halfCycleEndTimestamp = currentTimestamp;
+    halfState = false;
+    return;
+  }
   // Frequency quantization due to integer millisecond timing:
   //   Freq(Hz) | Half-cycle(ms) | Actual(Hz) | Error
   //   ---------|----------------|------------|------

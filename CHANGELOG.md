@@ -10,6 +10,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.2.0] - 2026-07-24
+
+### Added
+- Firmware: `firmware/fr_lite/` — a new Fixed Ratio sketch targeting Arduino UNO
+  (ATmega328P, 32KB flash / 2KB RAM). Drops Microscope + SLM two-photon sync (neither
+  fits the UNO's budget); every other shareable device (levers, cue/cue2, pump/pump2,
+  lick circuit, laser) and command code is unchanged from `fr.ino`. `ds.microscope` is
+  now null-guarded in `ReacherHelpers.cpp` (mirroring the existing `ds.laser` pattern)
+  so the lite sketch can pass `nullptr` safely. `compile.sh` builds `fr_lite` for `uno`
+  → `src/reacher/hex/uno/fr_lite.hex`, alongside the existing legacy `uno/*.hex`
+  artifacts; `uploader.py`'s `PARADIGMS` gains `fr_lite` as a `board=uno` upload target.
+  Compiles at 94% flash / 62% RAM on `arduino:avr:uno`
+  ([#51](https://github.com/Otis-Lab-MUSC/reacher/issues/51))
+
+### Fixed
+- Firmware: `fr/Config.h`'s `DEFAULT_CUE_FREQUENCY`/`DURATION`, `DEFAULT_PUMP_DURATION`,
+  `DEFAULT_LASER_FREQUENCY`/`DURATION`, and `DEFAULT_TIMEOUT_INTERVAL` still held their
+  old non-zero values from before the per-device onset-delay refactor, so a
+  freshly-flashed board fired real cue/pump/laser output the moment a device was armed,
+  before any experimenter configuration. All six are now zero, so the board ships inert
+  until explicitly configured. `firmware/README.md`'s FR section is also rewritten — it
+  still described the old cue-offset-relative "trace interval" chaining model, no longer
+  present in code, instead of the current per-device onset-delay model
+  ([#49](https://github.com/Otis-Lab-MUSC/reacher/issues/49))
+- Firmware: `Laser::UpdateHalfCycle()` divided by `frequency` unguarded; zeroing
+  `DEFAULT_LASER_FREQUENCY` (above) meant a fresh board's laser hit a `1.0f / 0`
+  division whose result was then cast to `uint32_t` — undefined behavior — the moment
+  `LASER_TEST` fired or a reward chain activated an unconfigured laser. Now guarded:
+  frequency `0` keeps the laser off instead of computing a half-cycle
+- Firmware: `MICROSCOPE_ARM`/`DISARM`/`TEST`/`SET_TRIG_PIN` silently reported success
+  on boards without a microscope (e.g. `fr_lite` on UNO) instead of erroring. Now
+  falls through to the sketch's "Command not found" response, matching how `SLM_*`
+  commands (absent from the shared handler) already behave
+
+---
+
 ## [3.1.1] - 2026-07-22
 
 _SLM SYNC never captured a timestamp on the Mega 2560: the pin-change interrupt was armed on the wrong port bit._
