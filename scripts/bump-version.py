@@ -92,7 +92,7 @@ VERSION_FILES: list[tuple[Path, str, str, "callable"]] = [
             r"\g<1>{version}\3",
             identity,
         )
-        for sketch in ("fr", "pr", "vi", "omission", "pavlovian")
+        for sketch in ("fr", "pr", "vi", "omission", "pavlovian", "fr_lite")
     ],
     # README version badge (shields.io escapes '-' as '--').
     (

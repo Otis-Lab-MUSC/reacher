@@ -20,7 +20,7 @@ void setDeviceTimestampOffset(DeviceSet& ds, uint32_t ts) {
   ds.pump2->SetOffset(ts);
   ds.lickCircuit->SetOffset(ts);
   if (ds.laser) ds.laser->SetOffset(ts);
-  ds.microscope->SetOffset(ts);
+  if (ds.microscope) ds.microscope->SetOffset(ts);
   // SLM is excluded: Slm does not inherit Device; each sketch calls slm.SetOffset() directly.
 }
 
@@ -34,7 +34,7 @@ ArmSnapshot captureArmState(const DeviceSet& ds) {
   snap.pump2       = ds.pump2->Armed();
   snap.lickCircuit = ds.lickCircuit->Armed();
   snap.laser       = ds.laser ? ds.laser->Armed() : false;
-  snap.microscope  = ds.microscope->Armed();
+  snap.microscope  = ds.microscope ? ds.microscope->Armed() : false;
   snap.slm         = false;  // SLM excluded (Slm does not inherit Device)
   return snap;
 }
@@ -48,7 +48,7 @@ void restoreArmState(DeviceSet& ds, const ArmSnapshot& snap) {
   ds.pump2->ArmToggle(snap.pump2);
   ds.lickCircuit->ArmToggle(snap.lickCircuit);
   if (ds.laser) ds.laser->ArmToggle(snap.laser);
-  ds.microscope->ArmToggle(snap.microscope);
+  if (ds.microscope) ds.microscope->ArmToggle(snap.microscope);
 }
 
 void armToggleDevices(DeviceSet& ds, bool toggle) {
@@ -60,7 +60,7 @@ void armToggleDevices(DeviceSet& ds, bool toggle) {
   ds.pump2->ArmToggle(toggle);
   ds.lickCircuit->ArmToggle(toggle);
   if (ds.laser) ds.laser->ArmToggle(toggle);
-  ds.microscope->ArmToggle(toggle);
+  if (ds.microscope) ds.microscope->ArmToggle(toggle);
 }
 
 void reportDeviceConfig(const __FlashStringHelper* dev, bool armed,
@@ -200,11 +200,12 @@ bool handleCommonDeviceCommand(DeviceSet& ds, int command, JsonDocument& inputJs
       if (ds.laser) { ds.laser->SetMode(false); logParamChange(F("LASER"), F("mode"), F("INDEPENDENT")); } break;
 
     // --- Microscope ---
-    case Cmd::MICROSCOPE_ARM:    ds.microscope->ArmToggle(true); break;
-    case Cmd::MICROSCOPE_DISARM: ds.microscope->ArmToggle(false); break;
+    case Cmd::MICROSCOPE_ARM:
+      if (ds.microscope) ds.microscope->ArmToggle(true); break;
+    case Cmd::MICROSCOPE_DISARM:
+      if (ds.microscope) ds.microscope->ArmToggle(false); break;
     case Cmd::MICROSCOPE_TEST:
-      ds.microscope->Trigger();
-      logParamChange(F("MICROSCOPE"), F("test"), F("FIRED")); break;
+      if (ds.microscope) { ds.microscope->Trigger(); logParamChange(F("MICROSCOPE"), F("test"), F("FIRED")); } break;
 
     // --- Pin reassignment (suffix x76) ---
     // Backend validates board / role / collisions; firmware clamps to 2-53.
@@ -234,6 +235,7 @@ bool handleCommonDeviceCommand(DeviceSet& ds, int command, JsonDocument& inputJs
       ds.laser->SetPin((int8_t)p); break;
     }
     case Cmd::MICROSCOPE_SET_TRIG_PIN: {
+      if (!ds.microscope) break;
       uint32_t p = clampParam(inputJson, "pin", 2, 53);
       ds.microscope->SetTriggerPin((int8_t)p); break;
     }
