@@ -22,6 +22,7 @@ PARADIGM_TO_SCHEDULE = {
     "vi": "VARIABLE_INTERVAL",
     "omission": "OMISSION",
     "pavlovian": "PAVLOVIAN",
+    "fr_lite": "FIXED_RATIO",
 }
 
 SCHEDULE_TO_SKETCH = {
@@ -43,6 +44,7 @@ class FirmwareSimulator:
         self._stop_event = threading.Event()
 
         # Configuration state (updated by incoming commands)
+        self.paradigm = "fr"
         self.schedule = "FIXED_RATIO"
         self.ratio = 5
         self.pr_step = 2
@@ -162,6 +164,7 @@ class FirmwareSimulator:
             paradigm_val = cmd_data.get("paradigm")
             if isinstance(paradigm_val, str):
                 self.schedule = PARADIGM_TO_SCHEDULE.get(paradigm_val, self.schedule)
+                self.paradigm = paradigm_val
         elif cmd == 203:
             self.omission_interval = cmd_data.get("interval", self.omission_interval)
         elif cmd == 204:
@@ -231,7 +234,13 @@ class FirmwareSimulator:
             self.pav_iti_max = cmd_data.get("iti_max", self.pav_iti_max)
 
     def _send_identification(self):
-        sketch = SCHEDULE_TO_SKETCH.get(self.schedule, "fr.ino")
+        # "_lite" paradigms share a schedule with their full counterpart
+        # (fr_lite and fr both report FIXED_RATIO), so the sketch name has
+        # to come from the paradigm itself, not the schedule, to be accurate.
+        if self.paradigm.endswith("_lite"):
+            sketch = f"{self.paradigm}.ino"
+        else:
+            sketch = SCHEDULE_TO_SKETCH.get(self.schedule, "fr.ino")
         self._send({
             "level": "000", "device": "CONTROLLER", "sketch": sketch,
             "version": "v2.0.0-sim", "baud_rate": 115200,
