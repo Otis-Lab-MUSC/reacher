@@ -10,6 +10,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.3.0] - 2026-07-27
+
+_fr_lite is now a first-class paradigm: the UNO firmware picker filters to lite-only
+sketches, and the backend command-dispatch gate no longer 400s on fr_lite sessions._
+
+### Added
+- Backend: `commands.py` — `fr_lite` added to `PARADIGMS`/`ALL_PARADIGMS`. Microscope
+  and SLM commands explicitly exclude it (no two-photon hardware on lite boards);
+  ~20 general FR-paradigm commands (ratio, lever timeout, cue/pump onset-delay +
+  lever-filter, all laser commands) explicitly include it
+  ([#53](https://github.com/Otis-Lab-MUSC/reacher/issues/53))
+- Backend: `simulator.py` gains fr_lite support (schedule mapping + sketch reporting)
+  so the fix below is testable without hardware
+
+### Fixed
+- Backend: `kernel/commands.py` carried its own `PARADIGMS` tuple that was missing
+  `"fr_lite"`, so the command-dispatch gate at `hardware.py:73` rejected nearly every
+  command for a fr_lite session with a 400 — fr_lite sessions were non-functional
+  end-to-end despite the firmware shipping in v3.2.0
+  ([#53](https://github.com/Otis-Lab-MUSC/reacher/issues/53))
+- Backend: `uploader.py`'s `list_available()` now declaratively filters UNO to only
+  `_lite`-suffixed paradigms, instead of relying on legacy full-size hex files being
+  absent from `hex/uno/` — the UNO firmware picker no longer offers paradigm sketches
+  the board can't run
+- Backend: `reacher.py`'s `get_detected_paradigm()` now distinguishes a lite-flashed
+  board from a full-size one on reconnect via the firmware `"sketch"` field, since
+  both report the same `"FIXED_RATIO"` schedule
+
+---
+
 ## [3.2.0] - 2026-07-24
 
 ### Added
