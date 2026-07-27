@@ -1075,11 +1075,22 @@ class REACHER:
                     break
 
     def get_detected_paradigm(self) -> Optional[str]:
-        """Return the paradigm detected from firmware identification, or None."""
+        """Return the paradigm detected from firmware identification, or None.
+
+        "_lite" sketches (e.g. fr_lite.ino) report the same ``schedule`` as
+        their full counterpart (fr.ino both report FIXED_RATIO), so the
+        schedule alone can't distinguish them — check the ``sketch`` field too.
+        """
         schedule = self.firmware_information.get("schedule")
-        if schedule and isinstance(schedule, str):
-            return SCHEDULE_TO_PARADIGM.get(schedule)
-        return None
+        if not schedule or not isinstance(schedule, str):
+            return None
+        base = SCHEDULE_TO_PARADIGM.get(schedule)
+        if base is None:
+            return None
+        sketch = self.firmware_information.get("sketch")
+        if isinstance(sketch, str) and sketch.endswith("_lite.ino"):
+            return f"{base}_lite"
+        return base
 
     def set_limit_type(self, limit_type: str) -> None:
         """Set the type of limit for program execution.

@@ -240,7 +240,15 @@ class FirmwareUploader:
         )
 
     def list_available(self, board: str = DEFAULT_BOARD) -> List[str]:
-        """Return paradigms whose hex files are present on disk for *board*."""
+        """Return paradigms whose hex files are present on disk for *board*.
+
+        UNO-class boards only ever offer "_lite" paradigms — their reduced
+        SRAM/pin count can't run the full sketches, whose hex files are kept
+        on disk under ``hex/uno/`` only for backwards compatibility (manual
+        flashing, diagnostics). This filter is declarative rather than
+        relying on those legacy files being absent, so it can't silently
+        regress if one is ever re-added.
+        """
         available = []
         for p in PARADIGMS:
             try:
@@ -248,6 +256,8 @@ class FirmwareUploader:
                 available.append(p)
             except (FileNotFoundError, ValueError):
                 pass
+        if board.lower() == "uno":
+            available = [p for p in available if p.endswith("_lite")]
         return available
 
     @staticmethod

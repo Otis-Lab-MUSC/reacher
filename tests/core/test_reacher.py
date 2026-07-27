@@ -544,6 +544,22 @@ def test_get_detected_paradigm(reacher):
     assert reacher.get_detected_paradigm() == "fr"
 
 
+def test_get_detected_paradigm_lite_sketch(reacher):
+    """fr_lite reports the same schedule as fr — only the sketch name distinguishes it."""
+    reacher.firmware_information = {
+        "schedule": "FIXED_RATIO", "device": "CONTROLLER", "sketch": "fr_lite.ino",
+    }
+    assert reacher.get_detected_paradigm() == "fr_lite"
+
+
+def test_get_detected_paradigm_full_sketch_unaffected(reacher):
+    """A full (non-lite) sketch name still resolves to the bare paradigm."""
+    reacher.firmware_information = {
+        "schedule": "FIXED_RATIO", "device": "CONTROLLER", "sketch": "fr.ino",
+    }
+    assert reacher.get_detected_paradigm() == "fr"
+
+
 # ===== New tests for security & reliability audit fixes =====
 
 

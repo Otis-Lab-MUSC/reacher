@@ -120,6 +120,48 @@ class TestGetCommandsForParadigm:
             assert 1374 in cmds, f"LEVER_LH_SET_TIMEOUT must be available for {paradigm}"
 
 
+class TestFrLiteParadigm:
+    """fr_lite behaves exactly like fr, minus two-photon hardware (microscope, SLM)."""
+
+    def test_fr_lite_is_a_known_paradigm(self):
+        assert "fr_lite" in PARADIGMS
+
+    def test_microscope_excluded(self):
+        cmds = get_commands_for_paradigm("fr_lite")
+        for code in [900, 901, 903, 976]:
+            assert code not in cmds, f"Microscope code {code} must not be available for fr_lite"
+
+    def test_slm_excluded(self):
+        cmds = get_commands_for_paradigm("fr_lite")
+        for code in [1100, 1101, 1102, 1103, 1176]:
+            assert code not in cmds, f"SLM code {code} must not be available for fr_lite"
+
+    def test_ratio_included(self):
+        cmds = get_commands_for_paradigm("fr_lite")
+        for code in [201, 1075, 1375]:
+            assert code in cmds, f"Ratio code {code} must be available for fr_lite"
+
+    def test_laser_included(self):
+        cmds = get_commands_for_paradigm("fr_lite")
+        for code in [600, 601, 603, 671, 672, 673, 676, 681, 682, 684, 685]:
+            assert code in cmds, f"Laser code {code} must be available for fr_lite"
+
+    def test_general_devices_included(self):
+        cmds = get_commands_for_paradigm("fr_lite")
+        for code in [300, 301, 400, 401, 500, 501, 1000, 1001, 1300, 1301]:
+            assert code in cmds, f"General device code {code} must be available for fr_lite"
+
+    def test_pavlovian_only_excluded(self):
+        cmds = get_commands_for_paradigm("fr_lite")
+        for code in [206, 207, 691, 692]:
+            assert code not in cmds, f"Pavlovian-only code {code} must not be available for fr_lite"
+
+    def test_microscope_still_available_for_full_fr(self):
+        cmds = get_commands_for_paradigm("fr")
+        for code in [900, 901, 903, 976, 1100, 1101]:
+            assert code in cmds, f"Code {code} must still be available for full fr paradigm"
+
+
 class TestBuildCommandPayload:
     def test_simple_command(self):
         payload = build_command_payload(101)
