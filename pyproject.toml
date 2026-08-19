@@ -10,7 +10,7 @@ name = "reacher2p"
 version = "3.3.0"
 description = "REACHER — Rodent Experiment Application Controls and Handling Ecosystem for Research"
 readme = "README.md"
-license = "MIT"
+license = "Unlicense"
 requires-python = ">=3.10"
 authors = [
     { name = "Joshua Boquiren", email = "thejoshbq@proton.me" },
