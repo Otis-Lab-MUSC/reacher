@@ -13,6 +13,9 @@ from typing import Callable, Dict, List, Optional
 
 from .kernel.reacher import REACHER
 
+from .diagnostics.schema import TIER_KERNEL as _TIER_KERNEL
+from .diagnostics.setup import log as _diag_log
+
 logger = logging.getLogger(__name__)
 
 
@@ -166,7 +169,20 @@ class SessionManager:
             info = self._sessions.get(session_id)
         if info is None:
             return  # Session already destroyed
+        previous = info.state
         info.state = state
+        if previous != state:
+            _diag_log(
+                "session.state",
+                tier=_TIER_KERNEL,
+                msg=f"Session {session_id}: {previous} → {state}",
+                src="reacher.session_manager",
+                session_id=session_id,
+                from_state=previous,
+                to_state=state,
+                port=info.port,
+                paradigm=info.paradigm,
+            )
         self._broadcast_state(session_id, state)
 
     def set_paradigm(self, session_id: str, paradigm: str) -> None:
@@ -202,9 +218,21 @@ class SessionManager:
         info = self._sessions.get(session_id)
         if info is None:
             return
+        previous = info.state
         info.state = "disconnected"
         self._broadcast_state(session_id, "disconnected")
         logger.warning("Session %s disconnected: %s", session_id, reason)
+        _diag_log(
+            "session.state",
+            tier=_TIER_KERNEL,
+            lvl="warn",
+            msg=f"Session {session_id}: {previous} → disconnected ({reason})",
+            src="reacher.session_manager",
+            session_id=session_id,
+            from_state=previous,
+            to_state="disconnected",
+            reason=str(reason),
+        )
 
     def _broadcast_state(self, session_id: str, state: str) -> None:
         if self._event_callback:

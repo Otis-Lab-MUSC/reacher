@@ -21,11 +21,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .. import __version__, discovery, machines, pairing, pin_overrides
+from .. import __version__, diagnostics, discovery, machines, pairing, pin_overrides
 from ..device_id import DEVICE_ID
 from ..session_manager import SessionManager
 from .middleware.auth import require_api_key, API_KEY
-from .routers import data, file, firmware, hardware, lifecycle, program, serial, session, websocket
+from .middleware.logging import RequestLoggingMiddleware
+from .routers import data, file, firmware, hardware, lifecycle, logs as logs_router, program, serial, session, websocket
 from .routers import discovery as discovery_router, pairing as pairing_router, proxy as proxy_router
 from .routers import update as update_router, validate as validate_router
 
@@ -133,6 +134,15 @@ def _resolve_static_dir():
     return None
 
 
+def _log_health() -> dict | None:
+    """Non-sensitive subset of the log sink's counters for /health."""
+    sink = diagnostics.get_sink()
+    if sink is None:
+        return None
+    stats = sink.stats()
+    return {k: stats[k] for k in ("run_id", "queued", "dropped", "write_failures") if k in stats}
+
+
 def broadcast_event(session_id: str, event_type: str, data: dict):
     """Enqueue an event for WebSocket delivery.
 
@@ -172,6 +182,13 @@ class _HealthCORSMiddleware(BaseHTTPMiddleware):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application startup/shutdown."""
+    # Idempotent: main() already configured logging for the normal entry points,
+    # but TestClient and embedded uses reach lifespan without going through it.
+    diagnostics.configure_logging()
+    # Chain onto uvicorn's signal handlers, which are only installed once it
+    # starts serving — doing this in main() would be overwritten.
+    diagnostics.install_signal_handlers()
+
     sm = SessionManager(event_callback=broadcast_event)
     app.state.session_manager = sm
 
@@ -226,6 +243,12 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Shutting down — destroying all sessions")
+    diagnostics.log(
+        "app.shutdown",
+        msg="Lifespan shutdown started",
+        src="reacher.api.app",
+        sessions=len(sm.list_sessions()),
+    )
     sm.destroy_all()
     pairing.stop_rotation()
     scan_task.cancel()
@@ -259,6 +282,9 @@ def create_app() -> FastAPI:
     # Outermost middleware: override CORS on /health so any origin can discover
     # this device before REACHER_CORS_ORIGINS is configured on remote machines.
     app.add_middleware(_HealthCORSMiddleware)
+    # Added last, so it wraps everything above and therefore observes the real
+    # status of requests that CORS or auth reject.
+    app.add_middleware(RequestLoggingMiddleware)
 
     @app.get("/health", tags=["health"])
     async def health_check():
@@ -272,6 +298,11 @@ def create_app() -> FastAPI:
             "version": __version__,
             "active_sessions": len(sessions),
             "dropped_events": websocket.dropped_events(),
+            # Counters only — deliberately NOT the log path.  /health is
+            # unauthenticated with wildcard CORS, and the absolute path leaks
+            # the OS username to any LAN peer.  Full stats live behind auth on
+            # /api/logs/runs.
+            "logging": _log_health(),
         }
 
     # Fix: PY-001 — Restrict token endpoint to same-origin requests
@@ -309,6 +340,7 @@ def create_app() -> FastAPI:
     app.include_router(proxy_router.ws_router, prefix="/api/proxy", tags=["proxy"])
     app.include_router(validate_router.router, prefix="/api/validate", tags=["validate"], dependencies=api_deps)
     app.include_router(update_router.router, prefix="/api/update", tags=["update"], dependencies=api_deps)
+    app.include_router(logs_router.router, prefix="/api/logs", tags=["logs"], dependencies=api_deps)
 
     # Serve built React frontend at /
     static_dir = _resolve_static_dir()
@@ -324,6 +356,7 @@ app = create_app()
 
 def main():
     """CLI entry-point (``reacher`` command)."""
+    diagnostics.configure_logging()
     if _is_already_running():
         print(f"REACHER is already running on port {PORT}.")
         print(f"Visit http://localhost:{PORT} in your browser.")
@@ -342,7 +375,10 @@ def main():
         host=HOST,
         port=PORT,
         log_level="info",
-        log_config=None if getattr(sys, "frozen", False) else uvicorn.config.LOGGING_CONFIG,
+        # Route uvicorn through the root SinkHandler in every build.  This used
+        # to be None when frozen, which silenced uvicorn entirely in shipped
+        # Labrynth builds.
+        log_config=diagnostics.uvicorn_log_config(),
         ws_ping_interval=WS_PING_INTERVAL,
         ws_ping_timeout=WS_PING_TIMEOUT,
     )

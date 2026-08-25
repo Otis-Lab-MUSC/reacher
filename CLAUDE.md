@@ -45,6 +45,9 @@ python -m build
 | `REACHER_CORS_ORIGINS` | None | Extra allowed CORS origins (comma-separated) |
 | `REACHER_API_KEY` | auto-generated | Bearer token; auto-written to `~/.reacher/api_key` if unset |
 | `REACHER_AVRDUDE_PATH` | system PATH | Path to `avrdude` binary (set during PyInstaller packaging) |
+| `REACHER_LOG_DIR` | `~/REACHER/LOG/runs` | Diagnostic run-log directory |
+| `REACHER_LOG_LEVEL` | `DEBUG` | Floor for the diagnostic log (`INFO` drops serial-wire records) |
+| `REACHER_LOG_VERBOSE_DEPS` | unset | Keep third-party DEBUG chatter (httpx, zeroconf, …) out of the log |
 
 ## Architecture
 
@@ -80,6 +83,32 @@ Persistent per-port Arduino pin remapping at `~/.reacher/pin_overrides.json` (mo
 - `machines.py` — persistent paired-peer store at `~/.reacher/machines.json` (mode `0o600`), keyed by `device_id`.
 - `device_id.py` — stable per-host identifier used by discovery/pairing.
 - `monitor.py` (`reacher-monitor` script) — Rich-based terminal dashboard showing pairing code, health, and session state; designed to run on the host's local display independently of any SSH session.
+
+### Diagnostic Logging (`src/reacher/diagnostics/`)
+Always-on structured NDJSON logging covering the whole stack — browser UI, HTTP,
+WebSocket, session lifecycle, and raw serial in both directions — in one file per
+process run at `~/REACHER/LOG/runs/<ts>_<run_id>/app.ndjson`. See `docs/logging.md`.
+
+`configure_logging()` (called from `app.py:main()` and the lifespan) installs a
+root `SinkHandler`, so **every existing `logger.*` call becomes durable without
+touching call sites** — previously they went to a handler-less root logger and
+were discarded entirely in frozen builds. It also installs crash capture:
+`sys.excepthook`, `threading.excepthook`, `faulthandler` (native segfaults),
+`atexit`, and chained SIGINT/SIGTERM handlers.
+
+A `corr_id` minted in the browser rides the `X-Reacher-Corr-Id` header into a
+`contextvar`, so a click can be traced through to the serial bytes it caused.
+Correlation reaches FastAPI sync endpoints (anyio copies context) but **not** the
+kernel's daemon threads — `serial.rx` carries `session_id` only.
+
+The sink never blocks producers (bounded queue, drops and counts under pressure),
+never raises (an unwritable disk degrades to counted drops), and never logs
+through itself. `/api/logs/ingest` receives browser records; `/api/logs/export`
+returns a run as a ZIP and relays through the proxy for paired hosts.
+
+Log volume note: chatty third-party loggers are capped in `QUIET_LOGGERS` —
+without that the subnet-scan fallback alone (~500 hosts/cycle via httpcore)
+buries the signal.
 
 ### Firmware Uploader (`src/reacher/uploader/`)
 Wraps `avrdude` to flash Arduino firmware. Handles PyInstaller frozen mode path resolution (`_MEIPASS/hex/`) and streams upload progress via callback. `boards.py` is the board-profile registry — each entry maps a `board_id` to a display name, an Arduino CLI FQBN, and the `avrdude` argument tuple. Adding a new board is a single entry in `BOARD_PROFILES`. Hex resolution prefers package data (`src/reacher/hex/`) as canonical; the GitHub fallback fetches from this repo (`Otis-Lab-MUSC/reacher`, `src/reacher/hex/`) for bare `pip install` hosts.
@@ -122,10 +151,13 @@ Tests use `pytest` with `asyncio_mode=auto` (configured in `pyproject.toml`). Th
 - `tests/test_commands.py` — command registry validation
 - `tests/test_websocket.py` — WebSocket event streaming
 - `tests/test_pin_overrides.py` — pin override persistence, validation, and serial-reconnect replay
+- `tests/test_logging.py` — diagnostic sink, rotation, redaction, crash hooks, ingest/export, end-to-end corr_id trace
+- `tests/conftest.py` — autouse fixture pointing `REACHER_LOG_DIR` at `tmp_path`; **required**, or tests write to the real `~/REACHER/`
 
 ## Docs & Scripts
 
 - `docs/setup-guide.md` — end-user setup walkthrough (host install, pairing, systemd).
+- `docs/logging.md` — diagnostic log: record schema, correlation, `jq` recipes, redaction policy, retrieval.
 - `scripts/install.sh` — host-side installer.
 - `scripts/bump-version.py` — single source of truth for the package version; updates `pyproject.toml`, `src/reacher/__init__.py`, the firmware version strings (`firmware/libraries/REACHERDevices/library.properties` + each sketch's `SendIdentification()`), and the `README.md` version badge + wheel-install example in one shot. Derived spellings are handled automatically — the badge is shields.io-escaped (`3.0.0-alpha.1` → `3.0.0--alpha.1`) and the wheel name is PEP 440 normalized (`3.0.0-alpha.1` → `3.0.0a1`); `--check` (which CI runs against the bare tag) validates all forms. After bumping, recompile firmware hex (`bash firmware/compile.sh`) so the shipped binaries report the new version.
 

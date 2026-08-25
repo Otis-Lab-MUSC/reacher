@@ -15,6 +15,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..middleware.auth import verify_ws_token
 from reacher import pairing
+from ...diagnostics.schema import TIER_API as _TIER_API
+from ...diagnostics.setup import log as _diag_log
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -63,6 +65,10 @@ def _trigger_shutdown():
         return
     _shutdown_scheduled = True
     logger.info("Triggering graceful shutdown (SIGINT to self)")
+    # Without this the watchdog's self-SIGINT looks like a spontaneous death.
+    _diag_log("ws.watchdog_shutdown", tier=_TIER_API, lvl="warn",
+              msg="Watchdog triggering graceful shutdown (SIGINT to self)",
+              src="reacher.api.websocket")
     os.kill(os.getpid(), signal.SIGINT)
 
 
@@ -73,6 +79,9 @@ def _trigger_suspend():
         return
     _server_suspended = True
     logger.info("Watchdog: soft-suspending (no connections for %ds)", _WATCHDOG_TIMEOUT)
+    _diag_log("ws.suspend", tier=_TIER_API, lvl="warn",
+              msg=f"Soft-suspending after {_WATCHDOG_TIMEOUT}s with no connections",
+              src="reacher.api.websocket", idle_s=_WATCHDOG_TIMEOUT)
     for sid in list(_connections.keys()):
         enqueue_event(sid, "server_suspended", {
             "reason": "watchdog_timeout",
@@ -251,6 +260,10 @@ async def _broadcast_worker():
         # Fix: F-004 — Warn all connected clients when events are being dropped
         current_drops = dropped_events()
         if current_drops > _last_warned_drops:
+            _diag_log("ws.events_dropped", tier=_TIER_API, lvl="warn",
+                      msg=f"WebSocket event queue overflow: {current_drops} dropped",
+                      src="reacher.api.websocket", dropped=current_drops,
+                      since_last=current_drops - _last_warned_drops)
             _last_warned_drops = current_drops
             warning_msg = json.dumps({
                 "type": "warning",
@@ -340,6 +353,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     global _had_connections, _last_connection_time, _app_ref, _orphan_task
 
     if not verify_ws_token(websocket):
+        _diag_log("ws.auth_failed", tier=_TIER_API, lvl="warn",
+                  msg=f"Rejected WebSocket for session {session_id}: bad token",
+                  src="reacher.api.websocket", session_id=session_id,
+                  client=getattr(websocket.client, "host", None))
         await websocket.close(code=4001, reason="Unauthorized")
         return
     await websocket.accept()
@@ -359,6 +376,11 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     if _orphan_task is None or _orphan_task.done():
         _orphan_task = asyncio.get_running_loop().create_task(_orphan_cleanup())
     logger.info("WebSocket connected for session %s", session_id)
+    _diag_log("ws.connect", tier=_TIER_API,
+              msg=f"WebSocket connected for session {session_id}",
+              src="reacher.api.websocket", session_id=session_id,
+              connections=total_connections(),
+              client=getattr(websocket.client, "host", None))
 
     # Fix #15: snapshot the current session state to this just-connected client.
     # State transitions (idle->uploading->connected->running) are broadcast as
@@ -406,3 +428,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             _session_disconnect_times[session_id] = time.monotonic()
         _last_connection_time = time.monotonic()
         logger.info("WebSocket disconnected for session %s", session_id)
+        _diag_log("ws.disconnect", tier=_TIER_API,
+                  msg=f"WebSocket disconnected for session {session_id}",
+                  src="reacher.api.websocket", session_id=session_id,
+                  connections=total_connections())

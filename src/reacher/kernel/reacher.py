@@ -12,6 +12,29 @@ from typing import Callable, Dict, List, Optional, Union
 from serial.tools import list_ports
 
 from .commands import build_command_payload, SCHEDULE_TO_PARADIGM
+# Leaf submodules rather than the `diagnostics` package, so importing the kernel
+# never re-enters a partially initialised `reacher/__init__`.
+from ..diagnostics.schema import TIER_WIRE as _TIER_WIRE
+from ..diagnostics.setup import log as _diag_log
+
+
+def _package_version() -> str:
+    """This package's version, resolved lazily.
+
+    Deferred rather than imported at module scope because ``reacher/__init__``
+    imports this module, so the name does not exist yet at import time.
+    """
+    try:
+        from .. import __version__
+
+        return __version__
+    except Exception:
+        return "unknown"
+
+
+#: The firmware's serial input buffer.  Every sketch silently drains commands
+#: longer than this, so the backend detects and reports the truncation.
+_FIRMWARE_RX_BUFFER = 128
 
 _USE_VALUE = object()  # sentinel: use the `value` arg from send_command()
 
@@ -511,8 +534,22 @@ class REACHER:
                         decoded = data.decode(encoding='utf-8', errors='strict').strip()
                     except UnicodeDecodeError:
                         self.logger.warning("Corrupt serial data (non-UTF-8), discarding: %s", data.hex())
+                        _diag_log("serial.rx_corrupt", tier=_TIER_WIRE, lvl="warn",
+                                  src="reacher.kernel", session_id=self.session_id,
+                                  hex=data.hex()[:512])
                         continue
                     self.logger.info(f"Serial data received: {decoded}")
+                    # Verbatim wire record.  Carries session_id but no corr_id:
+                    # this runs on a long-lived daemon thread with no request
+                    # context, and the firmware cannot echo one back.
+                    _diag_log(
+                        "serial.rx",
+                        tier=_TIER_WIRE,
+                        lvl="debug",
+                        src="reacher.kernel",
+                        session_id=self.session_id,
+                        line=decoded,
+                    )
                     # Fix: F-003 — Discard if queue is full; prevents OOM on I/O lag
                     try:
                         self.queue.put_nowait(decoded)
@@ -679,6 +716,31 @@ class REACHER:
                         })
                 except Exception:
                     self.logger.debug("Could not parse firmware version %r", fw_version)
+
+            # The floor check above only catches firmware older than the minimum.
+            # Hex that is above the floor but not what this package ships is the
+            # signature of a stale manual flash, and otherwise passes silently.
+            _pkg_version = _package_version()
+            _mismatch = bool(fw_version) and _pkg_version not in ("", "unknown") and (
+                fw_version.lstrip("v") != _pkg_version
+            )
+            _diag_log(
+                "firmware.identified",
+                tier=_TIER_WIRE,
+                lvl="warn" if _mismatch else "info",
+                msg=(
+                    f"Firmware {fw_version} does not match packaged {_pkg_version}"
+                    if _mismatch
+                    else f"Firmware identified: {fw_version}"
+                ),
+                src="reacher.kernel",
+                session_id=self.session_id,
+                firmware_version=fw_version,
+                package_version=_pkg_version,
+                sketch=event.get("sketch"),
+                baud_rate=event.get("baud_rate"),
+                version_mismatch=_mismatch,
+            )
             # Fix: SER-002 — Verify baud rate matches after firmware identification
             fw_baud = event.get("baud_rate")
             if fw_baud is not None and self.ser.is_open:
@@ -845,6 +907,30 @@ class REACHER:
                 raise Exception("Serial port is not open.")
             send = json.dumps(command).encode() + b'\n'
             self.logger.info(f"Sending command '{send}' to Arduino.")
+            # The firmware reads into a 128-byte buffer and *silently* drains
+            # anything longer (see ParseCommands in each sketch), so an
+            # oversized command is lost with no error on either side.  Surface
+            # it here — this is the only place it can be detected.
+            if len(send) > _FIRMWARE_RX_BUFFER:
+                _diag_log(
+                    "serial.tx_oversize",
+                    tier=_TIER_WIRE,
+                    lvl="warn",
+                    msg=f"Command exceeds firmware {_FIRMWARE_RX_BUFFER}-byte buffer; it will be truncated",
+                    src="reacher.kernel",
+                    session_id=self.session_id,
+                    length=len(send),
+                    limit=_FIRMWARE_RX_BUFFER,
+                    line=send.decode("utf-8", "replace"),
+                )
+            _diag_log(
+                "serial.tx",
+                tier=_TIER_WIRE,
+                lvl="debug",
+                src="reacher.kernel",
+                session_id=self.session_id,
+                line=send.decode("utf-8", "replace").rstrip("\n"),
+            )
             self.ser.write(send)
             self.ser.flush()
             time.sleep(0.05)
