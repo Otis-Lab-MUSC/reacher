@@ -26,7 +26,9 @@ This repository contains Arduino C++ firmware implementing behavioral paradigms 
 - **Variable Interval (VI)** — reward available during a random window within each fixed interval (MEGA only)
 - **Omission** — reward delivered after the animal withholds pressing for a specified duration (MEGA only)
 - **Pavlovian** — classical conditioning with CS+/CS- trials, cues, and probabilistic reward delivery (MEGA only)
-- **Fixed Ratio Lite (FR_LITE)** — UNO-compatible Fixed Ratio without two-photon sync (Microscope/SLM); all other devices identical to FR
+- **Lite variants (FR_LITE, PR_LITE, VI_LITE, OMISSION_LITE)** — UNO-compatible builds of the four operant paradigms without two-photon sync (Microscope/SLM); all other devices and commands identical to their base paradigm
+
+Pavlovian has no lite variant: stripped of Microscope and SLM it still needs 32450 B against the UNO's 32256 B limit, so it remains MEGA-only.
 
 ---
 
@@ -346,10 +348,15 @@ src/reacher/hex/mega/
 └── pavlovian.hex
 
 src/reacher/hex/uno/
-└── fr_lite.hex
+├── fr_lite.hex
+├── pr_lite.hex
+├── vi_lite.hex
+└── omission_lite.hex
 ```
 
-Target boards: `arduino:avr:mega:cpu=atmega2560` (Arduino Mega 2560, ATmega2560) for the five full paradigms, and `arduino:avr:uno` (Arduino UNO, ATmega328P) for fr_lite.
+Target boards: `arduino:avr:mega:cpu=atmega2560` (Arduino Mega 2560, ATmega2560) for the five full paradigms, and `arduino:avr:uno` (Arduino UNO, ATmega328P) for the four `_lite` paradigms.
+
+UNO flash use is tight — the lite builds occupy 91-94% of the available 32256 B — so re-check sizes after any firmware change.
 
 ---
 

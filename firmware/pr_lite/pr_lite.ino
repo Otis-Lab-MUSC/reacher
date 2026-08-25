@@ -1,11 +1,11 @@
 /**
- * @file fr_lite.ino
- * @brief REACHER v3.1.1 Fixed Ratio (FR) lite — Arduino UNO compatible (ATmega328P).
+ * @file pr_lite.ino
+ * @brief REACHER v2.0.0 Progressive Ratio (PR) lite — Arduino UNO compatible (ATmega328P).
  *
- * UNO-only variant of the FR paradigm. Removes two-photon sync (Microscope + SLM)
+ * UNO-only variant of the PR paradigm. Removes two-photon sync (Microscope + SLM)
  * to fit within 32KB flash / 2KB RAM constraints.
- * N active lever presses produce a reward (cue -> pump + laser).
- * The ratio is configurable via serial command (SET_RATIO).
+ * Like FR, but the press threshold increases by a configurable step after each
+ * reward. Uses arithmetic progression (not Richardson & Roberts exponential).
  *
  * **Baud rate:** 115200
  */
@@ -26,7 +26,7 @@
 #include <ReacherHelpers.h>
 #include "Config.h"
 
-// Configurable parameters (updated via serial commands)
+// Configurable parameters
 uint32_t CUE_DURATION       = DEFAULT_CUE_DURATION;
 uint32_t CUE_FREQUENCY      = DEFAULT_CUE_FREQUENCY;
 uint32_t PUMP_DURATION      = DEFAULT_PUMP_DURATION;
@@ -35,6 +35,7 @@ uint32_t LASER_DURATION     = DEFAULT_LASER_DURATION;
 bool     LASER_RH_ONLY_MODE = false;
 DeviceType LASER_LEVER_FILTER = DeviceType::LEVER_RH;  // Lever isolating the laser in RH/LH-only mode (#67)
 uint32_t TIMEOUT_INTERVAL   = DEFAULT_TIMEOUT_INTERVAL;
+uint8_t  PR_STEP            = 1;
 
 // Per-device onset delay shadows (ms) — survive ReconfigureChain()
 uint32_t CUE_ONSET_DELAY   = 0;
@@ -78,6 +79,7 @@ void EndSession();
 void ReconfigureChain();
 void SendIdentification();
 
+
 void onLeverPress(DeviceType source, uint32_t timestamp) {
   scheduler.OnInputEvent(source, timestamp);
 }
@@ -87,7 +89,7 @@ void onLeverRelease(DeviceType source) {
 }
 
 void SendIdentification() {
-  Serial.println(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"sketch\":\"fr_lite.ino\",\"version\":\"v3.4.0-alpha.2\",\"baud_rate\":115200,\"schedule\":\"FIXED_RATIO\"}"));
+  Serial.println(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"sketch\":\"pr_lite.ino\",\"version\":\"v3.4.0-alpha.2\",\"baud_rate\":115200,\"schedule\":\"PROGRESSIVE_RATIO\"}"));
 }
 
 void setup() {
@@ -118,7 +120,7 @@ void setup() {
   lLever.SetActiveLever(false);
 
   scheduler.SetTimeoutInterval(TIMEOUT_INTERVAL);
-  configureFixedRatio(scheduler, cue, cue2, *activePump, laser, 1, DeviceType::LEVER_RH, activePumpTarget);
+  configureProgressiveRatio(scheduler, cue, cue2, *activePump, laser, 1, PR_STEP, DeviceType::LEVER_RH, activePumpTarget);
 
   SendIdentification();
   wdt_enable(WDTO_8S);
@@ -144,7 +146,7 @@ void ReconfigureChain() {
   Trigger* t = scheduler.GetTrigger(0);
   uint8_t currentRatio = t ? t->threshold : 1;
   DeviceType timeoutTarget = (activeLever == &rLever) ? DeviceType::LEVER_RH : DeviceType::LEVER_LH;
-  configureFixedRatio(scheduler, cue, cue2, *activePump, laser, currentRatio, timeoutTarget, activePumpTarget, CUE_SOURCE_FILTER, CUE2_SOURCE_FILTER, PUMP_SOURCE_FILTER, PUMP2_SOURCE_FILTER);
+  configureProgressiveRatio(scheduler, cue, cue2, *activePump, laser, currentRatio, PR_STEP, timeoutTarget, activePumpTarget, CUE_SOURCE_FILTER, CUE2_SOURCE_FILTER, PUMP_SOURCE_FILTER, PUMP2_SOURCE_FILTER);
   {
     Chain* c0 = scheduler.GetChain(0);
     if (c0 && c0->numSteps >= 4) {
@@ -194,7 +196,7 @@ void StartSession() {
 
   Serial.println(F("{\"level\":\"007\",\"device\":\"CONTROLLER\",\"event\":\"START\",\"timestamp\":0}"));
 
-  Serial.print(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"paradigm\":\"FIXED_RATIO\",\"timeout\":"));
+  Serial.print(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"paradigm\":\"PROGRESSIVE_RATIO\",\"timeout\":"));
   Serial.print(TIMEOUT_INTERVAL);
   Serial.print(F(",\"active_lever\":\""));
   Serial.print((activeLever == &rLever) ? F("RH") : F("LH"));
@@ -208,6 +210,10 @@ void StartSession() {
   reportDeviceConfig(F("LICK"), lickCircuit.Armed());
   reportDeviceLever(F("LEVER_RH"), rLever.Armed(), rLever.IsReinforced());
   reportDeviceLever(F("LEVER_LH"), lLever.Armed(), lLever.IsReinforced());
+
+  Serial.print(F("{\"level\":\"000\",\"pr_step\":"));
+  Serial.print(PR_STEP);
+  Serial.println('}');
 }
 
 void EndSession() {
@@ -311,6 +317,13 @@ void ParseCommands() {
           case Cmd::SET_RATIO:
             scheduler.SetRatio(inputJson["ratio"]);
             logParamChange(F("CONTROLLER"), F("ratio"), (uint32_t)inputJson["ratio"]); break;
+          case Cmd::SET_PR_STEP: {
+            PR_STEP = inputJson["step"];
+            Trigger* t = scheduler.GetTrigger(0);
+            if (t) t->prStep = PR_STEP;
+            logParamChange(F("CONTROLLER"), F("pr_step"), (uint32_t)PR_STEP);
+            break;
+          }
           case Cmd::SET_ACTIVE_PUMP: {
             bool usePump2 = inputJson["pump2"] | false;
             activePump = usePump2 ? &pump2 : &pump;
@@ -367,6 +380,7 @@ void ParseCommands() {
             logParamChange(F("CONTROLLER"), F("lever_filter"), (uint32_t)val);
             break;
           }
+
 
           default:
             Serial.println(F("{\"level\":\"006\",\"desc\":\"Command not found\"}"));

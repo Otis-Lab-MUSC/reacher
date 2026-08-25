@@ -20,7 +20,9 @@ from .boards import BOARD_PROFILES, DEFAULT_BOARD, get_board_profile
 
 logger = logging.getLogger(__name__)
 
-PARADIGMS = ("fr", "pr", "vi", "omission", "pavlovian", "fr_lite")
+# Kept in step with kernel.commands.PARADIGMS. Pavlovian has no "_lite"
+# variant — stripped of two-photon support it still overflows UNO flash.
+PARADIGMS = ("fr", "pr", "vi", "omission", "pavlovian", "fr_lite", "pr_lite", "vi_lite", "omission_lite")
 
 # GitHub source for pre-compiled hex files.  Set REACHER_SKIP_HEX_FETCH=1 to
 # disable network fetching (airgapped deployments must pre-populate hex dirs).

@@ -47,27 +47,32 @@ for board in mega; do
     done
 done
 
-# Arduino UNO — lite FR-only build (RAM/flash constrained; see firmware/CLAUDE.md)
+# Arduino UNO — lite builds only (RAM/flash constrained; see firmware/CLAUDE.md).
+# Pavlovian has no lite variant: even stripped of Microscope + SLM it overflows
+# the UNO's 32256-byte limit, so it stays MEGA-only.
 UNO_FQBN="arduino:avr:uno"
 UNO_DIR="$HEX_DIR/uno"
 mkdir -p "$UNO_DIR"
-echo "==> Compiling fr_lite for uno ($UNO_FQBN)..."
-arduino-cli compile \
-    --fqbn "$UNO_FQBN" \
-    --libraries "$LIB_DIR" \
-    --output-dir "$UNO_DIR" \
-    "$SCRIPT_DIR/fr_lite/fr_lite.ino"
 
-if [ -f "$UNO_DIR/fr_lite.ino.hex" ]; then
-    mv "$UNO_DIR/fr_lite.ino.hex" "$UNO_DIR/fr_lite.hex"
-fi
+for sketch in fr_lite pr_lite vi_lite omission_lite; do
+    echo "==> Compiling $sketch for uno ($UNO_FQBN)..."
+    arduino-cli compile \
+        --fqbn "$UNO_FQBN" \
+        --libraries "$LIB_DIR" \
+        --output-dir "$UNO_DIR" \
+        "$SCRIPT_DIR/$sketch/$sketch.ino"
 
-rm -f "$UNO_DIR/fr_lite.ino.elf" "$UNO_DIR/fr_lite.ino.with_bootloader.hex" \
-      "$UNO_DIR/fr_lite.ino.eep" "$UNO_DIR/fr_lite.ino.with_bootloader.bin" \
-      "$UNO_DIR/fr_lite.ino.map"
+    if [ -f "$UNO_DIR/$sketch.ino.hex" ]; then
+        mv "$UNO_DIR/$sketch.ino.hex" "$UNO_DIR/$sketch.hex"
+    fi
 
-echo "    -> $UNO_DIR/fr_lite.hex"
+    rm -f "$UNO_DIR/$sketch.ino.elf" "$UNO_DIR/$sketch.ino.with_bootloader.hex" \
+          "$UNO_DIR/$sketch.ino.eep" "$UNO_DIR/$sketch.ino.with_bootloader.bin" \
+          "$UNO_DIR/$sketch.ino.map"
+
+    echo "    -> $UNO_DIR/$sketch.hex"
+done
 
 echo ""
-echo "All paradigms compiled successfully for MEGA."
+echo "All paradigms compiled successfully (MEGA: full; UNO: lite)."
 ls -lh "$HEX_DIR"/*/*.hex

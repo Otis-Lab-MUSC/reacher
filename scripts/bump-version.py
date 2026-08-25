@@ -92,7 +92,9 @@ VERSION_FILES: list[tuple[Path, str, str, "callable"]] = [
             r"\g<1>{version}\3",
             identity,
         )
-        for sketch in ("fr", "pr", "vi", "omission", "pavlovian", "fr_lite")
+        # Every sketch dir that reports a version over serial, "_lite" twins
+        # included — a missed one silently ships stale version strings.
+        for sketch in sorted(d.name for d in (ROOT / "firmware").iterdir() if (d / f"{d.name}.ino").exists())
     ],
     # README version badge (shields.io escapes '-' as '--').
     (

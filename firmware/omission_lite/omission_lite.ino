@@ -1,11 +1,11 @@
 /**
- * @file fr_lite.ino
- * @brief REACHER v3.1.1 Fixed Ratio (FR) lite — Arduino UNO compatible (ATmega328P).
+ * @file omission_lite.ino
+ * @brief REACHER v2.0.0 Omission lite — Arduino UNO compatible (ATmega328P).
  *
- * UNO-only variant of the FR paradigm. Removes two-photon sync (Microscope + SLM)
+ * UNO-only variant of the Omission paradigm. Removes two-photon sync (Microscope + SLM)
  * to fit within 32KB flash / 2KB RAM constraints.
- * N active lever presses produce a reward (cue -> pump + laser).
- * The ratio is configurable via serial command (SET_RATIO).
+ * Reward fires after the animal withholds lever pressing for a configurable
+ * absence interval. Any press resets the timer. No timeout is applied.
  *
  * **Baud rate:** 115200
  */
@@ -26,15 +26,14 @@
 #include <ReacherHelpers.h>
 #include "Config.h"
 
-// Configurable parameters (updated via serial commands)
+// Configurable parameters
 uint32_t CUE_DURATION       = DEFAULT_CUE_DURATION;
 uint32_t CUE_FREQUENCY      = DEFAULT_CUE_FREQUENCY;
 uint32_t PUMP_DURATION      = DEFAULT_PUMP_DURATION;
 uint8_t  LASER_FREQUENCY    = DEFAULT_LASER_FREQUENCY;
 uint32_t LASER_DURATION     = DEFAULT_LASER_DURATION;
 bool     LASER_RH_ONLY_MODE = false;
-DeviceType LASER_LEVER_FILTER = DeviceType::LEVER_RH;  // Lever isolating the laser in RH/LH-only mode (#67)
-uint32_t TIMEOUT_INTERVAL   = DEFAULT_TIMEOUT_INTERVAL;
+uint32_t OMISSION_INTERVAL  = 20000;
 
 // Per-device onset delay shadows (ms) — survive ReconfigureChain()
 uint32_t CUE_ONSET_DELAY   = 0;
@@ -78,6 +77,7 @@ void EndSession();
 void ReconfigureChain();
 void SendIdentification();
 
+
 void onLeverPress(DeviceType source, uint32_t timestamp) {
   scheduler.OnInputEvent(source, timestamp);
 }
@@ -87,7 +87,7 @@ void onLeverRelease(DeviceType source) {
 }
 
 void SendIdentification() {
-  Serial.println(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"sketch\":\"fr_lite.ino\",\"version\":\"v3.4.0-alpha.2\",\"baud_rate\":115200,\"schedule\":\"FIXED_RATIO\"}"));
+  Serial.println(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"sketch\":\"omission_lite.ino\",\"version\":\"v3.4.0-alpha.2\",\"baud_rate\":115200,\"schedule\":\"OMISSION\"}"));
 }
 
 void setup() {
@@ -117,8 +117,9 @@ void setup() {
   rLever.SetActiveLever(true);
   lLever.SetActiveLever(false);
 
-  scheduler.SetTimeoutInterval(TIMEOUT_INTERVAL);
-  configureFixedRatio(scheduler, cue, cue2, *activePump, laser, 1, DeviceType::LEVER_RH, activePumpTarget);
+  // Omission has no timeout
+  scheduler.SetTimeoutInterval(0);
+  configureOmission(scheduler, cue, cue2, *activePump, laser, OMISSION_INTERVAL, activePumpTarget);
 
   SendIdentification();
   wdt_enable(WDTO_8S);
@@ -141,20 +142,17 @@ void loop() {
 }
 
 void ReconfigureChain() {
-  Trigger* t = scheduler.GetTrigger(0);
-  uint8_t currentRatio = t ? t->threshold : 1;
-  DeviceType timeoutTarget = (activeLever == &rLever) ? DeviceType::LEVER_RH : DeviceType::LEVER_LH;
-  configureFixedRatio(scheduler, cue, cue2, *activePump, laser, currentRatio, timeoutTarget, activePumpTarget, CUE_SOURCE_FILTER, CUE2_SOURCE_FILTER, PUMP_SOURCE_FILTER, PUMP2_SOURCE_FILTER);
+  configureOmission(scheduler, cue, cue2, *activePump, laser, OMISSION_INTERVAL, activePumpTarget, CUE_SOURCE_FILTER, CUE2_SOURCE_FILTER, PUMP_SOURCE_FILTER, PUMP2_SOURCE_FILTER);
   {
     Chain* c0 = scheduler.GetChain(0);
     if (c0 && c0->numSteps >= 4) {
       uint32_t pd = (activePump == &pump2) ? PUMP2_ONSET_DELAY : PUMP_ONSET_DELAY;
       // Each device's offset originates from press onset via its own delay only —
       // no device's timing depends on another device's onset/duration.
-      c0->steps[0].offsetMs += CUE_ONSET_DELAY;
-      c0->steps[1].offsetMs += CUE_ONSET_DELAY;
-      c0->steps[2].offsetMs += pd;
-      c0->steps[3].offsetMs += laser.OnsetDelay();
+      c0->steps[0].offsetMs = CUE_ONSET_DELAY;
+      c0->steps[1].offsetMs = CUE_ONSET_DELAY;
+      c0->steps[2].offsetMs = pd;
+      c0->steps[3].offsetMs = laser.OnsetDelay();
     }
   }
   if (LASER_RH_ONLY_MODE) {
@@ -169,7 +167,7 @@ void ReconfigureChain() {
       t1->initialThreshold = 1;
       t1->pressCount = 0;
       t1->prStep = 0;
-      t1->sourceFilter = LASER_LEVER_FILTER;
+      t1->sourceFilter = DeviceType::LEVER_RH;
       t1->probability = 100;
     }
     Chain* c1 = scheduler.GetChain(1);
@@ -194,9 +192,7 @@ void StartSession() {
 
   Serial.println(F("{\"level\":\"007\",\"device\":\"CONTROLLER\",\"event\":\"START\",\"timestamp\":0}"));
 
-  Serial.print(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"paradigm\":\"FIXED_RATIO\",\"timeout\":"));
-  Serial.print(TIMEOUT_INTERVAL);
-  Serial.print(F(",\"active_lever\":\""));
+  Serial.print(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"paradigm\":\"OMISSION\",\"active_lever\":\""));
   Serial.print((activeLever == &rLever) ? F("RH") : F("LH"));
   Serial.println(F("\"}"));
 
@@ -208,6 +204,10 @@ void StartSession() {
   reportDeviceConfig(F("LICK"), lickCircuit.Armed());
   reportDeviceLever(F("LEVER_RH"), rLever.Armed(), rLever.IsReinforced());
   reportDeviceLever(F("LEVER_LH"), lLever.Armed(), lLever.IsReinforced());
+
+  Serial.print(F("{\"level\":\"000\",\"omission_interval\":"));
+  Serial.print(OMISSION_INTERVAL);
+  Serial.println('}');
 }
 
 void EndSession() {
@@ -266,24 +266,17 @@ void ParseCommands() {
           case Cmd::PUMP_SET_ONSET_DELAY:
           case Cmd::PUMP2_SET_ONSET_DELAY: {
             uint32_t d = (uint32_t)inputJson["delay"]; if (d > 600000) d = 600000;
-            if      (command == Cmd::LASER_SET_ONSET_DELAY) { laser.SetOnsetDelay(d); ReconfigureChain(); }
+            if      (command == Cmd::LASER_SET_ONSET_DELAY) { laser.SetOnsetDelay(d); if (LASER_RH_ONLY_MODE) ReconfigureChain(); }
             else if (command == Cmd::CUE_SET_ONSET_DELAY)   { CUE_ONSET_DELAY = d;   ReconfigureChain(); }
             else if (command == Cmd::CUE2_SET_ONSET_DELAY)  { /* cue2 uses CUE_ONSET_DELAY; no separate CUE2_ONSET_DELAY shadow yet */ }
             else if (command == Cmd::PUMP_SET_ONSET_DELAY)  { PUMP_ONSET_DELAY = d;  ReconfigureChain(); }
             else                                             { PUMP2_ONSET_DELAY = d; ReconfigureChain(); }
             break;
           }
-          case Cmd::LASER_TRIGGER_RH_ONLY: LASER_RH_ONLY_MODE = true; LASER_LEVER_FILTER = DeviceType::LEVER_RH; ReconfigureChain(); break;
-          case Cmd::LASER_TRIGGER_LH_ONLY: LASER_RH_ONLY_MODE = true; LASER_LEVER_FILTER = DeviceType::LEVER_LH; ReconfigureChain(); break;
+          case Cmd::LASER_TRIGGER_RH_ONLY: LASER_RH_ONLY_MODE = true; ReconfigureChain(); break;
           // RH lever commands
           case Cmd::LEVER_RH_ARM:          rLever.ArmToggle(true); break;
           case Cmd::LEVER_RH_DISARM:       rLever.ArmToggle(false); break;
-          case Cmd::LEVER_RH_SET_TIMEOUT:
-            TIMEOUT_INTERVAL = inputJson["timeout"]; scheduler.SetTimeoutInterval(TIMEOUT_INTERVAL);
-            logParamChange(F("LEVER_RH"), F("timeout"), TIMEOUT_INTERVAL); break;
-          case Cmd::LEVER_RH_SET_RATIO:
-            scheduler.SetRatio(inputJson["ratio"]);
-            logParamChange(F("LEVER_RH"), F("ratio"), (uint32_t)inputJson["ratio"]); break;
           case Cmd::LEVER_RH_SET_ACTIVE:
             rLever.SetActiveLever(true); activeLever = &rLever;
             logParamChange(F("LEVER_RH"), F("reinforced"), true); break;
@@ -294,12 +287,6 @@ void ParseCommands() {
           // LH lever commands
           case Cmd::LEVER_LH_ARM:          lLever.ArmToggle(true); break;
           case Cmd::LEVER_LH_DISARM:       lLever.ArmToggle(false); break;
-          case Cmd::LEVER_LH_SET_TIMEOUT:
-            TIMEOUT_INTERVAL = inputJson["timeout"]; scheduler.SetTimeoutInterval(TIMEOUT_INTERVAL);
-            logParamChange(F("LEVER_LH"), F("timeout"), TIMEOUT_INTERVAL); break;
-          case Cmd::LEVER_LH_SET_RATIO:
-            scheduler.SetRatio(inputJson["ratio"]);
-            logParamChange(F("LEVER_LH"), F("ratio"), (uint32_t)inputJson["ratio"]); break;
           case Cmd::LEVER_LH_SET_ACTIVE:
             lLever.SetActiveLever(true); activeLever = &lLever;
             logParamChange(F("LEVER_LH"), F("reinforced"), true); break;
@@ -308,9 +295,6 @@ void ParseCommands() {
             logParamChange(F("LEVER_LH"), F("reinforced"), false); break;
 
           // Session setup commands
-          case Cmd::SET_RATIO:
-            scheduler.SetRatio(inputJson["ratio"]);
-            logParamChange(F("CONTROLLER"), F("ratio"), (uint32_t)inputJson["ratio"]); break;
           case Cmd::SET_ACTIVE_PUMP: {
             bool usePump2 = inputJson["pump2"] | false;
             activePump = usePump2 ? &pump2 : &pump;
@@ -319,6 +303,9 @@ void ParseCommands() {
             logParamChange(F("CONTROLLER"), F("active_pump"), usePump2 ? F("PUMP2") : F("PUMP"));
             break;
           }
+          case Cmd::SET_OMISSION_INTERVAL:
+            OMISSION_INTERVAL = inputJson["interval"]; ReconfigureChain();
+            logParamChange(F("CONTROLLER"), F("omission_interval"), OMISSION_INTERVAL); break;
 
           // Controller commands
           case Cmd::SESSION_START:
@@ -367,6 +354,7 @@ void ParseCommands() {
             logParamChange(F("CONTROLLER"), F("lever_filter"), (uint32_t)val);
             break;
           }
+
 
           default:
             Serial.println(F("{\"level\":\"006\",\"desc\":\"Command not found\"}"));

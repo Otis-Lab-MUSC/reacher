@@ -3,6 +3,7 @@
 import pytest
 from reacher.kernel.commands import (
     COMMAND_REGISTRY,
+    LITE_PARADIGMS,
     CommandCode,
     CommandSpec,
     PARADIGMS,
@@ -120,46 +121,74 @@ class TestGetCommandsForParadigm:
             assert 1374 in cmds, f"LEVER_LH_SET_TIMEOUT must be available for {paradigm}"
 
 
-class TestFrLiteParadigm:
-    """fr_lite behaves exactly like fr, minus two-photon hardware (microscope, SLM)."""
+TWO_PHOTON_CODES = [900, 901, 903, 976, 1100, 1101, 1102, 1103, 1176]
 
-    def test_fr_lite_is_a_known_paradigm(self):
-        assert "fr_lite" in PARADIGMS
+# The one paradigm-defining parameter each schedule cannot work without.
+PARADIGM_PARAM_CODE = {"pr": 205, "vi": 204, "omission": 203}
 
-    def test_microscope_excluded(self):
-        cmds = get_commands_for_paradigm("fr_lite")
-        for code in [900, 901, 903, 976]:
-            assert code not in cmds, f"Microscope code {code} must not be available for fr_lite"
 
-    def test_slm_excluded(self):
-        cmds = get_commands_for_paradigm("fr_lite")
-        for code in [1100, 1101, 1102, 1103, 1176]:
-            assert code not in cmds, f"SLM code {code} must not be available for fr_lite"
+@pytest.mark.parametrize("lite", LITE_PARADIGMS)
+class TestLiteParadigms:
+    """A "_lite" paradigm behaves exactly like its base, minus two-photon hardware."""
 
-    def test_ratio_included(self):
-        cmds = get_commands_for_paradigm("fr_lite")
-        for code in [201, 1075, 1375]:
-            assert code in cmds, f"Ratio code {code} must be available for fr_lite"
+    def test_is_a_known_paradigm(self, lite):
+        assert lite in PARADIGMS
 
-    def test_laser_included(self):
-        cmds = get_commands_for_paradigm("fr_lite")
+    def test_two_photon_excluded(self, lite):
+        cmds = get_commands_for_paradigm(lite)
+        for code in TWO_PHOTON_CODES:
+            assert code not in cmds, f"Two-photon code {code} must not be available for {lite}"
+
+    def test_is_exactly_its_base_minus_two_photon(self, lite):
+        """The load-bearing invariant: stripping 2P must not cost anything else.
+
+        Guards against a lite paradigm being silently omitted from a command's
+        ``paradigms`` list, which would leave the board unable to be configured.
+        """
+        base = lite.removesuffix("_lite")
+        expected = set(get_commands_for_paradigm(base)) - set(TWO_PHOTON_CODES)
+        assert set(get_commands_for_paradigm(lite)) == expected
+
+    def test_laser_included(self, lite):
+        cmds = get_commands_for_paradigm(lite)
         for code in [600, 601, 603, 671, 672, 673, 676, 681, 682, 684, 685]:
-            assert code in cmds, f"Laser code {code} must be available for fr_lite"
+            assert code in cmds, f"Laser code {code} must be available for {lite}"
 
-    def test_general_devices_included(self):
-        cmds = get_commands_for_paradigm("fr_lite")
+    def test_general_devices_included(self, lite):
+        cmds = get_commands_for_paradigm(lite)
         for code in [300, 301, 400, 401, 500, 501, 1000, 1001, 1300, 1301]:
-            assert code in cmds, f"General device code {code} must be available for fr_lite"
+            assert code in cmds, f"General device code {code} must be available for {lite}"
 
-    def test_pavlovian_only_excluded(self):
-        cmds = get_commands_for_paradigm("fr_lite")
+    def test_pavlovian_only_excluded(self, lite):
+        cmds = get_commands_for_paradigm(lite)
         for code in [206, 207, 691, 692]:
-            assert code not in cmds, f"Pavlovian-only code {code} must not be available for fr_lite"
+            assert code not in cmds, f"Pavlovian-only code {code} must not be available for {lite}"
 
-    def test_microscope_still_available_for_full_fr(self):
-        cmds = get_commands_for_paradigm("fr")
-        for code in [900, 901, 903, 976, 1100, 1101]:
-            assert code in cmds, f"Code {code} must still be available for full fr paradigm"
+    def test_defining_parameter_included(self, lite):
+        """vi_lite must still set its interval, pr_lite its step, etc."""
+        base = lite.removesuffix("_lite")
+        code = PARADIGM_PARAM_CODE.get(base)
+        if code is None:
+            pytest.skip(f"{base} has no single defining parameter command")
+        assert code in get_commands_for_paradigm(lite)
+
+
+class TestLiteParadigmCoverage:
+    def test_pavlovian_has_no_lite_variant(self):
+        """Pavlovian overflows UNO flash even stripped — it must stay MEGA-only."""
+        assert "pavlovian_lite" not in PARADIGMS
+
+    def test_ratio_included_for_ratio_paradigms(self):
+        for lite in ("fr_lite", "pr_lite"):
+            cmds = get_commands_for_paradigm(lite)
+            for code in [201, 1075, 1375]:
+                assert code in cmds, f"Ratio code {code} must be available for {lite}"
+
+    def test_two_photon_still_available_for_full_paradigms(self):
+        for paradigm in ("fr", "pr", "vi", "omission", "pavlovian"):
+            cmds = get_commands_for_paradigm(paradigm)
+            for code in [900, 901, 903, 976, 1100, 1101]:
+                assert code in cmds, f"Code {code} must still be available for {paradigm}"
 
 
 class TestBuildCommandPayload:

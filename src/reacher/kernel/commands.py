@@ -143,13 +143,30 @@ class CommandCode(IntEnum):
     LEVER_LH_SET_ACTIVE = 1381
 
 
+# Base paradigms that ship a "_lite" (two-photon-stripped) UNO variant.
+# Pavlovian has none: even without Microscope + SLM it overflows the UNO's
+# 32256-byte flash budget, so it stays MEGA-only.
+LITE_CAPABLE_PARADIGMS = ("fr", "pr", "vi", "omission")
+LITE_PARADIGMS = tuple(f"{p}_lite" for p in LITE_CAPABLE_PARADIGMS)
+
 # Paradigm identifiers used throughout the system
-PARADIGMS = ("fr", "pr", "vi", "omission", "pavlovian", "fr_lite")
+PARADIGMS = ("fr", "pr", "vi", "omission", "pavlovian") + LITE_PARADIGMS
 ALL_PARADIGMS = list(PARADIGMS)
 
 # Paradigms with two-photon hardware (microscope, SLM) available. "_lite"
 # paradigms run on boards (e.g. UNO) that lack that hardware entirely.
 NON_LITE_PARADIGMS = [p for p in ALL_PARADIGMS if not p.endswith("_lite")]
+
+
+def with_lite(*paradigms: str) -> List[str]:
+    """Expand base paradigm names to also cover their "_lite" variants.
+
+    A lite board runs the same paradigm on hardware without two-photon sync, so
+    it must be offered every command of its base paradigm. Declaring support as
+    ``with_lite("fr", "pr")`` keeps the two in step automatically, rather than
+    relying on each of the ~26 command specs below to spell out both.
+    """
+    return list(paradigms) + [f"{p}_lite" for p in paradigms if p in LITE_CAPABLE_PARADIGMS]
 
 SCHEDULE_TO_PARADIGM: Dict[str, str] = {
     "FIXED_RATIO": "fr",
@@ -208,7 +225,7 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.SET_RATIO, "SET_RATIO",
         "Set the fixed/progressive ratio",
         payload_key="ratio", payload_type="int",
-        paradigms=["fr", "pr", "fr_lite"],
+        paradigms=with_lite("fr", "pr"),
     ),
     202: CommandSpec(
         CommandCode.SET_PARADIGM, "SET_PARADIGM",
@@ -219,19 +236,19 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.SET_OMISSION_INTERVAL, "SET_OMISSION_INTERVAL",
         "Set omission interval (ms)",
         payload_key="interval", payload_type="int",
-        paradigms=["omission"],
+        paradigms=with_lite("omission"),
     ),
     204: CommandSpec(
         CommandCode.SET_VI_INTERVAL, "SET_VI_INTERVAL",
         "Set variable interval (ms)",
         payload_key="interval", payload_type="int",
-        paradigms=["vi"],
+        paradigms=with_lite("vi"),
     ),
     205: CommandSpec(
         CommandCode.SET_PR_STEP, "SET_PR_STEP",
         "Set progressive ratio step size",
         payload_key="step", payload_type="int",
-        paradigms=["pr"],
+        paradigms=with_lite("pr"),
     ),
 
     # --- Pavlovian Parameters ---
@@ -323,7 +340,7 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.SET_ACTIVE_PUMP, "SET_ACTIVE_PUMP",
         "Select which pump fires in the reward chain (pump2=false → primary, pump2=true → secondary)",
         payload_key="pump2", payload_type="bool",
-        paradigms=["fr", "pr", "vi", "omission", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission"),
     ),
 
     # --- Cue ---
@@ -410,13 +427,13 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.CUE_SET_ONSET_DELAY, "CUE_SET_ONSET_DELAY",
         "Set primary cue onset delay from trigger (ms)",
         payload_key="delay", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission"),
     ),
     378: CommandSpec(
         CommandCode.CUE_SET_LEVER_FILTER, "CUE_SET_LEVER_FILTER",
         "Set primary cue lever routing filter (0=any, 1=RH_only, 2=LH_only)",
         payload_key="filter", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission"),
     ),
     386: CommandSpec(
         CommandCode.CUE2_SET_PIN, "CUE2_SET_PIN",
@@ -427,13 +444,13 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.CUE2_SET_ONSET_DELAY, "CUE2_SET_ONSET_DELAY",
         "Set secondary cue onset delay (stored; cue2 absent from operant chains)",
         payload_key="delay", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission"),
     ),
     388: CommandSpec(
         CommandCode.CUE2_SET_LEVER_FILTER, "CUE2_SET_LEVER_FILTER",
         "Set secondary cue lever routing filter (0=any, 1=RH_only, 2=LH_only)",
         payload_key="filter", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission"),
     ),
 
     # --- Pump ---
@@ -486,13 +503,13 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.PUMP_SET_ONSET_DELAY, "PUMP_SET_ONSET_DELAY",
         "Set primary pump onset delay from reward-window start (ms)",
         payload_key="delay", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission"),
     ),
     478: CommandSpec(
         CommandCode.PUMP_SET_LEVER_FILTER, "PUMP_SET_LEVER_FILTER",
         "Set primary pump lever routing filter (0=any, 1=RH_only, 2=LH_only)",
         payload_key="filter", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission"),
     ),
     486: CommandSpec(
         CommandCode.PUMP2_SET_PIN, "PUMP2_SET_PIN",
@@ -503,13 +520,13 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.PUMP2_SET_ONSET_DELAY, "PUMP2_SET_ONSET_DELAY",
         "Set secondary pump onset delay from reward-window start (ms)",
         payload_key="delay", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission"),
     ),
     488: CommandSpec(
         CommandCode.PUMP2_SET_LEVER_FILTER, "PUMP2_SET_LEVER_FILTER",
         "Set secondary pump lever routing filter (0=any, 1=RH_only, 2=LH_only)",
         payload_key="filter", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission"),
     ),
 
     # --- Lick Circuit ---
@@ -531,61 +548,61 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     600: CommandSpec(
         CommandCode.LASER_DISARM, "LASER_DISARM",
         "Disarm optogenetic laser",
-        paradigms=["fr", "pr", "vi", "omission", "pavlovian", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission", "pavlovian"),
     ),
     601: CommandSpec(
         CommandCode.LASER_ARM, "LASER_ARM",
         "Arm optogenetic laser",
-        paradigms=["fr", "pr", "vi", "omission", "pavlovian", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission", "pavlovian"),
     ),
     603: CommandSpec(
         CommandCode.LASER_TEST, "LASER_TEST",
         "Test optogenetic laser",
-        paradigms=["fr", "pr", "vi", "omission", "pavlovian", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission", "pavlovian"),
     ),
     671: CommandSpec(
         CommandCode.LASER_SET_FREQUENCY, "LASER_SET_FREQUENCY",
         "Set laser frequency (Hz)",
         payload_key="frequency", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission", "pavlovian", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission", "pavlovian"),
     ),
     672: CommandSpec(
         CommandCode.LASER_SET_DURATION, "LASER_SET_DURATION",
         "Set laser pulse duration (ms)",
         payload_key="duration", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission", "pavlovian", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission", "pavlovian"),
     ),
     673: CommandSpec(
         CommandCode.LASER_SET_ONSET_DELAY, "LASER_SET_ONSET_DELAY",
         "Set laser onset delay (ms) from trigger onset",
         payload_key="delay", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission", "pavlovian", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission", "pavlovian"),
     ),
     681: CommandSpec(
         CommandCode.LASER_MODE_CONTINGENT, "LASER_MODE_CONTINGENT",
         "Set laser to contingent mode (triggered by lever press)",
-        paradigms=["fr", "pr", "vi", "omission", "pavlovian", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission", "pavlovian"),
     ),
     682: CommandSpec(
         CommandCode.LASER_MODE_INDEPENDENT, "LASER_MODE_INDEPENDENT",
         "Set laser to independent mode (free-running)",
-        paradigms=["fr", "pr", "vi", "omission", "pavlovian", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission", "pavlovian"),
     ),
     684: CommandSpec(
         CommandCode.LASER_TRIGGER_RH_ONLY, "LASER_TRIGGER_RH_ONLY",
         "Set laser to RH-lever-only mode (fires on RH press, no cue, no pump)",
-        paradigms=["fr", "pr", "vi", "omission", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission"),
     ),
     685: CommandSpec(
         CommandCode.LASER_TRIGGER_LH_ONLY, "LASER_TRIGGER_LH_ONLY",
         "Set laser to LH-lever-only mode (fires on LH press, no cue, no pump)",
-        paradigms=["fr", "pr", "vi", "omission", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission"),
     ),
     676: CommandSpec(
         CommandCode.LASER_SET_PIN, "LASER_SET_PIN",
         "Reassign the laser PWM output pin",
         payload_key="pin", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission", "pavlovian", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission", "pavlovian"),
     ),
     691: CommandSpec(
         CommandCode.PAV_LASER_CS_PLUS, "PAV_LASER_CS_PLUS",
@@ -649,13 +666,13 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.LEVER_RH_SET_TIMEOUT, "LEVER_RH_SET_TIMEOUT",
         "Set right-hand lever timeout (ms)",
         payload_key="timeout", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission"),
     ),
     1075: CommandSpec(
         CommandCode.LEVER_RH_SET_RATIO, "LEVER_RH_SET_RATIO",
         "Set right-hand lever ratio",
         payload_key="ratio", payload_type="int",
-        paradigms=["fr", "pr", "fr_lite"],
+        paradigms=with_lite("fr", "pr"),
     ),
     1080: CommandSpec(
         CommandCode.LEVER_RH_SET_INACTIVE, "LEVER_RH_SET_INACTIVE",
@@ -684,13 +701,13 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.LEVER_LH_SET_TIMEOUT, "LEVER_LH_SET_TIMEOUT",
         "Set left-hand lever timeout (ms)",
         payload_key="timeout", payload_type="int",
-        paradigms=["fr", "pr", "vi", "omission", "fr_lite"],
+        paradigms=with_lite("fr", "pr", "vi", "omission"),
     ),
     1375: CommandSpec(
         CommandCode.LEVER_LH_SET_RATIO, "LEVER_LH_SET_RATIO",
         "Set left-hand lever ratio",
         payload_key="ratio", payload_type="int",
-        paradigms=["fr", "pr", "fr_lite"],
+        paradigms=with_lite("fr", "pr"),
     ),
     1380: CommandSpec(
         CommandCode.LEVER_LH_SET_INACTIVE, "LEVER_LH_SET_INACTIVE",

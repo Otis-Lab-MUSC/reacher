@@ -11,6 +11,8 @@ import threading
 import logging
 from typing import Optional
 
+from .commands import LITE_CAPABLE_PARADIGMS
+
 logger = logging.getLogger(__name__)
 
 # PR step sequence: 1, 2, 4, 6, 9, 12, 15, 20, 25, 32, 40, 50, 62, 77, 95, ...
@@ -22,8 +24,11 @@ PARADIGM_TO_SCHEDULE = {
     "vi": "VARIABLE_INTERVAL",
     "omission": "OMISSION",
     "pavlovian": "PAVLOVIAN",
-    "fr_lite": "FIXED_RATIO",
 }
+# A "_lite" board runs the same schedule as its base paradigm — only the
+# two-photon hardware is absent — so mirror the base entry rather than
+# restating it per variant.
+PARADIGM_TO_SCHEDULE.update({f"{p}_lite": PARADIGM_TO_SCHEDULE[p] for p in LITE_CAPABLE_PARADIGMS})
 
 SCHEDULE_TO_SKETCH = {
     "FIXED_RATIO": "fr.ino",

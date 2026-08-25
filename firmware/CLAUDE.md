@@ -2,14 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Operant-conditioning firmware for Arduino Mega 2560 (ATmega2560, 8 KB RAM, 256 KB flash). Five sketches share one C++ library and produce five `.hex` files consumed by the REACHER backend.
+Operant-conditioning firmware for Arduino Mega 2560 (ATmega2560, 8 KB RAM, 256 KB flash). Five paradigm sketches share one C++ library and produce five `.hex` files consumed by the REACHER backend. Four of them also ship a `_lite` variant for the Arduino UNO (ATmega328P, 2 KB RAM / 32256 B usable flash) with two-photon support (Microscope + SLM) stripped out.
 
 This `firmware/` tree lives inside the `reacher` repo (folded in from the now-archived `Otis-Lab-MUSC/reacher-firmware`). `compile.sh` writes hex artifacts up into the backend package-data directory `../src/reacher/hex/<board>/`, which is committed and shipped in the `reacher` wheel. For the wider Workbench (paradigm names, command-code ranges, event levels, serial framing), see `../../CLAUDE.md` (workspace) and `../CLAUDE.md` (backend). The README.md here is the canonical reference for hardware pinout, paradigm semantics, command-code list, and Pavlovian parameters — read it before authoring any sketch-level changes.
 
 ## Commands
 
 ```bash
-./compile.sh                        # builds all 5 paradigms (mega) + fr_lite (uno) -> ../src/reacher/hex/{mega,uno}/<paradigm>.hex
+./compile.sh                        # builds 5 paradigms (mega) + 4 _lite paradigms (uno) -> ../src/reacher/hex/{mega,uno}/<paradigm>.hex
 arduino-cli core install arduino:avr  # one-time: install AVR toolchain
 doxygen Doxyfile                    # regenerate docs/ (git-ignored)
 
@@ -21,7 +21,7 @@ arduino-cli compile --fqbn arduino:avr:mega:cpu=atmega2560 --libraries libraries
 arduino-cli upload -p /dev/ttyUSB0 --fqbn arduino:avr:mega:cpu=atmega2560 --input-file ../src/reacher/hex/mega/fr.hex
 ```
 
-There is no Arduino-side test framework — verification is done in-loop on hardware. From the backend, `tests/test_command_parity.py` asserts `Commands.h` matches the Python `CommandCode` enum. The committed `../src/reacher/hex/<board>/*.hex` files are tracked artifacts the backend ships; **recompile and commit them** when firmware logic or library code changes (run `bash compile.sh`). The `uno/` hex set includes the new `fr_lite.hex` (built by compile.sh); the legacy uno hex artifacts for the five full paradigms (fr.hex, pr.hex, vi.hex, omission.hex, pavlovian.hex) are left untouched in `uno/` for backwards compatibility.
+There is no Arduino-side test framework — verification is done in-loop on hardware. From the backend, `tests/test_command_parity.py` asserts `Commands.h` matches the Python `CommandCode` enum. The committed `../src/reacher/hex/<board>/*.hex` files are tracked artifacts the backend ships; **recompile and commit them** when firmware logic or library code changes (run `bash compile.sh`). The `uno/` hex set is built from the four `_lite` sketches (`fr_lite`, `pr_lite`, `vi_lite`, `omission_lite`); the legacy uno hex artifacts for the five full paradigms (fr.hex, pr.hex, vi.hex, omission.hex, pavlovian.hex) are left untouched in `uno/` for backwards compatibility. Those legacy files can no longer be regenerated — every full sketch now overflows UNO flash — and `FirmwareUploader.list_available("uno")` filters them out.
 
 **Versioning is coupled to the `reacher` package version.** `library.properties` and each sketch's `SendIdentification()` version string are stamped by `../scripts/bump-version.py`; after a bump, recompile the hex so the shipped binaries report the new version.
 
@@ -83,6 +83,9 @@ The library exposes per-device pin reassignment via the `*_SET_PIN` family (all 
 ## Conventions
 
 - **Memory**: avoid `String`, prefer `F("...")` flash strings for all literal serial output, keep new arrays inside the existing `MAX_*` budgets. Target board is Mega 2560 (ATmega2560, 8 KB RAM / 256 KB flash).
+- **UNO flash headroom is thin.** The `_lite` builds land at 91-94% of the UNO's 32256 B. Adding a command or device can push them over, and the failure only shows at compile time for UNO. After any library or sketch change, check the `_lite` sizes:
+  `arduino-cli compile --fqbn arduino:avr:uno --libraries libraries fr_lite/fr_lite.ino`
+- **Lite variants are hand-maintained copies.** A change to a paradigm sketch usually has to be mirrored into its `_lite` twin — 9 sketches, not 5. The `_lite` files differ from their base only by the two-photon strip, so `diff fr/fr.ino fr_lite/fr_lite.ino` should show nothing else.
 - **Serial**: print one JSON object per line, terminated with `\n`. Use the existing level conventions (`000` config / `001` state / `006` error / `007` behavioral / `008` frame).
 - **Versioning**: `library.properties` and the `version` field in each sketch's `SendIdentification()` must match — both are stamped from the `reacher` package version by `../scripts/bump-version.py`. Do not hand-edit; recompile hex after a bump.
 - **Hex artifacts**: `hex/mega/<paradigm>.hex` is committed. The companion `*.ino.eep` and `*.ino.with_bootloader.bin` files are also tracked (`.gitignore` does not exclude them); leave them in place unless you are recompiling.

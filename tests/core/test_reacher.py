@@ -544,12 +544,18 @@ def test_get_detected_paradigm(reacher):
     assert reacher.get_detected_paradigm() == "fr"
 
 
-def test_get_detected_paradigm_lite_sketch(reacher):
-    """fr_lite reports the same schedule as fr — only the sketch name distinguishes it."""
+@pytest.mark.parametrize("schedule,sketch,expected", [
+    ("FIXED_RATIO", "fr_lite.ino", "fr_lite"),
+    ("PROGRESSIVE_RATIO", "pr_lite.ino", "pr_lite"),
+    ("VARIABLE_INTERVAL", "vi_lite.ino", "vi_lite"),
+    ("OMISSION", "omission_lite.ino", "omission_lite"),
+])
+def test_get_detected_paradigm_lite_sketch(reacher, schedule, sketch, expected):
+    """A lite build reports the same schedule as its base — only the sketch name distinguishes it."""
     reacher.firmware_information = {
-        "schedule": "FIXED_RATIO", "device": "CONTROLLER", "sketch": "fr_lite.ino",
+        "schedule": schedule, "device": "CONTROLLER", "sketch": sketch,
     }
-    assert reacher.get_detected_paradigm() == "fr_lite"
+    assert reacher.get_detected_paradigm() == expected
 
 
 def test_get_detected_paradigm_full_sketch_unaffected(reacher):
