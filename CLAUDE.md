@@ -48,6 +48,10 @@ python -m build
 | `REACHER_LOG_DIR` | `~/REACHER/LOG/runs` | Diagnostic run-log directory |
 | `REACHER_LOG_LEVEL` | `DEBUG` | Floor for the diagnostic log (`INFO` drops serial-wire records) |
 | `REACHER_LOG_VERBOSE_DEPS` | unset | Keep third-party DEBUG chatter (httpx, zeroconf, …) out of the log |
+| `REACHER_LLM_BIN` | unset | Path to bundled `llama-cli` (set by the Labrynth launcher). Required for in-app issue summarization; there is no cloud fallback. |
+| `REACHER_LLM_MODEL` | unset | Path to the bundled GGUF. Required together with `REACHER_LLM_BIN`. |
+| `REACHER_GITHUB_TOKEN` | unset | Fine-grained PAT with `issues: write` on `Otis-Lab-MUSC/labrynth` and `reacher`. Operator-configured; never shipped in the installer. |
+| `REACHER_GITHUB_OWNER` | `Otis-Lab-MUSC` | GitHub org/user that owns the target issue repos. |
 
 ## Architecture
 
@@ -152,6 +156,7 @@ Tests use `pytest` with `asyncio_mode=auto` (configured in `pyproject.toml`). Th
 - `tests/test_websocket.py` — WebSocket event streaming
 - `tests/test_pin_overrides.py` — pin override persistence, validation, and serial-reconnect replay
 - `tests/test_logging.py` — diagnostic sink, rotation, redaction, crash hooks, ingest/export, end-to-end corr_id trace
+- `tests/test_issues.py` — log excerpt builder, `/api/issues/status` + `/report` (mocked llama-cli and GitHub)
 - `tests/conftest.py` — autouse fixture pointing `REACHER_LOG_DIR` at `tmp_path`; **required**, or tests write to the real `~/REACHER/`
 
 ## Docs & Scripts
