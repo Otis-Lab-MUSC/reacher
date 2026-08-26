@@ -102,12 +102,22 @@ since they may carry `?token=`).
 
 ## Collecting a bug report
 
-- **UI:** About → *Download diagnostics* → a ZIP of the current run.
-- **HTTP:** `GET /api/logs/export` (add `?run=<name>`; `GET /api/logs/runs` lists them).
+- **UI:** About → *Report an issue* — local llama.cpp summarizes the description
+  plus a compact excerpt of this run and, when `REACHER_GITHUB_TOKEN` is set,
+  files a GitHub issue. About → *Download diagnostics* still exports the full ZIP.
+- **HTTP:** `POST /api/issues/report` (auth required; needs `REACHER_LLM_BIN` +
+  `REACHER_LLM_MODEL`). `GET /api/issues/status` reports whether the local model
+  and GitHub token are configured. `GET /api/logs/export` (add `?run=<name>`;
+  `GET /api/logs/runs` lists them) remains the full-run ZIP.
 - **Remote host:** the same routes through the proxy —
   `GET /api/proxy/{device_id}/api/logs/export`. Each machine keeps its own log;
   the primary pulls on demand.
 - **By hand:** `~/REACHER/LOG/runs/latest/`.
+
+The issue body receives a **capped excerpt** (errors/warnings, recent UI events,
+session lifecycle, process meta) — not the full ZIP. Field values in that
+excerpt are still as sensitive as the experiment data; treat a filed GitHub
+issue accordingly.
 
 ## Configuration
 

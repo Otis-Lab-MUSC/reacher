@@ -29,6 +29,7 @@ from .middleware.logging import RequestLoggingMiddleware
 from .routers import data, file, firmware, hardware, lifecycle, logs as logs_router, program, serial, session, websocket
 from .routers import discovery as discovery_router, pairing as pairing_router, proxy as proxy_router
 from .routers import update as update_router, validate as validate_router
+from .routers import issues as issues_router
 
 logger = logging.getLogger(__name__)
 
@@ -341,6 +342,7 @@ def create_app() -> FastAPI:
     app.include_router(validate_router.router, prefix="/api/validate", tags=["validate"], dependencies=api_deps)
     app.include_router(update_router.router, prefix="/api/update", tags=["update"], dependencies=api_deps)
     app.include_router(logs_router.router, prefix="/api/logs", tags=["logs"], dependencies=api_deps)
+    app.include_router(issues_router.router, prefix="/api/issues", tags=["issues"], dependencies=api_deps)
 
     # Serve built React frontend at /
     static_dir = _resolve_static_dir()
