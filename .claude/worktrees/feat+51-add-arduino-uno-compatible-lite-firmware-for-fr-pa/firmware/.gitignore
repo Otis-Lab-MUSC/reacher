@@ -1,0 +1,10 @@
+*.zip
+releases
+zip/
+
+# Doxygen output is regenerable — not committed (was tracked in the standalone repo)
+docs/
+
+# Stray build artifacts if compile.sh is ever run with the legacy in-tree layout;
+# real hex artifacts live in ../src/reacher/hex/<board>/
+hex/

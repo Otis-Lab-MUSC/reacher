@@ -1,0 +1,25 @@
+[Unit]
+Description=REACHER API Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+# %i is the username passed at enable time, e.g. `systemctl enable reacher@pi`
+Environment="PATH=/home/%i/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# REACHER binds to loopback by default (127.0.0.1). Uncomment the line below
+# for LAN/multi-machine peripheral mode. Note: this exposes unauthenticated
+# endpoints (/api/lifecycle/shutdown, /api/firmware/diagnostics) and makes
+# the WebSocket token visible to server access logs.
+#Environment="REACHER_HOST=0.0.0.0"
+ExecStart=reacher
+Restart=on-failure
+RestartSec=5
+
+# View logs with: journalctl -u reacher@<user> -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

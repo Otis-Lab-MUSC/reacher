@@ -1,0 +1,26 @@
+[Unit]
+Description=REACHER Monitor (tty1 display)
+# Start after the API server is up; stop any getty that owns tty1
+After=reacher@%i.service
+Requires=reacher@%i.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+User=%i
+Environment="PATH=/home/%i/.local/bin:/usr/local/bin:/usr/bin:/bin" "TERM=linux"
+SupplementaryGroups=tty
+ExecStart=reacher-monitor
+Restart=always
+RestartSec=3
+
+# Bind to the Pi's physical display (tty1) so the dashboard appears on the
+# local monitor independently of any SSH session.
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target

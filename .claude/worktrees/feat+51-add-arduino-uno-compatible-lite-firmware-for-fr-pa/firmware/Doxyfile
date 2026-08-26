@@ -1,0 +1,30 @@
+PROJECT_NAME           = "REACHER v2.0.0"
+PROJECT_BRIEF          = "Operant conditioning controller firmware for Arduino Uno"
+OUTPUT_DIRECTORY       = docs
+INPUT                  = reacher
+FILE_PATTERNS          = *.h *.cpp *.ino
+EXTENSION_MAPPING      = ino=C++
+RECURSIVE              = NO
+
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+JAVADOC_AUTOBRIEF      = NO
+
+# Graphs (requires Graphviz)
+HAVE_DOT               = YES
+CLASS_DIAGRAMS         = YES
+COLLABORATION_GRAPH    = YES
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+CALL_GRAPH             = NO
+CALLER_GRAPH           = NO
+GRAPHICAL_HIERARCHY    = YES
+
+# Arduino preprocessor defines
+PREDEFINED             = ARDUINO=100 __AVR_ATmega328P__
+ENABLE_PREPROCESSING   = YES
+
+GENERATE_LATEX         = NO
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO

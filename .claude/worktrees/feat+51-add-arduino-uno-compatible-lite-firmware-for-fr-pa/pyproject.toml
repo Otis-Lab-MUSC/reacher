@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Distribution name on PyPI is "reacher2p" (the "reacher" name was already
+# taken by an unrelated project). The import package stays "reacher", so
+# `pip install reacher2p` still exposes `import reacher` / `python -m reacher`.
+name = "reacher2p"
+version = "3.1.1"
+description = "REACHER — Rodent Experiment Application Controls and Handling Ecosystem for Research"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Joshua Boquiren", email = "thejoshbq@proton.me" },
+]
+keywords = ["neuroscience", "arduino", "operant-conditioning", "experiment-control", "fastapi"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    # Fix: PY-003 — Upper bounds to prevent breaking changes
+    "pyserial>=3.5,<4.0",
+    "fastapi>=0.110,<1.0",
+    "uvicorn[standard]>=0.29,<1.0",
+    "websockets>=12.0,<15.0",
+    "httpx>=0.27,<1.0",
+    "zeroconf>=0.131,<1.0",
+    "rich>=13.0,<15.0",
+]
+
+[project.optional-dependencies]
+tray = [
+    "pystray>=0.19",
+    "Pillow>=10.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.12",
+    "ruff>=0.4,<0.16",
+]
+
+[project.urls]
+Homepage = "https://github.com/Otis-Lab-MUSC/REACHER"
+Repository = "https://github.com/Otis-Lab-MUSC/reacher"
+Issues = "https://github.com/Otis-Lab-MUSC/reacher/issues"
+
+[project.scripts]
+reacher = "reacher.api.app:main"
+reacher-monitor = "reacher.monitor:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+reacher = ["hex/**/*.hex"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
