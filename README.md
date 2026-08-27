@@ -2,7 +2,7 @@
 
 **Hardware control, session coordination, and live data capture for Arduino-driven rodent operant behavior experiments.**
 
-[![Version](https://img.shields.io/badge/version-3.4.0--alpha.5-blue)](https://github.com/Otis-Lab-MUSC/reacher/releases)
+[![Version](https://img.shields.io/badge/version-3.4.0--alpha.6-blue)](https://github.com/Otis-Lab-MUSC/reacher/releases)
 [![Language](https://img.shields.io/badge/python-3.10+-blue)](https://www.python.org)
 [![License](https://img.shields.io/badge/license-Unlicense-green)](LICENSE)
 [![Changelog](https://img.shields.io/badge/changelog-CHANGELOG.md-orange)](CHANGELOG.md)
@@ -26,7 +26,7 @@ Every lever press, infusion, lick, and cue is timestamped against the trial cloc
 
 ```bash
 pip install reacher2p                               # from PyPI
-pip install reacher2p-3.4.0a5-py3-none-any.whl        # from a release wheel
+pip install reacher2p-3.4.0a6-py3-none-any.whl        # from a release wheel
 ```
 
 Host setup — installation, pairing, and systemd services — is documented in [`docs/setup-guide.md`](docs/setup-guide.md); see [CONTRIBUTING.md](CONTRIBUTING.md) and [RELEASING.md](RELEASING.md) for development and release process.
