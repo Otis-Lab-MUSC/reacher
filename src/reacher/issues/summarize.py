@@ -13,6 +13,7 @@ import logging
 import os
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,10 @@ AGENT_READY_LABEL = "agent-ready"
 DEVELOP_LABEL = "develop"
 
 _LLM_TIMEOUT_S = 120
+_PROBE_TIMEOUT_S = 60
+# llama.cpp exits non-zero on an empty prompt ("input is empty"), so the probe
+# needs a token to chew on even though it generates nothing.
+_PROBE_PROMPT = "x"
 _THREADS = 2
 _N_PREDICT = 1024
 
@@ -80,11 +85,127 @@ Always include "bug" unless the report is clearly a feature request or question.
 The title should be imperative and specific: "Camera feed freezes on session restart" not "Bug with camera"."""
 
 
-def llm_available() -> bool:
-    """True when a bundled (or operator-supplied) llama-cli + GGUF are on disk."""
+@dataclass(frozen=True)
+class LlmStatus:
+    """Outcome of the summarizer liveness probe."""
+
+    ok: bool
+    detail: str = ""
+
+
+def _llama_argv(
+    bin_path: str,
+    model: str,
+    *,
+    prompt_file: str | None = None,
+    prompt: str = "",
+    n_predict: int,
+) -> list[str]:
+    """Build the llama.cpp argv.
+
+    The probe and the real call share this so the probe cannot drift from what
+    actually runs — a flag the bundled binary rejects has to fail both or
+    neither.  ``llama-cli`` dropped ``--no-conversation`` in b10622 (raw
+    completion moved to ``llama-completion``), and that shipped undetected
+    precisely because nothing validated the argv.
+    """
+    argv = [bin_path, "-m", model]
+    argv += ["-f", prompt_file] if prompt_file else ["-p", prompt]
+    argv += [
+        "-n",
+        str(n_predict),
+        "--temp",
+        "0.1",
+        "-t",
+        str(_THREADS),
+        "-ngl",
+        "0",
+        "--no-display-prompt",
+        "--no-conversation",
+        "--simple-io",
+    ]
+    return argv
+
+
+def _llama_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["LLAMA_LOG_LEVEL"] = "ERROR"
+    return env
+
+
+def _probe(bin_path: str, model: str) -> LlmStatus:
+    """Run the real argv with ``-n 0`` — loads the model, generates nothing.
+
+    ``--version`` is not enough: it exits 0 on a binary that rejects the flags
+    the summarizer sends.  llama.cpp parses argv before touching the model, so
+    a zero-token run exercises the whole path (shared libraries, arguments,
+    model load) in well under a second.
+    """
+    if not bin_path or not model:
+        return LlmStatus(False, "REACHER_LLM_BIN / REACHER_LLM_MODEL are not set")
+    if not os.path.isfile(bin_path):
+        return LlmStatus(False, f"llama.cpp binary not found: {bin_path}")
+    if not os.path.isfile(model):
+        return LlmStatus(False, f"GGUF model not found: {model}")
+
+    name = os.path.basename(bin_path)
+    try:
+        result = subprocess.run(
+            _llama_argv(bin_path, model, prompt=_PROBE_PROMPT, n_predict=0),
+            capture_output=True,
+            text=True,
+            timeout=_PROBE_TIMEOUT_S,
+            env=_llama_env(),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return LlmStatus(False, f"{name} timed out after {_PROBE_TIMEOUT_S}s")
+    except OSError as exc:
+        return LlmStatus(False, f"{name} could not be executed: {exc}")
+    if result.returncode != 0:
+        detail = ((result.stderr or "") + (result.stdout or "")).strip()
+        return LlmStatus(False, f"{name} exited {result.returncode}: {detail[-300:]}")
+    return LlmStatus(True, "")
+
+
+_probe_cache: tuple[tuple, LlmStatus] | None = None
+
+
+def _cache_key(bin_path: str, model: str) -> tuple:
+    def stamp(path: str):
+        try:
+            st = os.stat(path)
+        except OSError:
+            return None
+        return (st.st_mtime_ns, st.st_size)
+
+    return (bin_path, model, stamp(bin_path), stamp(model))
+
+
+def llm_probe() -> LlmStatus:
+    """Cached liveness probe.  Re-runs when the configured paths or files change."""
+    global _probe_cache
     bin_path = os.environ.get("REACHER_LLM_BIN", "").strip()
     model = os.environ.get("REACHER_LLM_MODEL", "").strip()
-    return bool(bin_path and model and os.path.isfile(bin_path) and os.path.isfile(model))
+    key = _cache_key(bin_path, model)
+    if _probe_cache is not None and _probe_cache[0] == key:
+        return _probe_cache[1]
+    status = _probe(bin_path, model)
+    if not status.ok:
+        logger.warning("Local summarizer unavailable: %s", status.detail)
+    _probe_cache = (key, status)
+    return status
+
+
+def reset_probe_cache() -> None:
+    """Drop the cached probe result (tests)."""
+    global _probe_cache
+    _probe_cache = None
+
+
+def llm_available() -> bool:
+    """True when the bundled llama.cpp binary + GGUF are present *and* runnable."""
+    return llm_probe().ok
 
 
 def summarize_report(
@@ -96,18 +217,22 @@ def summarize_report(
     severity: str = "",
     versions: str = "",
 ) -> dict[str, Any]:
-    """Run llama-cli and return ``{title, body, labels, summarized}``.
+    """Run the summarizer and return ``{title, body, labels, summarized, error}``.
 
     On any inference or parse failure, returns a fallback issue (``summarized``
-    is False) rather than raising — the caller can still file it.
+    is False, ``error`` explains why) rather than raising — the caller can
+    still file it.
     """
     try:
         raw = _run_llama(_user_content(repo, description, excerpt, steps, severity))
         parsed = _parse_model_json(raw)
         return _sanitize(parsed, excerpt=excerpt, versions=versions, summarized=True)
     except Exception as exc:
-        logger.warning("Local summarizer failed; filing fallback: %s", exc)
-        return _fallback(description, excerpt, steps, severity, versions)
+        # ERROR, not WARNING: a silent drop to the fallback draft is how a
+        # broken bundled model reached users looking like a working one.
+        logger.error("Local summarizer failed; filing fallback: %s", exc)
+        reset_probe_cache()
+        return _fallback(description, excerpt, steps, severity, versions, error=str(exc))
 
 
 def _user_content(repo: str, description: str, excerpt: str, steps: str, severity: str) -> str:
@@ -147,37 +272,17 @@ def _run_llama(user_content: str) -> str:
         fh.write(prompt)
         prompt_path = fh.name
     try:
-        cmd = [
-            bin_path,
-            "-m",
-            model,
-            "-f",
-            prompt_path,
-            "-n",
-            str(_N_PREDICT),
-            "--temp",
-            "0.1",
-            "-t",
-            str(_THREADS),
-            "-ngl",
-            "0",
-            "--no-display-prompt",
-            "--no-conversation",
-            "--simple-io",
-        ]
-        env = os.environ.copy()
-        env["LLAMA_LOG_LEVEL"] = "ERROR"
         result = subprocess.run(
-            cmd,
+            _llama_argv(bin_path, model, prompt_file=prompt_path, n_predict=_N_PREDICT),
             capture_output=True,
             text=True,
             timeout=_LLM_TIMEOUT_S,
-            env=env,
+            env=_llama_env(),
             check=False,
         )
         if result.returncode != 0:
             stderr = (result.stderr or "")[-500:]
-            raise RuntimeError(f"llama-cli exited {result.returncode}: {stderr}")
+            raise RuntimeError(f"{os.path.basename(bin_path)} exited {result.returncode}: {stderr}")
         return result.stdout or ""
     finally:
         try:
@@ -218,7 +323,7 @@ def _sanitize(
     if "## Diagnostic excerpt" not in body and excerpt:
         body = body.rstrip() + "\n\n## Diagnostic excerpt\n```\n" + excerpt + "\n```"
     body = _append_footer(body, versions)
-    return {"title": title, "body": body, "labels": labels, "summarized": summarized}
+    return {"title": title, "body": body, "labels": labels, "summarized": summarized, "error": None}
 
 
 def _fallback(
@@ -227,6 +332,7 @@ def _fallback(
     steps: str,
     severity: str,
     versions: str,
+    error: str = "",
 ) -> dict[str, Any]:
     steps_block = steps.strip() or "Unknown — needs investigation"
     sev = severity.strip() or "unspecified"
@@ -263,6 +369,7 @@ def _fallback(
         "body": body,
         "labels": ["bug", FALLBACK_LABEL],
         "summarized": False,
+        "error": error or None,
     }
 
 
