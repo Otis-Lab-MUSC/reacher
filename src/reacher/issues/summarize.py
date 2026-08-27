@@ -16,6 +16,8 @@ import tempfile
 from dataclasses import dataclass
 from typing import Any
 
+from ..child_env import clean_child_env
+
 logger = logging.getLogger(__name__)
 
 ALLOWED_LABELS = [
@@ -127,8 +129,16 @@ def _llama_argv(
     return argv
 
 
-def _llama_env() -> dict[str, str]:
-    env = os.environ.copy()
+def _llama_env(bin_path: str) -> dict[str, str]:
+    """Child environment for llama.cpp.
+
+    A frozen bundle puts its own library directory on LD_LIBRARY_PATH, which
+    would make llama.cpp load the bundle's Ubuntu libstdc++/libssl instead of
+    the host's.  Hand it a clean environment plus its own directory — the
+    official builds carry an ``$ORIGIN`` RPATH and do not strictly need the
+    latter, but a rebuild without one would otherwise fail silently.
+    """
+    env = clean_child_env(extra_lib_dirs=[os.path.dirname(bin_path)])
     env["LLAMA_LOG_LEVEL"] = "ERROR"
     return env
 
@@ -155,7 +165,7 @@ def _probe(bin_path: str, model: str) -> LlmStatus:
             capture_output=True,
             text=True,
             timeout=_PROBE_TIMEOUT_S,
-            env=_llama_env(),
+            env=_llama_env(bin_path),
             check=False,
         )
     except subprocess.TimeoutExpired:
@@ -277,7 +287,7 @@ def _run_llama(user_content: str) -> str:
             capture_output=True,
             text=True,
             timeout=_LLM_TIMEOUT_S,
-            env=_llama_env(),
+            env=_llama_env(bin_path),
             check=False,
         )
         if result.returncode != 0:

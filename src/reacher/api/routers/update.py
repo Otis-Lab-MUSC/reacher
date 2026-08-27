@@ -15,6 +15,8 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from ...child_env import clean_child_env
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -37,6 +39,7 @@ def _reset_download_state() -> None:
     if _download_temp_dir and os.path.isdir(_download_temp_dir):
         try:
             import shutil
+
             shutil.rmtree(_download_temp_dir)
         except Exception:
             pass
@@ -108,14 +111,14 @@ def _launch(path: str) -> None:
 
         ctypes.windll.shell32.ShellExecuteW(None, "runas", path, None, None, 1)
     elif sys.platform == "darwin":
-        subprocess.Popen(["open", path])
+        subprocess.Popen(["open", path], env=clean_child_env())
     else:
         # Linux
         if path.endswith(".deb"):
-            subprocess.Popen(["pkexec", "dpkg", "-i", path])
+            subprocess.Popen(["pkexec", "dpkg", "-i", path], env=clean_child_env())
         elif path.endswith(".AppImage"):
             os.chmod(path, 0o755)
-            subprocess.Popen([path])
+            subprocess.Popen([path], env=clean_child_env())
         else:
             # tar.gz — cannot auto-install
             raise HTTPException(status_code=202, detail=f"Manual install required. Archive saved to: {path}")
