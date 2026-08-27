@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import json
+import sys
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from reacher import diagnostics
 from reacher.diagnostics.excerpt import EXCERPT_MAX_CHARS, build_excerpt
-from reacher.issues.summarize import _parse_model_json, _sanitize, summarize_report
+from reacher.issues.summarize import (
+    _llama_argv,
+    _parse_model_json,
+    _sanitize,
+    llm_probe,
+    reset_probe_cache,
+    summarize_report,
+)
 
 
 @pytest.fixture
@@ -20,6 +28,7 @@ def api(tmp_path, monkeypatch):
     monkeypatch.delenv("REACHER_GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("REACHER_GITHUB_OWNER", raising=False)
     diagnostics.reset_for_tests()
+    reset_probe_cache()
 
     from fastapi.testclient import TestClient
 
@@ -30,6 +39,31 @@ def api(tmp_path, monkeypatch):
         client.headers.update({"Authorization": f"Bearer {API_KEY}"})
         yield client
     diagnostics.reset_for_tests()
+    reset_probe_cache()
+
+
+def _stub_llama(path, body="raise SystemExit(0)"):
+    """Write an executable llama.cpp stand-in.
+
+    The liveness probe actually runs the binary, so a text file no longer
+    passes — which is the whole point of the probe.
+    """
+    path.write_text(f"#!{sys.executable}\nimport sys\n{body}\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+@pytest.fixture
+def fake_llm(tmp_path, monkeypatch):
+    """Configure a runnable summarizer; yields (bin, model) for further tweaking."""
+    bin_path = _stub_llama(tmp_path / "llama-completion")
+    model = tmp_path / "model.gguf"
+    model.write_text("x")
+    monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
+    monkeypatch.setenv("REACHER_LLM_MODEL", str(model))
+    reset_probe_cache()
+    yield bin_path, model
+    reset_probe_cache()
 
 
 def _write_run(tmp_path, records, meta=None):
@@ -133,13 +167,7 @@ class TestIssuesApi:
         assert body["owner"] == "Otis-Lab-MUSC"
         assert "labrynth" in body["repos"]
 
-    def test_status_configured(self, api, tmp_path, monkeypatch):
-        bin_path = tmp_path / "llama-cli"
-        model = tmp_path / "model.gguf"
-        bin_path.write_text("x")
-        model.write_text("x")
-        monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
-        monkeypatch.setenv("REACHER_LLM_MODEL", str(model))
+    def test_status_configured(self, api, fake_llm, monkeypatch):
         monkeypatch.setenv("REACHER_GITHUB_TOKEN", "ghp_test")
         monkeypatch.setenv("REACHER_GITHUB_OWNER", "example-org")
         body = api.get("/api/issues/status").json()
@@ -160,14 +188,7 @@ class TestIssuesApi:
         assert res.status_code == 503
         assert "summarizer" in res.json()["detail"].lower()
 
-    def test_report_summarize_without_github(self, api, tmp_path, monkeypatch):
-        bin_path = tmp_path / "llama-cli"
-        model = tmp_path / "model.gguf"
-        bin_path.write_text("x")
-        model.write_text("x")
-        monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
-        monkeypatch.setenv("REACHER_LLM_MODEL", str(model))
-
+    def test_report_summarize_without_github(self, api, fake_llm):
         fake = {
             "title": "Pump relay never closes",
             "body": "## Description\nPump 1 armed but silent.",
@@ -186,13 +207,7 @@ class TestIssuesApi:
         assert data["title"] == fake["title"]
         assert data["summarized"] is True
 
-    def test_report_files_when_token_set(self, api, tmp_path, monkeypatch):
-        bin_path = tmp_path / "llama-cli"
-        model = tmp_path / "model.gguf"
-        bin_path.write_text("x")
-        model.write_text("x")
-        monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
-        monkeypatch.setenv("REACHER_LLM_MODEL", str(model))
+    def test_report_files_when_token_set(self, api, fake_llm, monkeypatch):
         monkeypatch.setenv("REACHER_GITHUB_TOKEN", "ghp_test")
 
         fake = {
@@ -222,13 +237,7 @@ class TestIssuesApi:
         assert kwargs["repo"] == "labrynth"
         assert kwargs["summarized"] is True
 
-    def test_fallback_path_passes_summarized_false(self, api, tmp_path, monkeypatch):
-        bin_path = tmp_path / "llama-cli"
-        model = tmp_path / "model.gguf"
-        bin_path.write_text("x")
-        model.write_text("x")
-        monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
-        monkeypatch.setenv("REACHER_LLM_MODEL", str(model))
+    def test_fallback_path_passes_summarized_false(self, api, fake_llm, monkeypatch):
         monkeypatch.setenv("REACHER_GITHUB_TOKEN", "ghp_test")
 
         fake = {
@@ -249,6 +258,147 @@ class TestIssuesApi:
         assert res.status_code == 200
         assert res.json()["summarized"] is False
         assert created.await_args.kwargs["summarized"] is False
+
+
+class TestLlmProbe:
+    """The probe exists because two separate defects shipped looking healthy."""
+
+    def test_unset_env_reports_why(self, monkeypatch):
+        monkeypatch.delenv("REACHER_LLM_BIN", raising=False)
+        monkeypatch.delenv("REACHER_LLM_MODEL", raising=False)
+        reset_probe_cache()
+        status = llm_probe()
+        assert status.ok is False
+        assert "not set" in status.detail
+
+    def test_missing_model_reports_path(self, tmp_path, monkeypatch):
+        bin_path = _stub_llama(tmp_path / "llama-completion")
+        monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
+        monkeypatch.setenv("REACHER_LLM_MODEL", str(tmp_path / "absent.gguf"))
+        reset_probe_cache()
+        status = llm_probe()
+        assert status.ok is False
+        assert "GGUF model not found" in status.detail
+
+    def test_non_executable_binary_fails(self, tmp_path, monkeypatch):
+        """Regression: a bundle missing its shared libraries is not 'available'.
+
+        Shipped as a plain unreadable/unrunnable file, this used to pass the
+        old ``os.path.isfile`` check and only fail when a user filed a report.
+        """
+        bin_path = tmp_path / "llama-completion"
+        bin_path.write_text("not an executable")
+        bin_path.chmod(0o644)
+        (tmp_path / "model.gguf").write_text("x")
+        monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
+        monkeypatch.setenv("REACHER_LLM_MODEL", str(tmp_path / "model.gguf"))
+        reset_probe_cache()
+        status = llm_probe()
+        assert status.ok is False
+        assert "llama-completion" in status.detail
+
+    def test_binary_rejecting_our_flags_fails(self, tmp_path, monkeypatch):
+        """Regression: llama-cli b10622 dropped --no-conversation.
+
+        The binary starts and ``--version`` succeeds, so only a probe that
+        sends the *real* argv catches it.
+        """
+        bin_path = _stub_llama(
+            tmp_path / "llama-cli",
+            body=(
+                "if '--no-conversation' in sys.argv:\n"
+                "    sys.stderr.write('error: invalid argument: --no-conversation')\n"
+                "    raise SystemExit(1)\n"
+                "raise SystemExit(0)"
+            ),
+        )
+        (tmp_path / "model.gguf").write_text("x")
+        monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
+        monkeypatch.setenv("REACHER_LLM_MODEL", str(tmp_path / "model.gguf"))
+        reset_probe_cache()
+        status = llm_probe()
+        assert status.ok is False
+        assert "invalid argument" in status.detail
+
+    def test_probe_sends_a_non_empty_prompt(self, tmp_path, monkeypatch):
+        """Regression: llama.cpp exits non-zero on an empty prompt.
+
+        A probe that passes ``-p ""`` reports a perfectly good bundle as
+        broken — a false negative is as bad as the bug it screens for.
+        """
+        bin_path = _stub_llama(
+            tmp_path / "llama-completion",
+            body=(
+                "i = sys.argv.index('-p')\n"
+                "if not sys.argv[i + 1]:\n"
+                "    sys.stderr.write('input is empty')\n"
+                "    raise SystemExit(255)\n"
+                "raise SystemExit(0)"
+            ),
+        )
+        (tmp_path / "model.gguf").write_text("x")
+        monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
+        monkeypatch.setenv("REACHER_LLM_MODEL", str(tmp_path / "model.gguf"))
+        reset_probe_cache()
+        status = llm_probe()
+        assert status.ok is True, status.detail
+
+    def test_probe_argv_matches_real_argv(self):
+        """The probe is worthless if it can drift from what inference runs."""
+        probe = _llama_argv("/bin/llama", "/m.gguf", prompt="", n_predict=0)
+        real = _llama_argv("/bin/llama", "/m.gguf", prompt_file="/p.txt", n_predict=1024)
+        flags = lambda argv: [a for a in argv if a.startswith("--") or a.startswith("-")]  # noqa: E731
+        assert set(flags(probe)) - {"-p"} == set(flags(real)) - {"-f"}
+        assert "--no-conversation" in probe
+        assert probe[probe.index("-n") + 1] == "0"
+
+    def test_result_is_cached_then_invalidated(self, fake_llm):
+        bin_path, _model = fake_llm
+        assert llm_probe().ok is True
+        # Break the binary; the cached result stands until the file changes.
+        cached = llm_probe()
+        assert cached.ok is True
+        _stub_llama(bin_path, body="raise SystemExit(1)")
+        assert llm_probe().ok is False
+
+
+class TestStatusSurfacesReason:
+    def test_status_reports_detail_when_unavailable(self, api):
+        body = api.get("/api/issues/status").json()
+        assert body["llm"] is False
+        assert body["llm_detail"]
+
+    def test_status_detail_is_null_when_healthy(self, api, fake_llm):
+        body = api.get("/api/issues/status").json()
+        assert body["llm"] is True
+        assert body["llm_detail"] is None
+
+    def test_report_503_explains_the_failure(self, api, tmp_path, monkeypatch):
+        bin_path = tmp_path / "llama-completion"
+        bin_path.write_text("broken")
+        bin_path.chmod(0o644)
+        (tmp_path / "model.gguf").write_text("x")
+        monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
+        monkeypatch.setenv("REACHER_LLM_MODEL", str(tmp_path / "model.gguf"))
+        reset_probe_cache()
+        res = api.post("/api/issues/report", json={"description": "broke"})
+        assert res.status_code == 503
+        detail = res.json()["detail"]
+        assert "not available" in detail
+        assert "llama-completion" in detail
+
+    def test_fallback_response_carries_error(self, api, fake_llm):
+        fake = {
+            "title": "t",
+            "body": "b",
+            "labels": ["bug"],
+            "summarized": False,
+            "error": "llama-completion exited 1: boom",
+        }
+        with patch("reacher.api.routers.issues.summarize_report", return_value=fake):
+            res = api.post("/api/issues/report", json={"description": "x"})
+        assert res.status_code == 200
+        assert res.json()["summary_error"] == "llama-completion exited 1: boom"
 
 
 def test_excerpt_max_constant_fits_github():

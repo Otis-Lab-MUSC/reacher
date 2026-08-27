@@ -48,7 +48,7 @@ python -m build
 | `REACHER_LOG_DIR` | `~/REACHER/LOG/runs` | Diagnostic run-log directory |
 | `REACHER_LOG_LEVEL` | `DEBUG` | Floor for the diagnostic log (`INFO` drops serial-wire records) |
 | `REACHER_LOG_VERBOSE_DEPS` | unset | Keep third-party DEBUG chatter (httpx, zeroconf, …) out of the log |
-| `REACHER_LLM_BIN` | unset | Path to bundled `llama-cli` (set by the Labrynth launcher). Required for in-app issue summarization; there is no cloud fallback. |
+| `REACHER_LLM_BIN` | unset | Path to the bundled `llama-completion` (set by the Labrynth launcher; `llama-cli` is chat-only since llama.cpp b10622 and rejects `--no-conversation`). Required for in-app issue summarization; there is no cloud fallback. Validated by a liveness probe, not just `isfile`. |
 | `REACHER_LLM_MODEL` | unset | Path to the bundled GGUF. Required together with `REACHER_LLM_BIN`. |
 | `REACHER_GITHUB_TOKEN` | unset | Fine-grained PAT with `issues: write` on `Otis-Lab-MUSC/labrynth` and `reacher`. Operator-configured; never shipped in the installer. |
 | `REACHER_GITHUB_OWNER` | `Otis-Lab-MUSC` | GitHub org/user that owns the target issue repos. |
