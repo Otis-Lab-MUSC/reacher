@@ -15,6 +15,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 
+from ...child_env import clean_child_env
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -35,10 +37,10 @@ def _strip_archive_suffix(name: str) -> str:
 
 def _sanitize_for_path(name: str) -> str:
     """Replace characters unsafe for directory/file names with underscores."""
-    sanitized = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', name)
-    sanitized = sanitized.replace(' ', '_')
-    sanitized = re.sub(r'_+', '_', sanitized)
-    return sanitized.strip(' _.') or "session"
+    sanitized = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
+    sanitized = sanitized.replace(" ", "_")
+    sanitized = re.sub(r"_+", "_", sanitized)
+    return sanitized.strip(" _.") or "session"
 
 
 def _find_frame_index(frame_timestamps: list[int], event_ts: int) -> int | None:
@@ -80,11 +82,13 @@ async def browse_folder():
     if sys.platform.startswith("linux"):
         try:
             import subprocess
+
             result = subprocess.run(
                 ["zenity", "--file-selection", "--directory", "--title=Select Destination Folder"],
                 capture_output=True,
                 text=True,
                 timeout=120,
+                env=clean_child_env(),
             )
             if result.returncode == 0:
                 return {"path": result.stdout.strip() or None}
@@ -97,6 +101,7 @@ async def browse_folder():
     try:
         import tkinter as tk
         from tkinter import filedialog
+
         root = tk.Tk()
         root.geometry("1x1+0+0")
         root.withdraw()
@@ -295,7 +300,7 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
                     "session_name": body.session_name or None,
                     "port": info.port,
                     "paradigm": info.paradigm,
-                    "firmware_sketch": firmware_info.get('sketch', 'unknown.ino'),
+                    "firmware_sketch": firmware_info.get("sketch", "unknown.ino"),
                     "firmware_version": firmware_info.get("version", "unknown"),
                     "export_date": export_date,
                     "export_time": export_time,

@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .. import __version__, diagnostics, discovery, machines, pairing, pin_overrides
+from ..child_env import clean_child_env, clean_environ
 from ..device_id import DEVICE_ID
 from ..session_manager import SessionManager
 from .middleware.auth import require_api_key, API_KEY
@@ -48,7 +49,8 @@ def _open_browser(url: str) -> None:
     on PATH.
     """
     if not os.getenv("REACHER_INCOGNITO"):
-        webbrowser.open(url)
+        with clean_environ():
+            webbrowser.open(url)
         return
 
     _INCOGNITO_BROWSERS = [
@@ -64,16 +66,17 @@ def _open_browser(url: str) -> None:
     for binary, flags in _INCOGNITO_BROWSERS:
         if shutil.which(binary):
             try:
-                subprocess.Popen([binary, *flags, url],
-                                 stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL)
+                subprocess.Popen(
+                    [binary, *flags, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=clean_child_env()
+                )
                 return
             except OSError:
                 continue
 
     # No supported browser found — fall back to default browser without incognito
     logger.warning("No incognito-capable browser found; opening default browser")
-    webbrowser.open(url)
+    with clean_environ():
+        webbrowser.open(url)
 
 
 async def _post_broker_registration(
@@ -93,6 +96,7 @@ async def _post_broker_registration(
     ``REACHER_BROKER_URL`` with ``REACHER_HOST=0.0.0.0`` for LAN access.
     """
     from .. import discovery as _discovery
+
     local_ip = _discovery._get_local_ip() or "127.0.0.1"
     url = f"http://{local_ip}:{port}"
     try:
@@ -166,6 +170,7 @@ class _HealthCORSMiddleware(BaseHTTPMiddleware):
         if request.url.path == "/health":
             if request.method == "OPTIONS":
                 from starlette.responses import Response
+
                 return Response(
                     status_code=200,
                     headers={
@@ -227,10 +232,7 @@ async def lifespan(app: FastAPI):
 
     logger.info("REACHER API v%s listening on %s:%d", __version__, HOST, PORT)
     if HOST == "127.0.0.1" and not _resolve_static_dir():
-        logger.warning(
-            "Bound to loopback — remote peers cannot connect. "
-            "Set REACHER_HOST=0.0.0.0 for LAN access."
-        )
+        logger.warning("Bound to loopback — remote peers cannot connect. Set REACHER_HOST=0.0.0.0 for LAN access.")
     if broker_url and HOST == "127.0.0.1":
         logger.warning(
             "REACHER_BROKER_URL is set but REACHER_HOST is loopback; "
@@ -239,8 +241,14 @@ async def lifespan(app: FastAPI):
         )
     # Only open the browser if a frontend is actually available — avoids opening
     # to a blank 404 on headless Pis running the bare API without a bundled UI.
+    #
+    # Off the event loop deliberately: this is the last statement before the
+    # server starts serving, and webbrowser.open() *waits* on console browsers
+    # (w3m, lynx, links).  Called inline, a machine whose default browser is one
+    # of those — or whose xdg-open is broken — never reaches `yield`, so the API
+    # never comes up and the app looks hung with no error.
     if _resolve_static_dir():
-        _open_browser(f"http://localhost:{PORT}")
+        loop.run_in_executor(None, _open_browser, f"http://localhost:{PORT}")
     yield
 
     logger.info("Shutting down — destroying all sessions")

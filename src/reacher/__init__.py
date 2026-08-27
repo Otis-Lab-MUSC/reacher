@@ -8,7 +8,7 @@ from .kernel.commands import (
     build_command_payload,
 )
 
-__version__ = "3.4.0-alpha.4"
+__version__ = "3.4.0-alpha.5"
 
 __all__ = [
     "REACHER",
