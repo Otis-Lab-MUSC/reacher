@@ -82,6 +82,20 @@ class TestCleanEnviron:
             pass
         assert os.environ["LD_LIBRARY_PATH"] == "/frozen/bundle/_internal"
 
+    def test_keeps_every_other_variable(self, monkeypatch):
+        """Regression: building the clean copy *after* os.environ.clear() copied
+        an empty environment, so PATH/HOME/DISPLAY/BROWSER vanished inside the
+        block and webbrowser had nothing left to launch."""
+        monkeypatch.setenv("LD_LIBRARY_PATH", "/frozen/bundle/_internal")
+        monkeypatch.setenv("BROWSER", "/usr/bin/firefox")
+        monkeypatch.setenv("PATH", "/usr/bin:/bin")
+        monkeypatch.setenv("DISPLAY", ":0")
+        with clean_environ():
+            assert os.environ["BROWSER"] == "/usr/bin/firefox"
+            assert os.environ["PATH"] == "/usr/bin:/bin"
+            assert os.environ["DISPLAY"] == ":0"
+            assert "LD_LIBRARY_PATH" not in os.environ
+
 
 def test_a_real_child_does_not_inherit_the_bundle_path(monkeypatch, tmp_path):
     """End-to-end: the value a spawned process actually observes."""

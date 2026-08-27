@@ -62,9 +62,13 @@ def clean_environ(extra_lib_dirs: Sequence[str] = ()) -> Iterator[None]:
     Prefer passing ``env=clean_child_env()`` wherever the call allows it.
     """
     saved = os.environ.copy()
+    # Compute before clearing — clean_child_env() reads os.environ, so building
+    # it afterwards would copy an empty one and wipe PATH, HOME, DISPLAY and
+    # BROWSER for the duration, leaving webbrowser with nothing to launch.
+    cleaned = clean_child_env(extra_lib_dirs)
     try:
         os.environ.clear()
-        os.environ.update(clean_child_env(extra_lib_dirs))
+        os.environ.update(cleaned)
         yield
     finally:
         os.environ.clear()
