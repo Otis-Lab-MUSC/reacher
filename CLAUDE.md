@@ -48,10 +48,7 @@ python -m build
 | `REACHER_LOG_DIR` | `~/REACHER/LOG/runs` | Diagnostic run-log directory |
 | `REACHER_LOG_LEVEL` | `DEBUG` | Floor for the diagnostic log (`INFO` drops serial-wire records) |
 | `REACHER_LOG_VERBOSE_DEPS` | unset | Keep third-party DEBUG chatter (httpx, zeroconf, …) out of the log |
-| `REACHER_LLM_BIN` | unset | Path to the bundled `llama-completion` (set by the Labrynth launcher; `llama-cli` is chat-only since llama.cpp b10622 and rejects `--no-conversation`). Required for in-app issue summarization; there is no cloud fallback. Validated by a liveness probe, not just `isfile`. |
-| `REACHER_LLM_MODEL` | unset | Path to the bundled GGUF. Required together with `REACHER_LLM_BIN`. |
-| `REACHER_GITHUB_TOKEN` | unset | Fine-grained PAT with `issues: write` on `Otis-Lab-MUSC/labrynth` and `reacher`. Operator-configured; never shipped in the installer. |
-| `REACHER_GITHUB_OWNER` | `Otis-Lab-MUSC` | GitHub org/user that owns the target issue repos. |
+| `REACHER_GITHUB_OWNER` | `Otis-Lab-MUSC` | GitHub org/user that owns the target issue repos. Used to build the pre-filled "New Issue" link. |
 
 ## Architecture
 
@@ -120,6 +117,19 @@ Wraps `avrdude` to flash Arduino firmware. Handles PyInstaller frozen mode path 
 ### Firmware Source (`firmware/`)
 Arduino firmware source, folded in from the archived `Otis-Lab-MUSC/reacher-firmware`. Five sketches (`fr/ pr/ vi/ omission/ pavlovian/`) share `libraries/REACHERDevices/`, and four ship a UNO-compatible `_lite` twin (`fr_lite/ pr_lite/ vi_lite/ omission_lite/`) with two-photon (Microscope + SLM) support stripped; Pavlovian has none because it overflows UNO flash even stripped. `firmware/libraries/REACHERDevices/src/Commands.h` is the firmware-side command list mirrored by `kernel/commands.py`; **edit both together** when adding a command — `tests/test_command_parity.py` enforces parity. `firmware/compile.sh` writes hex into the committed package-data tree `src/reacher/hex/<board>/` (run `arduino-cli core install arduino:avr` once, then `bash firmware/compile.sh`; commit the refreshed hex). Firmware version strings are stamped by `scripts/bump-version.py` — never hand-edit, and recompile hex after a bump. Target board is Mega 2560; the `uno/` hex set is the four `_lite` builds (the full-paradigm uno hex files are stale legacy artifacts that no longer compile). The microscope timestamp pin (INT0) is fixed in firmware and must not be exposed as remappable. See `firmware/CLAUDE.md` and `firmware/README.md` for paradigm/hardware detail.
 
+### Issue Reporting (`src/reacher/issues/`)
+`POST /api/issues/prefill` composes a title/body from the user's report plus a
+capped, redacted diagnostic excerpt (`diagnostics/excerpt.py`), and returns a
+pre-filled `github.com/{owner}/{repo}/issues/new?...` link — the user reviews
+and submits it themselves, in their own browser, under their own GitHub
+account. No token, no relay, no LLM, and no network or subprocess call happens
+on this path; `prefill.py` is pure string composition. The binding constraint
+is the practical URL length a browser/GitHub will accept
+(`prefill.URL_BUDGET`, conservatively 6,000 chars), not GitHub's 65,536-char
+issue-body cap — the diagnostic excerpt shrinks first to make room, and the
+body is bluntly truncated as a last resort so this endpoint can never hand
+back a link that gets rejected outright.
+
 ### systemd integration
 `systemd/reacher@.service` and `systemd/reacher-monitor@.service` are templated unit files (`%i` = username) for running the API and the dashboard as services on Linux hosts (e.g. a lab Raspberry Pi).
 
@@ -156,7 +166,7 @@ Tests use `pytest` with `asyncio_mode=auto` (configured in `pyproject.toml`). Th
 - `tests/test_websocket.py` — WebSocket event streaming
 - `tests/test_pin_overrides.py` — pin override persistence, validation, and serial-reconnect replay
 - `tests/test_logging.py` — diagnostic sink, rotation, redaction, crash hooks, ingest/export, end-to-end corr_id trace
-- `tests/test_issues.py` — log excerpt builder, `/api/issues/status` + `/report` (mocked llama-cli and GitHub)
+- `tests/test_issues.py` — log excerpt builder and `POST /api/issues/prefill` (title/body composition, excerpt-shrink-to-fit-URL-budget, label filtering, repo validation)
 - `tests/conftest.py` — autouse fixture pointing `REACHER_LOG_DIR` at `tmp_path`; **required**, or tests write to the real `~/REACHER/`
 
 ## Docs & Scripts

@@ -1,26 +1,11 @@
-"""In-app issue reporting: local llama.cpp summarizer + GitHub filing."""
+"""In-app issue reporting: a pre-filled, no-auth GitHub "New Issue" link."""
 
-from .github import ALLOWED_REPOS, create_issue, github_configured, github_owner
-from .summarize import (
-    ALLOWED_LABELS,
-    FALLBACK_LABEL,
-    LlmStatus,
-    llm_available,
-    llm_probe,
-    reset_probe_cache,
-    summarize_report,
-)
+from .prefill import ALLOWED_LABELS, ALLOWED_REPOS, build_prefill, github_owner, issue_url
 
 __all__ = [
     "ALLOWED_LABELS",
     "ALLOWED_REPOS",
-    "FALLBACK_LABEL",
-    "LlmStatus",
-    "create_issue",
-    "github_configured",
+    "build_prefill",
     "github_owner",
-    "llm_available",
-    "llm_probe",
-    "reset_probe_cache",
-    "summarize_report",
+    "issue_url",
 ]

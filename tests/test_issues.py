@@ -1,34 +1,23 @@
-"""Issue reporting: log excerpt, local summarizer, and /api/issues endpoints."""
+"""Issue reporting: log excerpt builder and POST /api/issues/prefill."""
 
 from __future__ import annotations
 
 import json
-import sys
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
 from reacher import diagnostics
-from reacher.diagnostics.excerpt import EXCERPT_MAX_CHARS, build_excerpt
-from reacher.issues.summarize import (
-    _llama_argv,
-    _parse_model_json,
-    _sanitize,
-    llm_probe,
-    reset_probe_cache,
-    summarize_report,
-)
+from reacher.diagnostics.excerpt import build_excerpt
+from reacher.issues.prefill import URL_BUDGET, build_prefill, github_owner, issue_url
 
 
 @pytest.fixture
 def api(tmp_path, monkeypatch):
     monkeypatch.setenv("REACHER_LOG_DIR", str(tmp_path / "runs"))
-    monkeypatch.delenv("REACHER_LLM_BIN", raising=False)
-    monkeypatch.delenv("REACHER_LLM_MODEL", raising=False)
-    monkeypatch.delenv("REACHER_GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("REACHER_GITHUB_OWNER", raising=False)
     diagnostics.reset_for_tests()
-    reset_probe_cache()
 
     from fastapi.testclient import TestClient
 
@@ -39,31 +28,6 @@ def api(tmp_path, monkeypatch):
         client.headers.update({"Authorization": f"Bearer {API_KEY}"})
         yield client
     diagnostics.reset_for_tests()
-    reset_probe_cache()
-
-
-def _stub_llama(path, body="raise SystemExit(0)"):
-    """Write an executable llama.cpp stand-in.
-
-    The liveness probe actually runs the binary, so a text file no longer
-    passes — which is the whole point of the probe.
-    """
-    path.write_text(f"#!{sys.executable}\nimport sys\n{body}\n", encoding="utf-8")
-    path.chmod(0o755)
-    return path
-
-
-@pytest.fixture
-def fake_llm(tmp_path, monkeypatch):
-    """Configure a runnable summarizer; yields (bin, model) for further tweaking."""
-    bin_path = _stub_llama(tmp_path / "llama-completion")
-    model = tmp_path / "model.gguf"
-    model.write_text("x")
-    monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
-    monkeypatch.setenv("REACHER_LLM_MODEL", str(model))
-    reset_probe_cache()
-    yield bin_path, model
-    reset_probe_cache()
 
 
 def _write_run(tmp_path, records, meta=None):
@@ -126,280 +90,140 @@ class TestExcerpt:
         assert "no diagnostic records" in build_excerpt(str(run_dir))
 
 
-class TestSummarizeParse:
-    def test_strips_fences_and_allowlists_labels(self):
-        raw = """```json
-{"title": "Cue tone never fires on START", "body": "## Description\\nCue 1 is armed but silent.", "labels": ["bug", "hardware", "invented"]}
-```"""
-        parsed = _parse_model_json(raw)
-        out = _sanitize(parsed, excerpt="err line", versions="reacher 1", summarized=True)
-        assert out["title"].startswith("Cue tone")
-        assert out["labels"] == ["bug", "hardware"]
-        assert "## Diagnostic excerpt" in out["body"]
-        assert out["summarized"] is True
+class TestBuildPrefill:
+    """No network, no subprocess — pure string composition."""
 
-    def test_fallback_on_garbage(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("REACHER_LLM_BIN", str(tmp_path / "llama-cli"))
-        monkeypatch.setenv("REACHER_LLM_MODEL", str(tmp_path / "model.gguf"))
-        (tmp_path / "llama-cli").write_text("x")
-        (tmp_path / "model.gguf").write_text("x")
+    def test_never_touches_network_or_subprocess(self, monkeypatch):
+        with (
+            patch("httpx.AsyncClient.post", side_effect=AssertionError("must not run")),
+            patch("subprocess.run", side_effect=AssertionError("must not run")),
+            patch("subprocess.Popen", side_effect=AssertionError("must not run")),
+        ):
+            result = build_prefill(repo="labrynth", description="The pump never fired")
+        assert result["url"].startswith("https://github.com/")
 
-        def boom(_user):
-            raise RuntimeError("llama exploded")
+    def test_title_from_first_line_of_description(self):
+        result = build_prefill(repo="labrynth", description="Pump relay never closes.\nMore detail here.")
+        assert result["title"] == "Pump relay never closes."
 
-        monkeypatch.setattr("reacher.issues.summarize._run_llama", boom)
-        out = summarize_report(
-            repo="labrynth",
-            description="The pump never fired",
-            excerpt="error | pump",
-            severity="critical",
-        )
-        assert out["summarized"] is False
-        assert "needs-triage" in out["labels"]
-        assert "The pump never fired" in out["body"]
+    def test_long_description_title_is_capped(self):
+        result = build_prefill(repo="labrynth", description="x" * 200)
+        assert len(result["title"]) <= 72
+        assert result["title"].endswith("…")
 
+    def test_body_includes_description_and_environment(self):
+        result = build_prefill(repo="labrynth", description="The pump never fired", versions="reacher 9.9.9")
+        assert "The pump never fired" in result["body"]
+        assert "reacher 9.9.9" in result["body"]
 
-class TestIssuesApi:
-    def test_status_unconfigured(self, api):
-        body = api.get("/api/issues/status").json()
-        assert body["llm"] is False
-        assert body["github"] is False
-        assert body["owner"] == "Otis-Lab-MUSC"
-        assert "labrynth" in body["repos"]
+    def test_body_has_repro_placeholder_when_steps_empty(self):
+        result = build_prefill(repo="labrynth", description="x")
+        assert "## Steps to Reproduce" in result["body"]
+        assert "What were you doing" in result["body"]
 
-    def test_status_configured(self, api, fake_llm, monkeypatch):
-        monkeypatch.setenv("REACHER_GITHUB_TOKEN", "ghp_test")
+    def test_body_uses_users_own_steps_when_given(self):
+        result = build_prefill(repo="labrynth", description="x", steps="1. Click Start\n2. Watch nothing happen")
+        assert "1. Click Start" in result["body"]
+        assert "What were you doing" not in result["body"]
+
+    def test_severity_included_when_set(self):
+        result = build_prefill(repo="labrynth", description="x", severity="critical")
+        assert "critical" in result["body"]
+
+    def test_labels_are_filtered_to_allowlist_and_develop_is_added(self):
+        result = build_prefill(repo="labrynth", description="x", labels=["bug", "not-a-label", "hardware"])
+        assert result["labels"] == ["bug", "hardware", "develop"]
+
+    def test_owner_defaults_to_otis_lab(self, monkeypatch):
+        monkeypatch.delenv("REACHER_GITHUB_OWNER", raising=False)
+        assert github_owner() == "Otis-Lab-MUSC"
+        assert build_prefill(repo="labrynth", description="x")["owner"] == "Otis-Lab-MUSC"
+
+    def test_owner_env_override(self, monkeypatch):
         monkeypatch.setenv("REACHER_GITHUB_OWNER", "example-org")
-        body = api.get("/api/issues/status").json()
-        assert body["llm"] is True
-        assert body["github"] is True
-        assert body["owner"] == "example-org"
+        assert build_prefill(repo="labrynth", description="x")["url"].startswith(
+            "https://github.com/example-org/labrynth/"
+        )
 
-    def test_report_requires_auth(self, api):
+    def test_url_stays_within_budget_even_with_a_huge_excerpt(self, tmp_path):
+        records = [{"ts": f"t{i}", "lvl": "error", "evt": "x", "msg": "n" * 200} for i in range(500)]
+        run_dir = _write_run(tmp_path, records)
+        fake_excerpt = lambda max_chars=0: build_excerpt(run_dir, max_chars=max_chars)  # noqa: E731
+        with patch("reacher.issues.prefill.build_current_excerpt", side_effect=fake_excerpt):
+            result = build_prefill(repo="labrynth", description="short report")
+        assert len(result["url"]) <= URL_BUDGET
+
+    def test_huge_description_still_produces_a_bounded_url(self):
+        result = build_prefill(repo="labrynth", description="x" * 50_000, steps="y" * 50_000)
+        assert len(result["url"]) <= URL_BUDGET + 500  # blunt fallback truncation, not exact
+        assert "truncated" in result["body"]
+
+
+class TestIssueUrl:
+    def test_round_trips_through_query_params(self):
+        url = issue_url("Otis-Lab-MUSC", "reacher", "A title", "A body\nwith a newline", ["bug", "develop"])
+        parsed = urlparse(url)
+        assert parsed.scheme == "https"
+        assert parsed.netloc == "github.com"
+        assert parsed.path == "/Otis-Lab-MUSC/reacher/issues/new"
+        qs = parse_qs(parsed.query)
+        assert qs["title"] == ["A title"]
+        assert qs["body"] == ["A body\nwith a newline"]
+        assert qs["labels"] == ["bug,develop"]
+
+    def test_labels_param_omitted_when_empty(self):
+        url = issue_url("Otis-Lab-MUSC", "reacher", "t", "b", [])
+        assert "labels=" not in url
+
+
+class TestPrefillEndpoint:
+    def test_requires_auth(self, api):
         res = api.post(
-            "/api/issues/report",
+            "/api/issues/prefill",
             json={"description": "something broke"},
             headers={"Authorization": ""},
         )
         assert res.status_code == 401
 
-    def test_report_503_without_llm(self, api):
-        res = api.post("/api/issues/report", json={"description": "something broke"})
-        assert res.status_code == 503
-        assert "summarizer" in res.json()["detail"].lower()
-
-    def test_report_summarize_without_github(self, api, fake_llm):
-        fake = {
-            "title": "Pump relay never closes",
-            "body": "## Description\nPump 1 armed but silent.",
-            "labels": ["bug", "hardware"],
-            "summarized": True,
-        }
-        with patch("reacher.api.routers.issues.summarize_report", return_value=fake):
-            res = api.post(
-                "/api/issues/report",
-                json={"description": "pump did nothing", "severity": "moderate"},
-            )
+    def test_returns_a_prefilled_link(self, api):
+        res = api.post(
+            "/api/issues/prefill",
+            json={"description": "The pump never fired", "severity": "moderate", "repo": "labrynth"},
+        )
         assert res.status_code == 200
         data = res.json()
-        assert data["filed"] is False
-        assert data["html_url"] is None
-        assert data["title"] == fake["title"]
-        assert data["summarized"] is True
+        assert data["repo"] == "labrynth"
+        assert data["owner"] == "Otis-Lab-MUSC"
+        assert data["url"].startswith("https://github.com/Otis-Lab-MUSC/labrynth/issues/new?")
+        assert "develop" in data["labels"]
 
-    def test_report_files_when_token_set(self, api, fake_llm, monkeypatch):
-        monkeypatch.setenv("REACHER_GITHUB_TOKEN", "ghp_test")
+    def test_rejects_a_bad_repo(self, api):
+        res = api.post("/api/issues/prefill", json={"description": "x", "repo": "evil"})
+        assert res.status_code == 422
 
-        fake = {
-            "title": "Cue tone never fires",
-            "body": "## Description\nSilent cue.",
-            "labels": ["bug"],
-            "summarized": True,
-        }
-        with (
-            patch("reacher.api.routers.issues.summarize_report", return_value=fake),
-            patch(
-                "reacher.api.routers.issues.create_issue",
-                new_callable=AsyncMock,
-                return_value="https://github.com/Otis-Lab-MUSC/labrynth/issues/1",
-            ) as created,
-        ):
-            res = api.post(
-                "/api/issues/report",
-                json={"description": "no sound", "repo": "labrynth", "app_version": "3.0.1-alpha.14"},
-            )
-        assert res.status_code == 200
+    def test_rejects_empty_description(self, api):
+        res = api.post("/api/issues/prefill", json={"description": ""})
+        assert res.status_code == 422
+
+    def test_rejects_oversized_description(self, api):
+        res = api.post("/api/issues/prefill", json={"description": "x" * 3000})
+        assert res.status_code == 422
+
+    def test_labels_are_allowlist_filtered_and_capped(self, api):
+        res = api.post(
+            "/api/issues/prefill",
+            json={
+                "description": "x",
+                "labels": ["bug", "not-a-label", "agent-ready", "hardware", "UI", "camera"],
+            },
+        )
         data = res.json()
-        assert data["filed"] is True
-        assert data["html_url"].endswith("/issues/1")
-        created.assert_awaited_once()
-        kwargs = created.await_args.kwargs
-        assert kwargs["repo"] == "labrynth"
-        assert kwargs["summarized"] is True
+        # allowlisted only, capped at 3 category labels, plus routing label
+        assert data["labels"] == ["bug", "hardware", "UI", "develop"]
 
-    def test_fallback_path_passes_summarized_false(self, api, fake_llm, monkeypatch):
-        monkeypatch.setenv("REACHER_GITHUB_TOKEN", "ghp_test")
-
-        fake = {
-            "title": "The pump never fired",
-            "body": "## Description\nThe pump never fired",
-            "labels": ["bug", "needs-triage"],
-            "summarized": False,
-        }
-        with (
-            patch("reacher.api.routers.issues.summarize_report", return_value=fake),
-            patch(
-                "reacher.api.routers.issues.create_issue",
-                new_callable=AsyncMock,
-                return_value="https://github.com/Otis-Lab-MUSC/labrynth/issues/2",
-            ) as created,
-        ):
-            res = api.post("/api/issues/report", json={"description": "The pump never fired"})
-        assert res.status_code == 200
-        assert res.json()["summarized"] is False
-        assert created.await_args.kwargs["summarized"] is False
-
-
-class TestLlmProbe:
-    """The probe exists because two separate defects shipped looking healthy."""
-
-    def test_unset_env_reports_why(self, monkeypatch):
-        monkeypatch.delenv("REACHER_LLM_BIN", raising=False)
-        monkeypatch.delenv("REACHER_LLM_MODEL", raising=False)
-        reset_probe_cache()
-        status = llm_probe()
-        assert status.ok is False
-        assert "not set" in status.detail
-
-    def test_missing_model_reports_path(self, tmp_path, monkeypatch):
-        bin_path = _stub_llama(tmp_path / "llama-completion")
-        monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
-        monkeypatch.setenv("REACHER_LLM_MODEL", str(tmp_path / "absent.gguf"))
-        reset_probe_cache()
-        status = llm_probe()
-        assert status.ok is False
-        assert "GGUF model not found" in status.detail
-
-    def test_non_executable_binary_fails(self, tmp_path, monkeypatch):
-        """Regression: a bundle missing its shared libraries is not 'available'.
-
-        Shipped as a plain unreadable/unrunnable file, this used to pass the
-        old ``os.path.isfile`` check and only fail when a user filed a report.
-        """
-        bin_path = tmp_path / "llama-completion"
-        bin_path.write_text("not an executable")
-        bin_path.chmod(0o644)
-        (tmp_path / "model.gguf").write_text("x")
-        monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
-        monkeypatch.setenv("REACHER_LLM_MODEL", str(tmp_path / "model.gguf"))
-        reset_probe_cache()
-        status = llm_probe()
-        assert status.ok is False
-        assert "llama-completion" in status.detail
-
-    def test_binary_rejecting_our_flags_fails(self, tmp_path, monkeypatch):
-        """Regression: llama-cli b10622 dropped --no-conversation.
-
-        The binary starts and ``--version`` succeeds, so only a probe that
-        sends the *real* argv catches it.
-        """
-        bin_path = _stub_llama(
-            tmp_path / "llama-cli",
-            body=(
-                "if '--no-conversation' in sys.argv:\n"
-                "    sys.stderr.write('error: invalid argument: --no-conversation')\n"
-                "    raise SystemExit(1)\n"
-                "raise SystemExit(0)"
-            ),
+    def test_app_version_is_folded_into_the_body(self, api):
+        res = api.post(
+            "/api/issues/prefill",
+            json={"description": "x", "app_version": "3.0.1-alpha.14"},
         )
-        (tmp_path / "model.gguf").write_text("x")
-        monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
-        monkeypatch.setenv("REACHER_LLM_MODEL", str(tmp_path / "model.gguf"))
-        reset_probe_cache()
-        status = llm_probe()
-        assert status.ok is False
-        assert "invalid argument" in status.detail
-
-    def test_probe_sends_a_non_empty_prompt(self, tmp_path, monkeypatch):
-        """Regression: llama.cpp exits non-zero on an empty prompt.
-
-        A probe that passes ``-p ""`` reports a perfectly good bundle as
-        broken — a false negative is as bad as the bug it screens for.
-        """
-        bin_path = _stub_llama(
-            tmp_path / "llama-completion",
-            body=(
-                "i = sys.argv.index('-p')\n"
-                "if not sys.argv[i + 1]:\n"
-                "    sys.stderr.write('input is empty')\n"
-                "    raise SystemExit(255)\n"
-                "raise SystemExit(0)"
-            ),
-        )
-        (tmp_path / "model.gguf").write_text("x")
-        monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
-        monkeypatch.setenv("REACHER_LLM_MODEL", str(tmp_path / "model.gguf"))
-        reset_probe_cache()
-        status = llm_probe()
-        assert status.ok is True, status.detail
-
-    def test_probe_argv_matches_real_argv(self):
-        """The probe is worthless if it can drift from what inference runs."""
-        probe = _llama_argv("/bin/llama", "/m.gguf", prompt="", n_predict=0)
-        real = _llama_argv("/bin/llama", "/m.gguf", prompt_file="/p.txt", n_predict=1024)
-        flags = lambda argv: [a for a in argv if a.startswith("--") or a.startswith("-")]  # noqa: E731
-        assert set(flags(probe)) - {"-p"} == set(flags(real)) - {"-f"}
-        assert "--no-conversation" in probe
-        assert probe[probe.index("-n") + 1] == "0"
-
-    def test_result_is_cached_then_invalidated(self, fake_llm):
-        bin_path, _model = fake_llm
-        assert llm_probe().ok is True
-        # Break the binary; the cached result stands until the file changes.
-        cached = llm_probe()
-        assert cached.ok is True
-        _stub_llama(bin_path, body="raise SystemExit(1)")
-        assert llm_probe().ok is False
-
-
-class TestStatusSurfacesReason:
-    def test_status_reports_detail_when_unavailable(self, api):
-        body = api.get("/api/issues/status").json()
-        assert body["llm"] is False
-        assert body["llm_detail"]
-
-    def test_status_detail_is_null_when_healthy(self, api, fake_llm):
-        body = api.get("/api/issues/status").json()
-        assert body["llm"] is True
-        assert body["llm_detail"] is None
-
-    def test_report_503_explains_the_failure(self, api, tmp_path, monkeypatch):
-        bin_path = tmp_path / "llama-completion"
-        bin_path.write_text("broken")
-        bin_path.chmod(0o644)
-        (tmp_path / "model.gguf").write_text("x")
-        monkeypatch.setenv("REACHER_LLM_BIN", str(bin_path))
-        monkeypatch.setenv("REACHER_LLM_MODEL", str(tmp_path / "model.gguf"))
-        reset_probe_cache()
-        res = api.post("/api/issues/report", json={"description": "broke"})
-        assert res.status_code == 503
-        detail = res.json()["detail"]
-        assert "not available" in detail
-        assert "llama-completion" in detail
-
-    def test_fallback_response_carries_error(self, api, fake_llm):
-        fake = {
-            "title": "t",
-            "body": "b",
-            "labels": ["bug"],
-            "summarized": False,
-            "error": "llama-completion exited 1: boom",
-        }
-        with patch("reacher.api.routers.issues.summarize_report", return_value=fake):
-            res = api.post("/api/issues/report", json={"description": "x"})
-        assert res.status_code == 200
-        assert res.json()["summary_error"] == "llama-completion exited 1: boom"
-
-
-def test_excerpt_max_constant_fits_github():
-    assert EXCERPT_MAX_CHARS < 65_536
+        assert "3.0.1-alpha.14" in res.json()["body"]
