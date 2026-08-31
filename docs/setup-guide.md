@@ -442,10 +442,7 @@ These are optional. The defaults work for most setups.
 | `REACHER_API_KEY` | Auto-generated | Override the API key instead of using the auto-generated one |
 | `REACHER_BROKER_URL` | Not set | URL of a REACHER broker for networks where automatic discovery doesn't work (e.g., university networks) |
 | `REACHER_CORS_ORIGINS` | Not set | Extra allowed origins for cross-origin requests (comma-separated) |
-| `REACHER_LLM_BIN` | Not set | Path to `llama-completion`. The Labrynth GUI installer sets this automatically. Required for in-app issue summarization. |
-| `REACHER_LLM_MODEL` | Not set | Path to the bundled GGUF. Required together with `REACHER_LLM_BIN`. |
-| `REACHER_GITHUB_TOKEN` | Not set | Fine-grained GitHub PAT with `issues: write` on the labrynth and reacher repos. Set this on each lab machine that should file issues. Never bake it into the installer. |
-| `REACHER_GITHUB_OWNER` | `Otis-Lab-MUSC` | GitHub org/user that owns those repos. |
+| `REACHER_GITHUB_OWNER` | `Otis-Lab-MUSC` | GitHub org/user that owns the labrynth and reacher repos. Used to build the pre-filled "New Issue" link. |
 
 To set an environment variable:
 
