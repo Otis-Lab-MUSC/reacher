@@ -40,6 +40,17 @@ _USE_VALUE = object()  # sentinel: use the `value` arg from send_command()
 
 # Maps command codes to (device_name, field_name, value_or_sentinel)
 # _USE_VALUE means the value is taken from the `value` arg passed to send_command().
+#
+# device_name MUST be spelled the way firmware spells it at log level 000
+# (reportDeviceConfig / reportDeviceLever), not level 007. This path and the
+# firmware-config path both append into `hardware_settings` and dedup on plain
+# string equality, so a name firmware never emits at 000 will not collide with
+# the firmware's own row — it silently creates a second, permanent entry for the
+# same device with disjoint fields, and both reach the browser.
+#
+# The lick circuit is the trap: firmware calls it LICK at 000 and LICK_CIRCUIT at
+# 007. LICK is canonical here, matching the normalization the 007 handler already
+# performs below. tests/test_device_names.py::test_l8_* enforces this.
 _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     # --- Arm/Disarm ---
     300: ("CUE", "armed", False),
@@ -50,8 +61,8 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     401: ("PUMP", "armed", True),
     410: ("PUMP2", "armed", False),
     411: ("PUMP2", "armed", True),
-    500: ("LICK_CIRCUIT", "armed", False),
-    501: ("LICK_CIRCUIT", "armed", True),
+    500: ("LICK", "armed", False),
+    501: ("LICK", "armed", True),
     600: ("LASER", "armed", False),
     601: ("LASER", "armed", True),
     900: ("MICROSCOPE", "armed", False),
@@ -97,7 +108,7 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     386: ("CUE2", "pin", _USE_VALUE),
     476: ("PUMP", "pin", _USE_VALUE),
     486: ("PUMP2", "pin", _USE_VALUE),
-    576: ("LICK_CIRCUIT", "pin", _USE_VALUE),
+    576: ("LICK", "pin", _USE_VALUE),
     676: ("LASER", "pin", _USE_VALUE),
     976: ("MICROSCOPE", "trigger_pin", _USE_VALUE),
     1076: ("LEVER_RH", "pin", _USE_VALUE),

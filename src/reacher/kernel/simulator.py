@@ -257,9 +257,12 @@ class FirmwareSimulator:
             "armed": self.cue_armed, "frequency": self.cue_frequency,
             "duration": self.cue_duration,
         })
+        # Level 000 spells levers LEVER_RH / LEVER_LH (reportDeviceLever). The
+        # old SWITCH_LEVER_<orientation> form matched no firmware version and no
+        # kernel handler, so config rows for it were silently unmappable.
         active_orientation = "RH" if self.lever_rh_active else "LH"
         self._send({
-            "level": "000", "device": f"SWITCH_LEVER_{active_orientation}",
+            "level": "000", "device": f"LEVER_{active_orientation}",
             "armed": self.lever_rh_armed if active_orientation == "RH" else self.lever_lh_armed,
             "reinforced": True,
         })
@@ -268,7 +271,9 @@ class FirmwareSimulator:
             "armed": self.pump_armed, "duration": self.pump_duration,
         })
         if self.lick_armed:
-            self._send({"level": "000", "device": "LICK_CIRCUIT", "armed": True})
+            # Level 000 spells the lick circuit LICK; only level 007 uses
+            # LICK_CIRCUIT (see the 007 emit below and reacher.py's handler).
+            self._send({"level": "000", "device": "LICK", "armed": True})
         if self.microscope_armed:
             self._send({"level": "000", "device": "MICROSCOPE", "armed": True})
         if self.laser_armed:
@@ -568,7 +573,9 @@ class FirmwareSimulator:
         # Pump — use secondary if SET_ACTIVE_PUMP selected it, else primary
         if self.pump2_active and self.pump2_armed:
             self._send({
-                "level": "007", "device": "PUMP2", "pin": 13,
+                # Level 007 spells the secondary pump PUMP_2 (Scheduler::
+                # LogDeviceActivation); PUMP2 is the level-000/001 spelling.
+                "level": "007", "device": "PUMP_2", "pin": 13,
                 "event": "INFUSION", "start_timestamp": self._clock,
                 "end_timestamp": self._clock + self.pump2_duration,
             })
