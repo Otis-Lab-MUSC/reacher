@@ -111,6 +111,55 @@ Log volume note: chatty third-party loggers are capped in `QUIET_LOGGERS` —
 without that the subnet-scan fallback alone (~500 hosts/cycle via httpcore)
 buries the signal.
 
+### Registry Export (`src/reacher/schema.py`)
+`python -m reacher.schema dump --json` emits every registry as one document:
+commands, pin constraints, boards, paradigms, **plus** parsed `Commands.h`,
+`Pins.h`, per-sketch `Cmd::` references, and the firmware device-name
+namespaces. It is the **only** place those firmware files are parsed —
+`test_command_parity.py` and the MCP checks both go through it, so a reformat
+breaks one parser rather than three. Pure read + serialize: no network, no
+writes. Reports `firmware.present: false` (never raises) on a wheel-only tree.
+Every parser has a sanity floor that raises rather than returning an empty
+result a comparison would read as "no drift".
+
+It also owns two registries other layers derive from: `KNOWN_FIRMWARE_GAPS`
+(commands the UI offers that firmware silently drops — **derive UI gates from
+this, never hand-write them**) and `INTENTIONALLY_UNHANDLED` (by-design cases).
+Tests assert the two stay disjoint and that neither goes stale.
+
+**Device names are per-log-level, not global.** Firmware spells the lick circuit
+`LICK` at level 000 and `LICK_CIRCUIT` at level 007; the operant scheduler emits
+`CUE_1`/`PUMP_1` where the Pavlovian one emits `CUE`/`PUMP`. The kernel rewrites
+some names before emitting, so **anything downstream of the kernel must be
+checked against `device_names.post_kernel`**, never the raw firmware sets.
+`POST_KERNEL_EVENT_REWRITES` and `EVENT_STREAM_CONTRIBUTORS` model that; the
+latter is keyed by log level and covers level 009, which synthesizes an `SLM`
+event that appears at no 007 print site.
+
+### MCP Server (`src/reacher/mcp/`)
+Cross-repo change tooling for a user's own coding agent — `pip install
+"reacher2p[mcp]"`, then the `reacher-mcp` console script over stdio. Six
+read-only tools plus `run_checks`; **no file-writing tools** (the agent writes,
+under its own permission model). Never imported by `api/app.py`, so it stays out
+of the frozen bundle. See `docs/mcp-server.md`.
+
+Three invariants, each guarding a way to report success while verifying nothing:
+- Ground truth is fetched by running `reacher.schema` as a **subprocess with
+  `PYTHONPATH` at the target checkout's `src/`**, per call, never cached and
+  never imported. Otherwise a user with both an installed wheel and a checkout
+  reads the wheel while editing the checkout.
+- Checks report `pass | fail | unavailable | error`, and `unavailable` is never
+  a pass. `run_checks` reports `ran`/`trustworthy`/`verdict` separately from
+  `exit_code` (`pass_with_skips`, `pass_with_warnings`).
+- Every result declares `derived_from`; results whose remedy is a deletion carry
+  a `before_removing` warning. Four times during development a contract was
+  modelled from a partial view of its producer and *the correct code looked
+  wrong* — provenance is the guardrail against acting on that.
+
+`run_checks` uses a literal argv allowlist (`shell=False`, pinned cwd,
+`clean_child_env()`). `firmware/compile.sh` is deliberately excluded: it
+rewrites committed hex.
+
 ### Firmware Uploader (`src/reacher/uploader/`)
 Wraps `avrdude` to flash Arduino firmware. Handles PyInstaller frozen mode path resolution (`_MEIPASS/hex/`) and streams upload progress via callback. `boards.py` is the board-profile registry — each entry maps a `board_id` to a display name, an Arduino CLI FQBN, and the `avrdude` argument tuple. Adding a new board is a single entry in `BOARD_PROFILES`. Hex resolution prefers package data (`src/reacher/hex/`) as canonical; the GitHub fallback fetches from this repo (`Otis-Lab-MUSC/reacher`, `src/reacher/hex/`) for bare `pip install` hosts.
 
@@ -167,12 +216,22 @@ Tests use `pytest` with `asyncio_mode=auto` (configured in `pyproject.toml`). Th
 - `tests/test_pin_overrides.py` — pin override persistence, validation, and serial-reconnect replay
 - `tests/test_logging.py` — diagnostic sink, rotation, redaction, crash hooks, ingest/export, end-to-end corr_id trace
 - `tests/test_issues.py` — log excerpt builder and `POST /api/issues/prefill` (title/body composition, excerpt-shrink-to-fit-URL-budget, label filtering, repo validation)
+- `tests/test_schema.py` — the registry export, with golden-negatives proving each parser's sanity floor fires
+- `tests/test_firmware_parity.py` — C13 (lite twins carry every non-2P command; `Config.h` byte-identical) and C14 (declared paradigm support has a handler)
+- `tests/test_device_names.py` — L8: kernel and simulator device names against the firmware namespaces, and that every `code_dict` level is classified
+- `tests/test_frontend_parity.py` — C3–C9 against the labrynth checkout; **skips loudly** when absent
+- `tests/test_mcp_*.py` — workspace discovery, the checkout-beats-wheel guarantee, the check engine's golden-negatives, and the tool surface
 - `tests/conftest.py` — autouse fixture pointing `REACHER_LOG_DIR` at `tmp_path`; **required**, or tests write to the real `~/REACHER/`
+
+**Golden-negatives are mandatory for a new check.** Every consistency rule ships
+with a test driving deliberately drifted input, because a check that has never
+failed is indistinguishable from one that cannot.
 
 ## Docs & Scripts
 
 - `docs/setup-guide.md` — end-user setup walkthrough (host install, pairing, systemd).
 - `docs/logging.md` — diagnostic log: record schema, correlation, `jq` recipes, redaction policy, retrieval.
+- `docs/mcp-server.md` — the `reacher-mcp` cross-repo change server: setup, tools, how to read `UNAVAILABLE`/`verdict`/`derived_from`.
 - `scripts/install.sh` — host-side installer.
 - `scripts/bump-version.py` — single source of truth for the package version; updates `pyproject.toml`, `src/reacher/__init__.py`, the firmware version strings (`firmware/libraries/REACHERDevices/library.properties` + each sketch's `SendIdentification()`), and the `README.md` version badge + wheel-install example in one shot. Derived spellings are handled automatically — the badge is shields.io-escaped (`3.0.0-alpha.1` → `3.0.0--alpha.1`) and the wheel name is PEP 440 normalized (`3.0.0-alpha.1` → `3.0.0a1`); `--check` (which CI runs against the bare tag) validates all forms. After bumping, recompile firmware hex (`bash firmware/compile.sh`) so the shipped binaries report the new version.
 
