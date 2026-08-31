@@ -1022,3 +1022,84 @@ class TestFrameTimestampStopSemantics:
         reacher.update_frame_events({"timestamp": 9999})
         assert reacher.frame_data == [9999]
         assert emit_calls == [("frame", {"timestamp": 9999, "missed": 0})]
+
+
+class TestInfusionCounting:
+    """The kernel's infusion tally, which the export and the limit check rely on.
+
+    A browser-side count is reconstructed from a refetched event list after a
+    WebSocket reconnect, and can silently disagree with reality. The kernel
+    counts off the serial stream as events arrive, so it has no equivalent
+    failure mode — provided it recognises every spelling firmware uses.
+    """
+
+    @pytest.fixture
+    def counter(self, reacher):
+        """A REACHER wired only for counting.
+
+        The shared `reacher` fixture is reused across this module, so its
+        logger and event-log path may carry state from earlier tests. Counting
+        is the only behaviour under test here, so the durable-write and logging
+        side paths are neutralised rather than exercised.
+        """
+        reacher._write_event_log = lambda *a, **k: None
+        reacher.logger = logging.getLogger("test.infusion")
+        reacher.program_running = True
+        reacher.program_flag.clear()
+        reacher._infusion_count = 0
+        reacher._cumulative_infusion_count = 0
+        reacher.behavior_data = []
+        return reacher
+
+    def _infusion(self, device):
+        return {
+            "level": "007", "device": device, "event": "INFUSION",
+            "pin": 4, "start_timestamp": 100, "end_timestamp": 200,
+        }
+
+    def test_counts_both_operant_and_pavlovian_spellings(self, counter):
+        """The operant scheduler emits PUMP_1; the Pavlovian one emits PUMP.
+
+        Recognising only one silently zeroes the count for eight of the nine
+        paradigms, or for the ninth.
+        """
+        for device in ("PUMP_1", "PUMP", "PUMP_1"):
+            counter.update_behavioral_events(self._infusion(device))
+        assert counter.get_total_infusion_count() == 3
+
+    def test_ignores_other_devices_and_events(self, counter):
+        counter.update_behavioral_events(self._infusion("PUMP_2"))
+        counter.update_behavioral_events(
+            {"level": "007", "device": "PUMP_1", "event": "TONE",
+             "pin": 4, "start_timestamp": 1, "end_timestamp": 2}
+        )
+        assert counter.get_total_infusion_count() == 0
+
+    def test_total_spans_segments(self):
+        """An export archive contains every segment, so its count must too.
+
+        `_infusion_count` alone resets at each split; a summary built from it
+        would describe only the final segment while the ZIP holds them all.
+        """
+        import threading
+
+        instance = REACHER.__new__(REACHER)
+        instance._infusion_count = 4
+        instance._cumulative_infusion_count = 11
+        instance.thread_lock = threading.Lock()
+        assert instance.get_total_infusion_count() == 15
+
+    def test_count_survives_a_refetch_of_the_event_list(self, counter):
+        """The kernel has no recompute path, which is why it cannot drift.
+
+        Replacing behavior_data wholesale — the server-side analogue of the
+        frontend's reconnect recovery — must not disturb the tally, because the
+        tally was never derived from that list.
+        """
+        for _ in range(5):
+            counter.update_behavioral_events(self._infusion("PUMP_1"))
+        assert counter.get_total_infusion_count() == 5
+
+        with counter.thread_lock:
+            counter.behavior_data = []
+        assert counter.get_total_infusion_count() == 5

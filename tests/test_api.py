@@ -36,6 +36,7 @@ def client():
         mock_instance.make_destination_folder.return_value = "/tmp/reacher_test"
         mock_instance.get_segment_exports.return_value = []
         mock_instance.get_segment_event_counts.return_value = []
+        mock_instance.get_total_infusion_count.return_value = 0
         mock_instance.get_event_log_path.return_value = "/tmp/reacher_test_missing_event_log.jsonl"
         mock_instance.flush_event_log.return_value = None
         mock_instance.emit_failure_count = 0
@@ -397,6 +398,9 @@ class TestFileEndpoints:
         instance.get_firmware_information.return_value = {"sketch": "fr", "version": "v2.0.0"}
         instance.get_hardware_settings.return_value = [{"baud_rate": 9600}]
         instance.get_frame_data.return_value = [50, 150, 250, 350, 450]
+        # The kernel's authoritative tally, deliberately unequal to the count
+        # the request body will send.
+        instance.get_total_infusion_count.return_value = 7
 
         # Non-segmented session — no prior segment CSVs
         instance.get_segment_exports.return_value = []
@@ -416,6 +420,8 @@ class TestFileEndpoints:
             json={
                 "session_name": "my_session",
                 "notes": "test notes",
+                # Deliberately wrong: a browser-side tally disturbed by a
+                # WebSocket reconnect. The kernel's count must win.
                 "infusion_count": 3,
                 "press_count": 10,
                 "trial_count": 2,
@@ -442,7 +448,11 @@ class TestFileEndpoints:
 
             meta = json.loads(zf.read("metadata.json"))
             assert meta["session_name"] == "my_session"
-            assert meta["infusion_count"] == 3
+            # The exported count comes from the kernel (7), not the request
+            # body (3). The kernel counts off the serial stream and is what
+            # check_limit_met enforces against; a browser tally can be silently
+            # wrong after a reconnect, and that must not reach the archive.
+            assert meta["infusion_count"] == 7
             assert meta["firmware_sketch"] == "fr"
             assert meta["firmware_version"] == "v2.0.0"
             assert meta["frame_count"] == 5

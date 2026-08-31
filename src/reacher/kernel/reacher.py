@@ -1422,6 +1422,20 @@ class REACHER:
         """Return the current segment number (0 means no splits have occurred)."""
         return self._segment_number
 
+    def get_total_infusion_count(self) -> int:
+        """Return infusions across every segment of this session.
+
+        This is the count the kernel maintained from the serial stream itself,
+        which is what ``check_limit_met`` enforces against. It is authoritative:
+        unlike a count reconstructed in a browser, it cannot be disturbed by a
+        WebSocket reconnect, a segment split, or a tab lifecycle.
+
+        Spans all segments because that is what an export archive contains —
+        ``_infusion_count`` alone covers only the current one.
+        """
+        with self.thread_lock:
+            return self._cumulative_infusion_count + self._infusion_count
+
     def get_segment_exports(self) -> List[str]:
         """Return a snapshot of split-segment CSV paths (does not include the final in-memory segment)."""
         with self.thread_lock:
