@@ -5,16 +5,20 @@ firmware/libraries/REACHERDevices/src/Commands.h. Now that both files live in
 this repo, this test parses the header and asserts parity so additions on
 either side fail CI until the other side is updated.
 
+The header parser lives in ``reacher.schema`` so that this test, the cross-repo
+consistency checks and the MCP server all read Commands.h through one
+implementation — a reformat should break one parser, not three.
+
 Skipped when the firmware source tree is absent (e.g. running the test suite
 against an installed wheel, which ships only the hex artifacts).
 """
 
-import re
 from pathlib import Path
 
 import pytest
 
 from reacher.kernel.commands import COMMAND_REGISTRY, CommandCode
+from reacher.schema import parse_commands_header
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 COMMANDS_H = REPO_ROOT / "firmware" / "libraries" / "REACHERDevices" / "src" / "Commands.h"
@@ -26,8 +30,6 @@ COMMANDS_H = REPO_ROOT / "firmware" / "libraries" / "REACHERDevices" / "src" / "
 # sketch — see reacher #24.)
 KNOWN_BACKEND_ONLY: set[CommandCode] = set()
 
-_CONSTEXPR_RE = re.compile(r"^\s*constexpr\s+int\s+(\w+)\s*=\s*(\d+)\s*;", re.MULTILINE)
-
 pytestmark = pytest.mark.skipif(
     not COMMANDS_H.is_file(),
     reason="firmware source not present (installed-wheel run)",
@@ -35,10 +37,12 @@ pytestmark = pytest.mark.skipif(
 
 
 def parse_commands_h() -> dict[str, int]:
-    return {name: int(value) for name, value in _CONSTEXPR_RE.findall(COMMANDS_H.read_text())}
+    return parse_commands_header(COMMANDS_H)
 
 
 def test_header_parsed():
+    # parse_commands_header raises below its own sanity floor, so reaching this
+    # assertion at all already proves the parser is not silently degraded.
     codes = parse_commands_h()
     assert len(codes) > 50, f"Commands.h parse looks broken — only {len(codes)} constants found"
 
