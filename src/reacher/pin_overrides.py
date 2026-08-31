@@ -89,7 +89,12 @@ SET_PIN_CODE_FOR: dict[str, int] = {
     c.component_key: code for code, c in PIN_CONSTRAINTS.items()
 }
 
-# All canonical component keys (stable order — used by the GUI grid).
+# All canonical component keys, in PIN_CONSTRAINTS declaration order.
+#
+# NOT the GUI grid order: labrynth's pinMeta.ts COMPONENT_KEYS declares its own
+# ordering (levers first) because the grid groups by physical layout, not by
+# command code. The two lists must agree on membership — tests/test_frontend_parity.py
+# enforces that — but deliberately not on order.
 COMPONENT_KEYS: tuple[str, ...] = tuple(SET_PIN_CODE_FOR.keys())
 
 
