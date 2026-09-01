@@ -169,6 +169,10 @@ def run(
                     status=Status.UNAVAILABLE,
                     message=f"not verified — missing: {', '.join(unmet)}",
                     fix_hint=_hint_for(unmet),
+                    # An unavailable result is the partial model the module docstring
+                    # warns about, so it needs provenance more than a passing one does:
+                    # naming what it needed and could not read.
+                    provenance=tuple(f"{name} (not present in this workspace)" for name in unmet),
                 )
             )
             continue
