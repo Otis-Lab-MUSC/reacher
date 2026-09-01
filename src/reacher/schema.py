@@ -176,15 +176,35 @@ KNOWN_FIRMWARE_GAPS: dict[str, dict[str, Any]] = {
     "LASER_TRIGGER_LH_ONLY": {
         "paradigms": ["vi", "vi_lite", "omission", "omission_lite"],
         "reason": (
-            "vi and omission handle only LASER_TRIGGER_RH_ONLY and never set "
-            "LASER_LEVER_FILTER, so a left-lever laser contingency is accepted by "
-            "the UI and silently dropped by firmware. fr.ino and pr.ino show the "
-            "intended shape."
+            "vi and omission handle only LASER_TRIGGER_RH_ONLY and have no "
+            "LASER_LEVER_FILTER global at all; ReconfigureChain hardcodes "
+            "sourceFilter = LEVER_RH. Code 685 therefore reaches the default "
+            "case, so LASER_RH_ONLY_MODE keeps its previous value and no "
+            "reconfigure happens. Selecting 'LH only' does not disable the "
+            "laser — it leaves the prior contingency in force, which can mean "
+            "stimulation on RH presses while the protocol says LH, for a whole "
+            "session, in data that looks normal. fr.ino and pr.ino show the "
+            "intended shape. Firmware does emit a level-006 naming the code."
         ),
         "ui_guidance": (
             "Disable the 'LH lever' laser contingency on vi and omission and say "
-            "why. Derive the gate from this entry, never hand-write it, or the "
-            "gate will outlive the gap."
+            "why — do not hide it. A hidden control reads as absent hardware, and "
+            "an 'lh' preset applied on vi would then no-op with nothing on screen "
+            "to explain the mismatch. Derive the gate from this entry, never "
+            "hand-write it, or the gate will outlive the gap."
+        ),
+        "persistence_note": (
+            "buildPresetFromSession bakes contingency:'lh' into saved presets, "
+            "re-dispatched on every apply, so a preset authored on an FR rig "
+            "misbehaves when applied to a VI rig. Gating the control is not "
+            "enough on its own; existing presets carry the setting."
+        ),
+        "remedy": (
+            "Mirror fr.ino's LASER_LEVER_FILTER into vi/omission and their lite "
+            "twins (4 sketches). Deferred pending bench verification: VI "
+            "interposes an interval trigger where FR uses press-count, so "
+            "sourceFilter behaviour under a VI schedule is not established by "
+            "reading alone, and the lite twins sit at 91-94% of UNO flash."
         ),
     },
 }

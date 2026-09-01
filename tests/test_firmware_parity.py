@@ -165,6 +165,15 @@ def test_gap_registries_are_well_formed():
             for paradigm in paradigms or []:
                 assert paradigm in ALL_PARADIGMS, f"{name}[{command}] names unknown {paradigm!r}"
 
+    # A gap is a command the UI offers and firmware drops, so each one owes the
+    # frontend an instruction. INTENTIONALLY_UNHANDLED entries do not: nothing
+    # in the UI reaches them.
+    for command, entry in schema.KNOWN_FIRMWARE_GAPS.items():
+        assert entry.get("ui_guidance"), (
+            f"KNOWN_FIRMWARE_GAPS[{command}] has no ui_guidance — the UI gate is "
+            "derived from this field, and without it the gap reaches the operator."
+        )
+
 
 def test_gap_and_intentional_registries_are_disjoint():
     """Merging the two categories would let a real defect hide as a design decision."""
