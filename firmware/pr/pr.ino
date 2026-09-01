@@ -417,7 +417,7 @@ void ParseCommands() {
             logParamChange(F("SLM"), F("duration"), slm.LaserDuration()); break;
 
           default:
-            Serial.println(F("{\"level\":\"006\",\"desc\":\"Command not found\"}"));
+            logUnknownCommand(command);
             break;
         }
       }

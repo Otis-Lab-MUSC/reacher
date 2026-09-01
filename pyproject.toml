@@ -41,11 +41,21 @@ tray = [
     "pystray>=0.19",
     "Pillow>=10.0",
 ]
+# Cross-repo change tooling exposed over MCP (`reacher-mcp`). Optional: the
+# server is never imported by the app, so a plain install and the frozen bundle
+# are unaffected.
+mcp = [
+    "mcp>=2.0,<3.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-mock>=3.12",
     "ruff>=0.4,<0.16",
+    # The consistency checks and their golden-negatives are SDK-free by design,
+    # so `dev` alone runs everything except tests/test_mcp_server.py, which
+    # importorskips the SDK.
+    "mcp>=2.0,<3.0",
 ]
 
 [project.urls]
@@ -56,6 +66,7 @@ Issues = "https://github.com/Otis-Lab-MUSC/reacher/issues"
 [project.scripts]
 reacher = "reacher.api.app:main"
 reacher-monitor = "reacher.monitor:main"
+reacher-mcp = "reacher.mcp.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

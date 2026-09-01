@@ -202,6 +202,16 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
 
     # Gather data
     behavior = instance.get_behavior_data()
+    try:
+        infusion_count = instance.get_total_infusion_count()
+        press_count = instance.get_total_press_count()
+        trial_count = instance.get_total_trial_count()
+    except AttributeError:
+        # A stub or simulator instance without the accessors; fall back rather
+        # than fail an export the user is waiting on.
+        infusion_count = body.infusion_count
+        press_count = body.press_count
+        trial_count = body.trial_count
     firmware_info = instance.get_firmware_information()
     hardware_settings = instance.get_hardware_settings()
     frame_data = instance.get_frame_data()
@@ -310,9 +320,16 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
                     "per_segment_event_counts": per_segment_event_counts,
                     "frame_count": frame_count,
                     "slm_event_count": len(slm_timestamps),
-                    "infusion_count": body.infusion_count,
-                    "press_count": body.press_count,
-                    "trial_count": body.trial_count,
+                    # All three come from the kernel's own counters, not the
+                    # request body. The kernel counts off the serial stream as
+                    # it arrives, so the figures cannot be disturbed by a
+                    # WebSocket reconnect or a tab lifecycle the way a
+                    # browser-side tally can, and they span every segment in
+                    # this archive rather than only the last one. The body
+                    # values are a fallback for a caller with no live instance.
+                    "infusion_count": infusion_count,
+                    "press_count": press_count,
+                    "trial_count": trial_count,
                 },
                 indent=2,
             ),

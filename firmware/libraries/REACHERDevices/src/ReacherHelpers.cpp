@@ -263,3 +263,9 @@ bool handleCommonDeviceCommand(DeviceSet& ds, int command, JsonDocument& inputJs
   }
   return true;
 }
+
+void logUnknownCommand(int command) {
+  Serial.print(F("{\"level\":\"006\",\"desc\":\"Command not found\",\"command\":"));
+  Serial.print(command);
+  Serial.println(F("}"));
+}

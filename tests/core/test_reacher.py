@@ -7,6 +7,7 @@ import serial
 from unittest.mock import Mock, patch
 
 from reacher.kernel.reacher import REACHER
+from reacher.kernel.commands import CommandCode
 
 
 @pytest.fixture
@@ -1022,3 +1023,246 @@ class TestFrameTimestampStopSemantics:
         reacher.update_frame_events({"timestamp": 9999})
         assert reacher.frame_data == [9999]
         assert emit_calls == [("frame", {"timestamp": 9999, "missed": 0})]
+
+
+class TestKernelCounters:
+    """The tallies the export summary reports: infusions, presses, trials.
+
+    A browser-side count is reconstructed from a refetched event list after a
+    WebSocket reconnect, and can silently disagree with reality. The kernel
+    counts off the serial stream as events arrive, so it has no equivalent
+    failure mode — provided it recognises every spelling firmware uses.
+    """
+
+    @pytest.fixture
+    def counter(self, reacher):
+        """A REACHER wired only for counting.
+
+        The shared `reacher` fixture is reused across this module, so its
+        logger and event-log path may carry state from earlier tests. Counting
+        is the only behaviour under test here, so the durable-write and logging
+        side paths are neutralised rather than exercised.
+        """
+        reacher._write_event_log = lambda *a, **k: None
+        reacher.logger = logging.getLogger("test.counters")
+        reacher.program_running = True
+        reacher.program_flag.clear()
+        reacher._infusion_count = 0
+        reacher._cumulative_infusion_count = 0
+        reacher._press_count = 0
+        reacher._cumulative_press_count = 0
+        reacher._trial_count = 0
+        reacher._cumulative_trial_count = 0
+        reacher.behavior_data = []
+        return reacher
+
+    def _infusion(self, device):
+        return {
+            "level": "007", "device": device, "event": "INFUSION",
+            "pin": 4, "start_timestamp": 100, "end_timestamp": 200,
+        }
+
+    def test_counts_both_operant_and_pavlovian_spellings(self, counter):
+        """The operant scheduler emits PUMP_1; the Pavlovian one emits PUMP.
+
+        Recognising only one silently zeroes the count for eight of the nine
+        paradigms, or for the ninth.
+        """
+        for device in ("PUMP_1", "PUMP", "PUMP_1"):
+            counter.update_behavioral_events(self._infusion(device))
+        assert counter.get_total_infusion_count() == 3
+
+    def test_ignores_other_devices_and_events(self, counter):
+        counter.update_behavioral_events(self._infusion("PUMP_2"))
+        counter.update_behavioral_events(
+            {"level": "007", "device": "PUMP_1", "event": "TONE",
+             "pin": 4, "start_timestamp": 1, "end_timestamp": 2}
+        )
+        assert counter.get_total_infusion_count() == 0
+
+    def test_total_spans_segments(self):
+        """An export archive contains every segment, so its count must too.
+
+        `_infusion_count` alone resets at each split; a summary built from it
+        would describe only the final segment while the ZIP holds them all.
+        """
+        import threading
+
+        instance = REACHER.__new__(REACHER)
+        instance._infusion_count = 4
+        instance._cumulative_infusion_count = 11
+        instance.thread_lock = threading.Lock()
+        assert instance.get_total_infusion_count() == 15
+
+    def test_count_survives_a_refetch_of_the_event_list(self, counter):
+        """The kernel has no recompute path, which is why it cannot drift.
+
+        Replacing behavior_data wholesale — the server-side analogue of the
+        frontend's reconnect recovery — must not disturb the tally, because the
+        tally was never derived from that list.
+        """
+        for _ in range(5):
+            counter.update_behavioral_events(self._infusion("PUMP_1"))
+        assert counter.get_total_infusion_count() == 5
+
+        with counter.thread_lock:
+            counter.behavior_data = []
+        assert counter.get_total_infusion_count() == 5
+
+    def _press(self, device, cls="ACTIVE"):
+        return {
+            "level": "007", "device": device, "event": "PRESS", "class": cls,
+            "pin": 2, "start_timestamp": 100, "end_timestamp": 200,
+        }
+
+    @pytest.mark.parametrize("cls", ["ACTIVE", "INACTIVE", "TIMEOUT"])
+    def test_counts_every_press_class(self, counter, cls):
+        """The exported figure means "lever contacts", matching what the UI shows.
+
+        Firmware sends event=PRESS with a separate class field; the kernel
+        rewrites it to <CLASS>_PRESS. Counting only ACTIVE would silently change
+        what the number means relative to every export already on disk.
+        """
+        counter.update_behavioral_events(self._press("LEVER_RH", cls))
+        assert counter.get_total_press_count() == 1
+
+    def test_counts_both_levers(self, counter):
+        counter.update_behavioral_events(self._press("LEVER_RH"))
+        counter.update_behavioral_events(self._press("LEVER_LH", "TIMEOUT"))
+        assert counter.get_total_press_count() == 2
+
+    def test_counts_legacy_switch_lever_spelling(self, counter):
+        """Pre-v2.4.x firmware sends SWITCH_LEVER + orientation.
+
+        The kernel rewrites it to LEVER_RH before the counter sees it, so the
+        counter needs no second spelling — but that rewrite is load-bearing and
+        a regression in it would zero the count on legacy rigs.
+        """
+        counter.update_behavioral_events({
+            "level": "007", "device": "SWITCH_LEVER", "event": "PRESS",
+            "class": "ACTIVE", "orientation": "RH",
+            "start_timestamp": 1, "end_timestamp": 2,
+        })
+        assert counter.get_total_press_count() == 1
+
+    def test_press_ignores_non_lever_and_non_press(self, counter):
+        counter.update_behavioral_events(self._press("PUMP_1"))
+        counter.update_behavioral_events({
+            "level": "007", "device": "LEVER_RH", "event": "RELEASE",
+            "start_timestamp": 1, "end_timestamp": 2,
+        })
+        assert counter.get_total_press_count() == 0
+
+    def test_counts_pavlovian_trials(self, counter):
+        for _ in range(3):
+            counter.update_behavioral_events({
+                "level": "007", "device": "PAVLOV", "event": "TRIAL_START",
+                "trial_type": "CS_PLUS", "timestamp": 5,
+            })
+        counter.update_behavioral_events({
+            "level": "007", "device": "PAVLOV", "event": "ALL_TRIALS_COMPLETE",
+            "timestamp": 9,
+        })
+        assert counter.get_total_trial_count() == 3
+
+    def test_counters_do_not_cross_contaminate(self, counter):
+        """One event must advance exactly one tally.
+
+        The increments share a locked block; an if/elif slip there would let a
+        press bump the infusion count, which check_limit_met enforces against.
+        """
+        counter.update_behavioral_events(self._infusion("PUMP_1"))
+        counter.update_behavioral_events(self._press("LEVER_RH"))
+        counter.update_behavioral_events({
+            "level": "007", "device": "PAVLOV", "event": "TRIAL_START",
+            "timestamp": 5,
+        })
+        assert counter.get_total_infusion_count() == 1
+        assert counter.get_total_press_count() == 1
+        assert counter.get_total_trial_count() == 1
+
+    def test_split_segment_accumulates_every_counter(self, counter, tmp_path):
+        """The cross-segment total is only correct if the split folds all three in.
+
+        This is the mechanism the export summary depends on: per-segment
+        counters reset here, so anything not accumulated is lost silently and
+        the archive under-reports.
+        """
+        counter._export_segment = lambda behavior, suffix="": str(tmp_path / f"seg{suffix}.csv")
+        counter._emit = lambda *a, **k: None
+
+        counter.update_behavioral_events(self._infusion("PUMP_1"))
+        counter.update_behavioral_events(self._press("LEVER_RH"))
+        counter.update_behavioral_events(self._press("LEVER_LH"))
+        counter.update_behavioral_events({
+            "level": "007", "device": "PAVLOV", "event": "TRIAL_START", "timestamp": 1,
+        })
+        counter.split_segment()
+
+        assert counter._infusion_count == 0
+        assert counter._press_count == 0
+        assert counter._trial_count == 0
+
+        counter.update_behavioral_events(self._press("LEVER_RH"))
+        assert counter.get_total_infusion_count() == 1
+        assert counter.get_total_press_count() == 3
+        assert counter.get_total_trial_count() == 1
+
+    def test_totals_span_segments(self):
+        """An export archive contains every segment, so its counts must too."""
+        import threading
+
+        instance = REACHER.__new__(REACHER)
+        instance.thread_lock = threading.Lock()
+        instance._press_count, instance._cumulative_press_count = 6, 20
+        instance._trial_count, instance._cumulative_trial_count = 1, 9
+        assert instance.get_total_press_count() == 26
+        assert instance.get_total_trial_count() == 10
+
+
+class TestFirmwareErrorReporting:
+    """Level-006 errors, the only signal that a command was dropped.
+
+    Paradigms implement different command subsets, so a control the UI offers
+    can be silently ignored by the firmware behind it — see
+    schema.KNOWN_FIRMWARE_GAPS. The 006 record is the operator's only evidence
+    that happened, which makes naming the offending command load-bearing.
+    """
+
+    @pytest.fixture
+    def instance(self, reacher):
+        reacher.logger = logging.getLogger("test.fwerror")
+        reacher._emit = lambda *a, **k: None
+        return reacher
+
+    def test_resolves_a_known_command_code_to_its_name(self, instance, caplog):
+        with caplog.at_level(logging.ERROR, logger="test.fwerror"):
+            instance.handle_firmware_error({
+                "level": "006", "desc": "Command not found",
+                "command": int(CommandCode.LASER_TRIGGER_LH_ONLY),
+            })
+        assert "LASER_TRIGGER_LH_ONLY" in caplog.text
+        assert "685" in caplog.text
+
+    def test_labels_an_unregistered_code_without_raising(self, instance, caplog):
+        """Firmware can outrun the registry; a diagnostic must not crash on it."""
+        with caplog.at_level(logging.ERROR, logger="test.fwerror"):
+            instance.handle_firmware_error({
+                "level": "006", "desc": "Command not found", "command": 99999,
+            })
+        assert "unregistered code 99999" in caplog.text
+
+    def test_errors_without_a_command_field_are_unchanged(self, instance, caplog):
+        """Most 006 records carry no command; they must not gain noise."""
+        with caplog.at_level(logging.ERROR, logger="test.fwerror"):
+            instance.handle_firmware_error({"level": "006", "desc": "Pump jam"})
+        assert "Pump jam" in caplog.text
+        assert "(" not in caplog.text.split("Pump jam")[1]
+
+    def test_the_raw_event_still_reaches_the_frontend(self, instance):
+        """Resolution is for the log; the browser gets the event untouched."""
+        seen = []
+        instance._emit = lambda kind, payload: seen.append((kind, payload))
+        event = {"level": "006", "desc": "Command not found", "command": 685}
+        instance.handle_firmware_error(event)
+        assert seen == [("error", event)]

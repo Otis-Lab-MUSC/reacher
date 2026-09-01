@@ -11,7 +11,7 @@ import logging
 from typing import Callable, Dict, List, Optional, Union
 from serial.tools import list_ports
 
-from .commands import build_command_payload, SCHEDULE_TO_PARADIGM
+from .commands import build_command_payload, CommandCode, SCHEDULE_TO_PARADIGM
 # Leaf submodules rather than the `diagnostics` package, so importing the kernel
 # never re-enters a partially initialised `reacher/__init__`.
 from ..diagnostics.schema import TIER_WIRE as _TIER_WIRE
@@ -40,6 +40,17 @@ _USE_VALUE = object()  # sentinel: use the `value` arg from send_command()
 
 # Maps command codes to (device_name, field_name, value_or_sentinel)
 # _USE_VALUE means the value is taken from the `value` arg passed to send_command().
+#
+# device_name MUST be spelled the way firmware spells it at log level 000
+# (reportDeviceConfig / reportDeviceLever), not level 007. This path and the
+# firmware-config path both append into `hardware_settings` and dedup on plain
+# string equality, so a name firmware never emits at 000 will not collide with
+# the firmware's own row — it silently creates a second, permanent entry for the
+# same device with disjoint fields, and both reach the browser.
+#
+# The lick circuit is the trap: firmware calls it LICK at 000 and LICK_CIRCUIT at
+# 007. LICK is canonical here, matching the normalization the 007 handler already
+# performs below. tests/test_device_names.py::test_l8_* enforces this.
 _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     # --- Arm/Disarm ---
     300: ("CUE", "armed", False),
@@ -50,8 +61,8 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     401: ("PUMP", "armed", True),
     410: ("PUMP2", "armed", False),
     411: ("PUMP2", "armed", True),
-    500: ("LICK_CIRCUIT", "armed", False),
-    501: ("LICK_CIRCUIT", "armed", True),
+    500: ("LICK", "armed", False),
+    501: ("LICK", "armed", True),
     600: ("LASER", "armed", False),
     601: ("LASER", "armed", True),
     900: ("MICROSCOPE", "armed", False),
@@ -97,7 +108,7 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     386: ("CUE2", "pin", _USE_VALUE),
     476: ("PUMP", "pin", _USE_VALUE),
     486: ("PUMP2", "pin", _USE_VALUE),
-    576: ("LICK_CIRCUIT", "pin", _USE_VALUE),
+    576: ("LICK", "pin", _USE_VALUE),
     676: ("LASER", "pin", _USE_VALUE),
     976: ("MICROSCOPE", "trigger_pin", _USE_VALUE),
     1076: ("LEVER_RH", "pin", _USE_VALUE),
@@ -193,6 +204,12 @@ class REACHER:
         self.frame_data: List[int] = []
         self.slm_data: List[int] = []
         self._infusion_count: int = 0  # Atomic counter — avoids O(n) rescan in check_limit_met
+        # Counted off the serial stream for the same reason as infusions: an
+        # export must not depend on a browser's tally of what it happened to
+        # receive. Presses include every lever contact (ACTIVE/INACTIVE/TIMEOUT),
+        # matching what the UI displays.
+        self._press_count: int = 0
+        self._trial_count: int = 0
         # Fix: F-002 — Memory warning thresholds for unbounded data lists
         self._DATA_WARNING_THRESHOLD = 100_000  # Warn when lists exceed this size
         self._data_warning_emitted: bool = False
@@ -200,6 +217,8 @@ class REACHER:
         # Segmentation state
         self._segment_number: int = 0
         self._cumulative_infusion_count: int = 0
+        self._cumulative_press_count: int = 0
+        self._cumulative_trial_count: int = 0
         self._segment_exports: List[str] = []
         self._segment_event_counts: List[int] = []
 
@@ -673,6 +692,14 @@ class REACHER:
         # Fix: XL-002 — Log error_code when present
         error_code = event.get("error_code", "UNKNOWN")
         desc = event.get("desc", "Unknown")
+        # Firmware names the offending code on an unrecognised command. Resolve
+        # it here: paradigms differ in what they implement, so "Command not
+        # found" alone cannot tell an operator which control did nothing.
+        if (command := event.get("command")) is not None:
+            try:
+                desc = f"{desc} ({CommandCode(int(command)).name}={command})"
+            except (ValueError, TypeError):
+                desc = f"{desc} (unregistered code {command})"
         self.logger.error(f"Firmware error [{error_code}]: {desc}")
         self._emit("error", event)
 
@@ -837,6 +864,11 @@ class REACHER:
                 self.behavior_data.append(entry_dict)
                 if entry_dict.get('device') in ('PUMP', 'PUMP_1') and entry_dict.get('event') == 'INFUSION':
                     self._infusion_count += 1
+                elif entry_dict.get('device') in ('LEVER_RH', 'LEVER_LH') \
+                        and str(entry_dict.get('event', '')).endswith('PRESS'):
+                    self._press_count += 1
+                elif entry_dict.get('device') == 'PAVLOV' and entry_dict.get('event') == 'TRIAL_START':
+                    self._trial_count += 1
                 # Fix: F-002 — Warn when data lists grow dangerously large
                 total = len(self.behavior_data) + len(self.frame_data) + len(self.slm_data)
             if total >= self._DATA_WARNING_THRESHOLD and not self._data_warning_emitted:
@@ -1238,8 +1270,12 @@ class REACHER:
         self.frame_data = []
         self.slm_data = []
         self._infusion_count = 0
+        self._press_count = 0
+        self._trial_count = 0
         self._segment_number = 0
         self._cumulative_infusion_count = 0
+        self._cumulative_press_count = 0
+        self._cumulative_trial_count = 0
         self._segment_exports = []
         self._segment_event_counts = []
         self.paused_time = 0
@@ -1345,8 +1381,12 @@ class REACHER:
             snapshot = list(self.behavior_data)
             segment_infusions = self._infusion_count
             self._cumulative_infusion_count += segment_infusions
+            self._cumulative_press_count += self._press_count
+            self._cumulative_trial_count += self._trial_count
             self.behavior_data = []
             self._infusion_count = 0
+            self._press_count = 0
+            self._trial_count = 0
             self._data_warning_emitted = False
             self._segment_number += 1
 
@@ -1410,6 +1450,38 @@ class REACHER:
     def get_segment_number(self) -> int:
         """Return the current segment number (0 means no splits have occurred)."""
         return self._segment_number
+
+    def get_total_infusion_count(self) -> int:
+        """Return infusions across every segment of this session.
+
+        This is the count the kernel maintained from the serial stream itself,
+        which is what ``check_limit_met`` enforces against. It is authoritative:
+        unlike a count reconstructed in a browser, it cannot be disturbed by a
+        WebSocket reconnect, a segment split, or a tab lifecycle.
+
+        Spans all segments because that is what an export archive contains —
+        ``_infusion_count`` alone covers only the current one.
+        """
+        with self.thread_lock:
+            return self._cumulative_infusion_count + self._infusion_count
+
+    def get_total_press_count(self) -> int:
+        """Return lever presses across every segment of this session.
+
+        Counts every contact — ACTIVE, INACTIVE and TIMEOUT — on either lever,
+        which is the figure the UI shows. Authoritative and cross-segment for
+        the same reasons as :meth:`get_total_infusion_count`.
+        """
+        with self.thread_lock:
+            return self._cumulative_press_count + self._press_count
+
+    def get_total_trial_count(self) -> int:
+        """Return Pavlovian trials started across every segment of this session.
+
+        Zero on operant paradigms, which emit no PAVLOV events.
+        """
+        with self.thread_lock:
+            return self._cumulative_trial_count + self._trial_count
 
     def get_segment_exports(self) -> List[str]:
         """Return a snapshot of split-segment CSV paths (does not include the final in-memory segment)."""
