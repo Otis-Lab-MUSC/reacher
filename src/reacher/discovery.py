@@ -90,7 +90,7 @@ def start(device_id: str, port: int, version: str) -> None:
     global _zeroconf, _browser, _info
 
     try:
-        from zeroconf import ServiceBrowser, ServiceInfo, Zeroconf
+        from zeroconf import Error as ZeroconfError, ServiceBrowser, ServiceInfo, Zeroconf
     except ImportError:
         logger.warning("zeroconf not installed — mDNS device discovery disabled; install with: pip install zeroconf")
         return
@@ -119,8 +119,26 @@ def start(device_id: str, port: int, version: str) -> None:
             },
             server=f"{socket.gethostname()}.local.",
         )
-        _zeroconf.register_service(_info)
-        logger.info("Registered mDNS service: %s", service_name)
+
+        try:
+            _zeroconf.register_service(_info)
+            logger.info("Registered mDNS service: %s", service_name)
+        except (ZeroconfError, OSError) as exc:
+            # Expected, non-fatal: the name may still be held by a not-yet-expired
+            # record from a previous run that didn't shut down cleanly (crash/kill),
+            # or the network doesn't carry multicast (managed switches, some
+            # VPNs/Wi-Fi). This device is still reachable via unicast registration
+            # (POST /api/discovery/register) and subnet scan, so this must not be
+            # fatal — and must not skip starting the browser below, since browsing
+            # for *other* peers is unaffected by our own registration failing.
+            logger.warning(
+                "mDNS service registration failed (%s: %s) — this device won't be "
+                "advertised via mDNS; it can still be discovered via unicast "
+                "registration or subnet scan",
+                type(exc).__name__,
+                exc,
+            )
+            _info = None
 
         _browser = ServiceBrowser(_zeroconf, _SERVICE_TYPE, _ServiceListener(device_id))
     except Exception:
