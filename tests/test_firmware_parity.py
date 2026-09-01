@@ -266,3 +266,51 @@ def test_every_sketch_has_a_committed_hex(sketches):
         if not (HEX_ROOT / s["board"] / f"{name}.hex").is_file()
     ]
     assert not missing, f"sketches with no committed hex artifact: {missing}"
+
+
+# --- C15: unrecognised commands name themselves ---------------------------
+
+# Paradigms deliberately implement different command subsets, so a command that
+# reaches a sketch's default case is normal and expected. What is not acceptable
+# is reporting it anonymously: "Command not found" with no code leaves an
+# operator unable to tell which control silently did nothing, which is how
+# KNOWN_FIRMWARE_GAPS["LASER_TRIGGER_LH_ONLY"] survived unnoticed. Every sketch
+# must route its default through the shared helper that names the code.
+
+
+def test_every_sketch_reports_the_code_of_an_unrecognised_command(sketches):
+    """C15: no sketch may fall through to an anonymous error."""
+    offenders = []
+    for name in sketches:
+        source = (FIRMWARE / name / f"{name}.ino").read_text()
+        if "logUnknownCommand(command)" not in source:
+            offenders.append(name)
+    assert not offenders, (
+        "sketches whose unknown-command path does not name the code: "
+        f"{sorted(offenders)}. Use logUnknownCommand(command) so an operator "
+        "can tell which control did nothing."
+    )
+
+
+def test_no_sketch_emits_an_anonymous_command_not_found(sketches):
+    """C15 converse: the old inline form must not creep back in.
+
+    Written separately because a sketch could satisfy the check above and still
+    carry a second, anonymous site.
+    """
+    offenders = [
+        name for name in sketches
+        if "Command not found" in (FIRMWARE / name / f"{name}.ino").read_text()
+    ]
+    assert not offenders, (
+        f"sketches with an inline anonymous error: {sorted(offenders)} — "
+        "the message belongs in logUnknownCommand so every sketch reports alike."
+    )
+
+
+def test_helper_reports_the_command_field(sketches):
+    """The kernel resolves event['command']; the helper must actually emit it."""
+    helper = (FIRMWARE / "libraries" / "REACHERDevices" / "src" / "ReacherHelpers.cpp").read_text()
+    body = helper.split("void logUnknownCommand(int command)")[1]
+    assert '\\"command\\":' in body, "logUnknownCommand must emit a 'command' field"
+    assert "Serial.print(command)" in body, "logUnknownCommand must emit the code itself"

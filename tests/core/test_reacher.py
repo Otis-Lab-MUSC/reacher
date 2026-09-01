@@ -7,6 +7,7 @@ import serial
 from unittest.mock import Mock, patch
 
 from reacher.kernel.reacher import REACHER
+from reacher.kernel.commands import CommandCode
 
 
 @pytest.fixture
@@ -1218,3 +1219,50 @@ class TestKernelCounters:
         assert instance.get_total_press_count() == 26
         assert instance.get_total_trial_count() == 10
 
+
+class TestFirmwareErrorReporting:
+    """Level-006 errors, the only signal that a command was dropped.
+
+    Paradigms implement different command subsets, so a control the UI offers
+    can be silently ignored by the firmware behind it — see
+    schema.KNOWN_FIRMWARE_GAPS. The 006 record is the operator's only evidence
+    that happened, which makes naming the offending command load-bearing.
+    """
+
+    @pytest.fixture
+    def instance(self, reacher):
+        reacher.logger = logging.getLogger("test.fwerror")
+        reacher._emit = lambda *a, **k: None
+        return reacher
+
+    def test_resolves_a_known_command_code_to_its_name(self, instance, caplog):
+        with caplog.at_level(logging.ERROR, logger="test.fwerror"):
+            instance.handle_firmware_error({
+                "level": "006", "desc": "Command not found",
+                "command": int(CommandCode.LASER_TRIGGER_LH_ONLY),
+            })
+        assert "LASER_TRIGGER_LH_ONLY" in caplog.text
+        assert "685" in caplog.text
+
+    def test_labels_an_unregistered_code_without_raising(self, instance, caplog):
+        """Firmware can outrun the registry; a diagnostic must not crash on it."""
+        with caplog.at_level(logging.ERROR, logger="test.fwerror"):
+            instance.handle_firmware_error({
+                "level": "006", "desc": "Command not found", "command": 99999,
+            })
+        assert "unregistered code 99999" in caplog.text
+
+    def test_errors_without_a_command_field_are_unchanged(self, instance, caplog):
+        """Most 006 records carry no command; they must not gain noise."""
+        with caplog.at_level(logging.ERROR, logger="test.fwerror"):
+            instance.handle_firmware_error({"level": "006", "desc": "Pump jam"})
+        assert "Pump jam" in caplog.text
+        assert "(" not in caplog.text.split("Pump jam")[1]
+
+    def test_the_raw_event_still_reaches_the_frontend(self, instance):
+        """Resolution is for the log; the browser gets the event untouched."""
+        seen = []
+        instance._emit = lambda kind, payload: seen.append((kind, payload))
+        event = {"level": "006", "desc": "Command not found", "command": 685}
+        instance.handle_firmware_error(event)
+        assert seen == [("error", event)]

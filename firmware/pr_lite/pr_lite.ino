@@ -383,7 +383,7 @@ void ParseCommands() {
 
 
           default:
-            Serial.println(F("{\"level\":\"006\",\"desc\":\"Command not found\"}"));
+            logUnknownCommand(command);
             break;
         }
       }

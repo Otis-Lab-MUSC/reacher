@@ -77,6 +77,12 @@ ArmSnapshot captureArmState(const DeviceSet& ds);
 /// @brief Restore a previously captured arm state to all devices.
 void restoreArmState(DeviceSet& ds, const ArmSnapshot& snap);
 
+/// @brief Report a command no sketch handler recognised, naming the code.
+/// The code matters: paradigms differ in which commands they implement, so a
+/// bare "not found" leaves the operator unable to tell which control silently
+/// did nothing.
+void logUnknownCommand(int command);
+
 /// @brief Handle device commands common to all paradigms (cue, pump, lick, laser, microscope).
 /// @param ds Device set
 /// @param command Command code from serial JSON

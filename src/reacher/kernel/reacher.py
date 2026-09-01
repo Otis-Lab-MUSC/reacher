@@ -11,7 +11,7 @@ import logging
 from typing import Callable, Dict, List, Optional, Union
 from serial.tools import list_ports
 
-from .commands import build_command_payload, SCHEDULE_TO_PARADIGM
+from .commands import build_command_payload, CommandCode, SCHEDULE_TO_PARADIGM
 # Leaf submodules rather than the `diagnostics` package, so importing the kernel
 # never re-enters a partially initialised `reacher/__init__`.
 from ..diagnostics.schema import TIER_WIRE as _TIER_WIRE
@@ -692,6 +692,14 @@ class REACHER:
         # Fix: XL-002 — Log error_code when present
         error_code = event.get("error_code", "UNKNOWN")
         desc = event.get("desc", "Unknown")
+        # Firmware names the offending code on an unrecognised command. Resolve
+        # it here: paradigms differ in what they implement, so "Command not
+        # found" alone cannot tell an operator which control did nothing.
+        if (command := event.get("command")) is not None:
+            try:
+                desc = f"{desc} ({CommandCode(int(command)).name}={command})"
+            except (ValueError, TypeError):
+                desc = f"{desc} (unregistered code {command})"
         self.logger.error(f"Firmware error [{error_code}]: {desc}")
         self._emit("error", event)
 
