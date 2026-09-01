@@ -1024,8 +1024,8 @@ class TestFrameTimestampStopSemantics:
         assert emit_calls == [("frame", {"timestamp": 9999, "missed": 0})]
 
 
-class TestInfusionCounting:
-    """The kernel's infusion tally, which the export and the limit check rely on.
+class TestKernelCounters:
+    """The tallies the export summary reports: infusions, presses, trials.
 
     A browser-side count is reconstructed from a refetched event list after a
     WebSocket reconnect, and can silently disagree with reality. The kernel
@@ -1043,11 +1043,15 @@ class TestInfusionCounting:
         side paths are neutralised rather than exercised.
         """
         reacher._write_event_log = lambda *a, **k: None
-        reacher.logger = logging.getLogger("test.infusion")
+        reacher.logger = logging.getLogger("test.counters")
         reacher.program_running = True
         reacher.program_flag.clear()
         reacher._infusion_count = 0
         reacher._cumulative_infusion_count = 0
+        reacher._press_count = 0
+        reacher._cumulative_press_count = 0
+        reacher._trial_count = 0
+        reacher._cumulative_trial_count = 0
         reacher.behavior_data = []
         return reacher
 
@@ -1103,3 +1107,114 @@ class TestInfusionCounting:
         with counter.thread_lock:
             counter.behavior_data = []
         assert counter.get_total_infusion_count() == 5
+
+    def _press(self, device, cls="ACTIVE"):
+        return {
+            "level": "007", "device": device, "event": "PRESS", "class": cls,
+            "pin": 2, "start_timestamp": 100, "end_timestamp": 200,
+        }
+
+    @pytest.mark.parametrize("cls", ["ACTIVE", "INACTIVE", "TIMEOUT"])
+    def test_counts_every_press_class(self, counter, cls):
+        """The exported figure means "lever contacts", matching what the UI shows.
+
+        Firmware sends event=PRESS with a separate class field; the kernel
+        rewrites it to <CLASS>_PRESS. Counting only ACTIVE would silently change
+        what the number means relative to every export already on disk.
+        """
+        counter.update_behavioral_events(self._press("LEVER_RH", cls))
+        assert counter.get_total_press_count() == 1
+
+    def test_counts_both_levers(self, counter):
+        counter.update_behavioral_events(self._press("LEVER_RH"))
+        counter.update_behavioral_events(self._press("LEVER_LH", "TIMEOUT"))
+        assert counter.get_total_press_count() == 2
+
+    def test_counts_legacy_switch_lever_spelling(self, counter):
+        """Pre-v2.4.x firmware sends SWITCH_LEVER + orientation.
+
+        The kernel rewrites it to LEVER_RH before the counter sees it, so the
+        counter needs no second spelling — but that rewrite is load-bearing and
+        a regression in it would zero the count on legacy rigs.
+        """
+        counter.update_behavioral_events({
+            "level": "007", "device": "SWITCH_LEVER", "event": "PRESS",
+            "class": "ACTIVE", "orientation": "RH",
+            "start_timestamp": 1, "end_timestamp": 2,
+        })
+        assert counter.get_total_press_count() == 1
+
+    def test_press_ignores_non_lever_and_non_press(self, counter):
+        counter.update_behavioral_events(self._press("PUMP_1"))
+        counter.update_behavioral_events({
+            "level": "007", "device": "LEVER_RH", "event": "RELEASE",
+            "start_timestamp": 1, "end_timestamp": 2,
+        })
+        assert counter.get_total_press_count() == 0
+
+    def test_counts_pavlovian_trials(self, counter):
+        for _ in range(3):
+            counter.update_behavioral_events({
+                "level": "007", "device": "PAVLOV", "event": "TRIAL_START",
+                "trial_type": "CS_PLUS", "timestamp": 5,
+            })
+        counter.update_behavioral_events({
+            "level": "007", "device": "PAVLOV", "event": "ALL_TRIALS_COMPLETE",
+            "timestamp": 9,
+        })
+        assert counter.get_total_trial_count() == 3
+
+    def test_counters_do_not_cross_contaminate(self, counter):
+        """One event must advance exactly one tally.
+
+        The increments share a locked block; an if/elif slip there would let a
+        press bump the infusion count, which check_limit_met enforces against.
+        """
+        counter.update_behavioral_events(self._infusion("PUMP_1"))
+        counter.update_behavioral_events(self._press("LEVER_RH"))
+        counter.update_behavioral_events({
+            "level": "007", "device": "PAVLOV", "event": "TRIAL_START",
+            "timestamp": 5,
+        })
+        assert counter.get_total_infusion_count() == 1
+        assert counter.get_total_press_count() == 1
+        assert counter.get_total_trial_count() == 1
+
+    def test_split_segment_accumulates_every_counter(self, counter, tmp_path):
+        """The cross-segment total is only correct if the split folds all three in.
+
+        This is the mechanism the export summary depends on: per-segment
+        counters reset here, so anything not accumulated is lost silently and
+        the archive under-reports.
+        """
+        counter._export_segment = lambda behavior, suffix="": str(tmp_path / f"seg{suffix}.csv")
+        counter._emit = lambda *a, **k: None
+
+        counter.update_behavioral_events(self._infusion("PUMP_1"))
+        counter.update_behavioral_events(self._press("LEVER_RH"))
+        counter.update_behavioral_events(self._press("LEVER_LH"))
+        counter.update_behavioral_events({
+            "level": "007", "device": "PAVLOV", "event": "TRIAL_START", "timestamp": 1,
+        })
+        counter.split_segment()
+
+        assert counter._infusion_count == 0
+        assert counter._press_count == 0
+        assert counter._trial_count == 0
+
+        counter.update_behavioral_events(self._press("LEVER_RH"))
+        assert counter.get_total_infusion_count() == 1
+        assert counter.get_total_press_count() == 3
+        assert counter.get_total_trial_count() == 1
+
+    def test_totals_span_segments(self):
+        """An export archive contains every segment, so its counts must too."""
+        import threading
+
+        instance = REACHER.__new__(REACHER)
+        instance.thread_lock = threading.Lock()
+        instance._press_count, instance._cumulative_press_count = 6, 20
+        instance._trial_count, instance._cumulative_trial_count = 1, 9
+        assert instance.get_total_press_count() == 26
+        assert instance.get_total_trial_count() == 10
+

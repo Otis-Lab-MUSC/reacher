@@ -204,6 +204,12 @@ class REACHER:
         self.frame_data: List[int] = []
         self.slm_data: List[int] = []
         self._infusion_count: int = 0  # Atomic counter — avoids O(n) rescan in check_limit_met
+        # Counted off the serial stream for the same reason as infusions: an
+        # export must not depend on a browser's tally of what it happened to
+        # receive. Presses include every lever contact (ACTIVE/INACTIVE/TIMEOUT),
+        # matching what the UI displays.
+        self._press_count: int = 0
+        self._trial_count: int = 0
         # Fix: F-002 — Memory warning thresholds for unbounded data lists
         self._DATA_WARNING_THRESHOLD = 100_000  # Warn when lists exceed this size
         self._data_warning_emitted: bool = False
@@ -211,6 +217,8 @@ class REACHER:
         # Segmentation state
         self._segment_number: int = 0
         self._cumulative_infusion_count: int = 0
+        self._cumulative_press_count: int = 0
+        self._cumulative_trial_count: int = 0
         self._segment_exports: List[str] = []
         self._segment_event_counts: List[int] = []
 
@@ -848,6 +856,11 @@ class REACHER:
                 self.behavior_data.append(entry_dict)
                 if entry_dict.get('device') in ('PUMP', 'PUMP_1') and entry_dict.get('event') == 'INFUSION':
                     self._infusion_count += 1
+                elif entry_dict.get('device') in ('LEVER_RH', 'LEVER_LH') \
+                        and str(entry_dict.get('event', '')).endswith('PRESS'):
+                    self._press_count += 1
+                elif entry_dict.get('device') == 'PAVLOV' and entry_dict.get('event') == 'TRIAL_START':
+                    self._trial_count += 1
                 # Fix: F-002 — Warn when data lists grow dangerously large
                 total = len(self.behavior_data) + len(self.frame_data) + len(self.slm_data)
             if total >= self._DATA_WARNING_THRESHOLD and not self._data_warning_emitted:
@@ -1249,8 +1262,12 @@ class REACHER:
         self.frame_data = []
         self.slm_data = []
         self._infusion_count = 0
+        self._press_count = 0
+        self._trial_count = 0
         self._segment_number = 0
         self._cumulative_infusion_count = 0
+        self._cumulative_press_count = 0
+        self._cumulative_trial_count = 0
         self._segment_exports = []
         self._segment_event_counts = []
         self.paused_time = 0
@@ -1356,8 +1373,12 @@ class REACHER:
             snapshot = list(self.behavior_data)
             segment_infusions = self._infusion_count
             self._cumulative_infusion_count += segment_infusions
+            self._cumulative_press_count += self._press_count
+            self._cumulative_trial_count += self._trial_count
             self.behavior_data = []
             self._infusion_count = 0
+            self._press_count = 0
+            self._trial_count = 0
             self._data_warning_emitted = False
             self._segment_number += 1
 
@@ -1435,6 +1456,24 @@ class REACHER:
         """
         with self.thread_lock:
             return self._cumulative_infusion_count + self._infusion_count
+
+    def get_total_press_count(self) -> int:
+        """Return lever presses across every segment of this session.
+
+        Counts every contact — ACTIVE, INACTIVE and TIMEOUT — on either lever,
+        which is the figure the UI shows. Authoritative and cross-segment for
+        the same reasons as :meth:`get_total_infusion_count`.
+        """
+        with self.thread_lock:
+            return self._cumulative_press_count + self._press_count
+
+    def get_total_trial_count(self) -> int:
+        """Return Pavlovian trials started across every segment of this session.
+
+        Zero on operant paradigms, which emit no PAVLOV events.
+        """
+        with self.thread_lock:
+            return self._cumulative_trial_count + self._trial_count
 
     def get_segment_exports(self) -> List[str]:
         """Return a snapshot of split-segment CSV paths (does not include the final in-memory segment)."""
