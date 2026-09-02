@@ -36,6 +36,7 @@ def client():
         mock_instance.make_destination_folder.return_value = "/tmp/reacher_test"
         mock_instance.get_segment_exports.return_value = []
         mock_instance.get_segment_event_counts.return_value = []
+        mock_instance.get_segment_number.return_value = 0
         mock_instance.get_total_infusion_count.return_value = 0
         mock_instance.get_total_press_count.return_value = 0
         mock_instance.get_total_trial_count.return_value = 0
@@ -368,6 +369,7 @@ class TestDataEndpoints:
             "behavior": {"data": [], "total": 0},
             "frames": {"frames": [], "count": 0},
             "slm": {"slm": [], "count": 0},
+            "segment_number": 0,
         }
 
     def test_get_recovery_bundles_all_three_streams(self, client):
@@ -390,6 +392,34 @@ class TestDataEndpoints:
         assert body["behavior"]["total"] == 1
         assert body["frames"] == {"frames": [10, 20, 30], "count": 3}
         assert body["slm"] == {"slm": [15, 25], "count": 2}
+        assert body["segment_number"] == 0
+
+    def test_get_recovery_behavior_is_current_segment_only(self, client):
+        # Cross-review finding on #70/#126: split_segment() exports and clears
+        # behavior_data every split but deliberately leaves frame_data/slm_data
+        # alone, so post-split, `behavior.total` covers only the current
+        # segment while frames/slm cover the whole session. segment_number
+        # must be nonzero so a caller can tell.
+        resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
+        sid = resp.json()["session_id"]
+        sm = client.app.state.session_manager
+        instance = sm.get_instance(sid)
+        # Simulate post-split state: 1 event left in the current segment,
+        # but frames/slm still carry everything accumulated pre- and post-split.
+        instance.get_behavior_data.return_value = [
+            {"device": "LEVER_RH", "event": "PRESS", "start_timestamp": 3, "end_timestamp": 3}
+        ]
+        instance.get_frame_data.return_value = [1, 2, 3]
+        instance.get_slm_data.return_value = [1, 2]
+        instance.get_segment_number.return_value = 1
+
+        resp = client.get(f"/api/data/{sid}/recovery", headers=AUTH_HEADER)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["segment_number"] == 1
+        assert body["behavior"]["total"] == 1
+        assert body["frames"]["count"] == 3
+        assert body["slm"]["count"] == 2
 
     def test_get_recovery_nonexistent_session(self, client):
         resp = client.get("/api/data/nonexistent/recovery", headers=AUTH_HEADER)
