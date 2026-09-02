@@ -23,6 +23,14 @@ PavlovianScheduler::PavlovianScheduler() {
   microscope = nullptr;
   laserTrialFilter = LaserTrialFilter::CS_BOTH;
   laserPhase = LaserPhase::REWARD;
+  laserCsPlusOverride = false;
+  laserCsPlusFreq = 0;
+  laserCsPlusDuration = 0;
+  laserCsPlusOnsetDelay = 0;
+  laserCsMinusOverride = false;
+  laserCsMinusFreq = 0;
+  laserCsMinusDuration = 0;
+  laserCsMinusOnsetDelay = 0;
   sessionOffset = 0;
   sessionActive = false;
   sessionPaused = false;
@@ -92,10 +100,37 @@ void PavlovianScheduler::SetLaserPhase(LaserPhase phase) {
   laserPhase = phase;
 }
 
+void PavlovianScheduler::SetLaserCsPlusPulse(uint32_t freq, uint32_t duration, uint32_t onsetDelay) {
+  laserCsPlusOverride = true;
+  laserCsPlusFreq = freq;
+  laserCsPlusDuration = duration;
+  laserCsPlusOnsetDelay = onsetDelay;
+}
+
+void PavlovianScheduler::SetLaserCsMinusPulse(uint32_t freq, uint32_t duration, uint32_t onsetDelay) {
+  laserCsMinusOverride = true;
+  laserCsMinusFreq = freq;
+  laserCsMinusDuration = duration;
+  laserCsMinusOnsetDelay = onsetDelay;
+}
+
 bool PavlovianScheduler::ShouldFireLaser(bool isCsMinus) const {
   return (laserTrialFilter == LaserTrialFilter::CS_BOTH)
       || (laserTrialFilter == LaserTrialFilter::CS_PLUS && !isCsMinus)
       || (laserTrialFilter == LaserTrialFilter::CS_MINUS && isCsMinus);
+}
+
+void PavlovianScheduler::ResolveLaserPulse(bool isCsMinus, uint32_t& duration, uint32_t& onsetDelay) {
+  bool hasOverride = isCsMinus ? laserCsMinusOverride : laserCsPlusOverride;
+  if (!hasOverride) {
+    duration = laser->Duration();
+    onsetDelay = laser->OnsetDelay();
+    return;
+  }
+  uint32_t freq = isCsMinus ? laserCsMinusFreq : laserCsPlusFreq;
+  duration = isCsMinus ? laserCsMinusDuration : laserCsPlusDuration;
+  onsetDelay = isCsMinus ? laserCsMinusOnsetDelay : laserCsPlusOnsetDelay;
+  laser->SetFrequency(freq);
 }
 
 void PavlovianScheduler::Update(uint32_t now) {
@@ -419,11 +454,12 @@ void PavlovianScheduler::PavTick(uint32_t now) {
         // Clamp delay to keep onset within the REWARD window so it can't slip into a later phase/trial.
         if (laser && laser->Armed() && laser->IsContingent() && laserPhase == LaserPhase::REWARD) {
           if (ShouldFireLaser(isCsMinus)) {
-            uint32_t laserDelay = laser->OnsetDelay();
+            uint32_t fireDuration, laserDelay;
+            ResolveLaserPulse(isCsMinus, fireDuration, laserDelay);
             if (laserDelay >= pavConsumptionMs) laserDelay = (pavConsumptionMs > 1) ? (uint32_t)pavConsumptionMs - 1 : 0;
             uint32_t laserStart = now + laserDelay;
-            laser->Activate(laserStart, laser->Duration());
-            LogDeviceActivation(DeviceType::LASER, laserStart, laserStart + laser->Duration());
+            laser->Activate(laserStart, fireDuration);
+            LogDeviceActivation(DeviceType::LASER, laserStart, laserStart + fireDuration);
           }
         }
 
@@ -482,11 +518,12 @@ void PavlovianScheduler::PavStartTrial(uint32_t now) {
   // Clamp delay to keep onset within the CUE window so it can't slip into a later phase/trial.
   if (laser && laser->Armed() && laser->IsContingent() && laserPhase == LaserPhase::CUE) {
     if (ShouldFireLaser(isCsMinus)) {
-      uint32_t laserDelay = laser->OnsetDelay();
+      uint32_t fireDuration, laserDelay;
+      ResolveLaserPulse(isCsMinus, fireDuration, laserDelay);
       if (laserDelay >= pavCueDuration) laserDelay = (pavCueDuration > 1) ? (uint32_t)pavCueDuration - 1 : 0;
       uint32_t laserStart = now + laserDelay;
-      laser->Activate(laserStart, laser->Duration());
-      LogDeviceActivation(DeviceType::LASER, laserStart, laserStart + laser->Duration());
+      laser->Activate(laserStart, fireDuration);
+      LogDeviceActivation(DeviceType::LASER, laserStart, laserStart + fireDuration);
     }
   }
 

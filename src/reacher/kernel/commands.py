@@ -107,6 +107,12 @@ class CommandCode(IntEnum):
     PAV_LASER_CS_BOTH = 693
     PAV_LASER_PHASE_REWARD = 694
     PAV_LASER_PHASE_CUE = 695
+    PAV_LASER_CS_PLUS_SET_FREQUENCY = 696
+    PAV_LASER_CS_PLUS_SET_DURATION = 697
+    PAV_LASER_CS_PLUS_SET_DELAY = 698
+    PAV_LASER_CS_MINUS_SET_FREQUENCY = 699
+    PAV_LASER_CS_MINUS_SET_DURATION = 700
+    PAV_LASER_CS_MINUS_SET_DELAY = 701
 
     # --- Microscope (9xx) ---
     MICROSCOPE_DISARM = 900
@@ -627,6 +633,42 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     695: CommandSpec(
         CommandCode.PAV_LASER_PHASE_CUE, "PAV_LASER_PHASE_CUE",
         "Set Pavlovian laser to fire during cue phase",
+        paradigms=["pavlovian"],
+    ),
+    696: CommandSpec(
+        CommandCode.PAV_LASER_CS_PLUS_SET_FREQUENCY, "PAV_LASER_CS_PLUS_SET_FREQUENCY",
+        "Override laser frequency (Hz) fired on CS+ trials; unset falls back to LASER_SET_FREQUENCY",
+        payload_key="frequency", payload_type="int",
+        paradigms=["pavlovian"],
+    ),
+    697: CommandSpec(
+        CommandCode.PAV_LASER_CS_PLUS_SET_DURATION, "PAV_LASER_CS_PLUS_SET_DURATION",
+        "Override laser duration (ms) fired on CS+ trials; unset falls back to LASER_SET_DURATION",
+        payload_key="duration", payload_type="int",
+        paradigms=["pavlovian"],
+    ),
+    698: CommandSpec(
+        CommandCode.PAV_LASER_CS_PLUS_SET_DELAY, "PAV_LASER_CS_PLUS_SET_DELAY",
+        "Override laser onset delay (ms) fired on CS+ trials; unset falls back to LASER_SET_ONSET_DELAY",
+        payload_key="delay", payload_type="int",
+        paradigms=["pavlovian"],
+    ),
+    699: CommandSpec(
+        CommandCode.PAV_LASER_CS_MINUS_SET_FREQUENCY, "PAV_LASER_CS_MINUS_SET_FREQUENCY",
+        "Override laser frequency (Hz) fired on CS- trials; unset falls back to LASER_SET_FREQUENCY",
+        payload_key="frequency", payload_type="int",
+        paradigms=["pavlovian"],
+    ),
+    700: CommandSpec(
+        CommandCode.PAV_LASER_CS_MINUS_SET_DURATION, "PAV_LASER_CS_MINUS_SET_DURATION",
+        "Override laser duration (ms) fired on CS- trials; unset falls back to LASER_SET_DURATION",
+        payload_key="duration", payload_type="int",
+        paradigms=["pavlovian"],
+    ),
+    701: CommandSpec(
+        CommandCode.PAV_LASER_CS_MINUS_SET_DELAY, "PAV_LASER_CS_MINUS_SET_DELAY",
+        "Override laser onset delay (ms) fired on CS- trials; unset falls back to LASER_SET_ONSET_DELAY",
+        payload_key="delay", payload_type="int",
         paradigms=["pavlovian"],
     ),
 

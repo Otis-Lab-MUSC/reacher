@@ -119,6 +119,15 @@ namespace Cmd {
   constexpr int PAV_LASER_PHASE_REWARD = 694;  // Fire during REWARD phase (default)
   constexpr int PAV_LASER_PHASE_CUE    = 695;  // Fire during CUE_ON phase
 
+  // Per-trial-type laser pulse overrides. Unset (default): the trial type
+  // falls back to the shared LASER_SET_FREQUENCY/DURATION/ONSET_DELAY values.
+  constexpr int PAV_LASER_CS_PLUS_SET_FREQUENCY  = 696;  // CS+ trial laser frequency override (Hz)
+  constexpr int PAV_LASER_CS_PLUS_SET_DURATION   = 697;  // CS+ trial laser duration override (ms)
+  constexpr int PAV_LASER_CS_PLUS_SET_DELAY      = 698;  // CS+ trial laser onset delay override (ms)
+  constexpr int PAV_LASER_CS_MINUS_SET_FREQUENCY = 699;  // CS- trial laser frequency override (Hz)
+  constexpr int PAV_LASER_CS_MINUS_SET_DURATION  = 700;  // CS- trial laser duration override (ms)
+  constexpr int PAV_LASER_CS_MINUS_SET_DELAY     = 701;  // CS- trial laser onset delay override (ms)
+
   // --- Microscope (9xx) ---
   constexpr int MICROSCOPE_DISARM    = 900;
   constexpr int MICROSCOPE_ARM       = 901;

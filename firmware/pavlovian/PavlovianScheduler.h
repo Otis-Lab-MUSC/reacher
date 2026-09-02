@@ -74,6 +74,13 @@ public:
   /// @brief Set which phase the laser fires during.
   void SetLaserPhase(LaserPhase phase);
 
+  /// @brief Override the laser pulse (frequency/duration/onset delay) fired on CS+ trials.
+  /// Until called, CS+ trials use the shared laser's frequency/duration/onset delay.
+  void SetLaserCsPlusPulse(uint32_t freq, uint32_t duration, uint32_t onsetDelay);
+  /// @brief Override the laser pulse (frequency/duration/onset delay) fired on CS- trials.
+  /// Until called, CS- trials use the shared laser's frequency/duration/onset delay.
+  void SetLaserCsMinusPulse(uint32_t freq, uint32_t duration, uint32_t onsetDelay);
+
   /// @brief Main loop tick — advances trial state machine and output devices.
   void Update(uint32_t now);
 
@@ -121,6 +128,16 @@ private:
 
   LaserTrialFilter laserTrialFilter;
   LaserPhase       laserPhase;
+
+  // Per-trial-type laser pulse overrides (see SetLaserCsPlusPulse/SetLaserCsMinusPulse).
+  bool     laserCsPlusOverride;
+  uint32_t laserCsPlusFreq;
+  uint32_t laserCsPlusDuration;
+  uint32_t laserCsPlusOnsetDelay;
+  bool     laserCsMinusOverride;
+  uint32_t laserCsMinusFreq;
+  uint32_t laserCsMinusDuration;
+  uint32_t laserCsMinusOnsetDelay;
 
   // Session state
   uint32_t sessionOffset;
@@ -174,6 +191,10 @@ private:
   void TickOutputs(uint32_t now);
   /// @brief Check whether the laser should fire for this trial type.
   bool ShouldFireLaser(bool isCsMinus) const;
+  /// @brief Resolve the effective laser frequency/duration/onset-delay for a trial
+  /// type — the per-type override if set, else the shared laser's current values.
+  /// Applies the override frequency to the laser (mutates shared laser state).
+  void ResolveLaserPulse(bool isCsMinus, uint32_t& duration, uint32_t& onsetDelay);
 
   /// @brief Serialize lever press event to serial JSON (level 007).
   void LogLeverPress(DeviceType source, PressClass cls);

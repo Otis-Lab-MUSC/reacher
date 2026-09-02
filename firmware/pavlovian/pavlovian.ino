@@ -14,7 +14,8 @@
  * (ITI -> CUE -> TRACE -> REWARD). Lever presses are logged but do not affect
  * trial progression. Two cues (CS+/CS-), two pumps, and an optional laser are used.
  * Laser can be assigned to specific trial types (CS+, CS-, or both) and firing phases
- * (CUE or REWARD).
+ * (CUE or REWARD). Pulse frequency/duration/onset-delay can be overridden independently
+ * per trial type (CS+ vs CS-); an unconfigured type falls back to the shared laser values.
  *
  * **JSON protocol levels:**
  * - 000 — Settings / configuration dump
@@ -81,6 +82,17 @@ Slm         slm(PIN_SLM_TS);
 // Laser shadow variables
 uint8_t  LASER_FREQUENCY = 40;
 uint32_t LASER_DURATION  = 5000;
+
+// Per-trial-type laser pulse shadow variables. Each SET command carries only its
+// own key; the companion values are retained here (mirrors CUE_PULSE_ON/OFF).
+// Defaults match the shared laser's compile-time defaults above so an override
+// sent for one field only doesn't silently zero the other two.
+uint32_t PAV_LASER_CS_PLUS_FREQ    = 40;
+uint32_t PAV_LASER_CS_PLUS_DUR     = 5000;
+uint32_t PAV_LASER_CS_PLUS_DELAY   = 0;
+uint32_t PAV_LASER_CS_MINUS_FREQ   = 40;
+uint32_t PAV_LASER_CS_MINUS_DUR    = 5000;
+uint32_t PAV_LASER_CS_MINUS_DELAY  = 0;
 
 // Cue pulse shadow variables (CS+ = cue, CS- = cue2). pulse_on == 0 means
 // continuous (pulsing disabled). 374/375 set CS+, 384/385 set CS-; each
@@ -360,6 +372,53 @@ void ParseCommands() {
             uint32_t d = (uint32_t)inputJson["delay"]; if (d > 600000) d = 600000;
             laser.SetOnsetDelay(d);
             logParamChange(F("LASER"), F("onset_delay"), d); break;
+          }
+
+          // Per-trial-type laser pulse overrides. Each command carries only its own
+          // key; the companion values are held in the shadow globals below (mirrors
+          // CUE_SET_PULSE_ON/OFF). Until at least one is sent for a trial type, that
+          // type falls back to the shared LASER_SET_FREQUENCY/DURATION/ONSET_DELAY.
+          case Cmd::PAV_LASER_CS_PLUS_SET_FREQUENCY: {
+            uint32_t v = (uint32_t)inputJson["frequency"];
+            if (v < 1) v = 1; if (v > 65535) v = 65535;
+            PAV_LASER_CS_PLUS_FREQ = v;
+            scheduler.SetLaserCsPlusPulse(PAV_LASER_CS_PLUS_FREQ, PAV_LASER_CS_PLUS_DUR, PAV_LASER_CS_PLUS_DELAY);
+            logParamChange(F("LASER"), F("cs_plus_frequency"), PAV_LASER_CS_PLUS_FREQ); break;
+          }
+          case Cmd::PAV_LASER_CS_PLUS_SET_DURATION: {
+            uint32_t v = (uint32_t)inputJson["duration"];
+            if (v < 1) v = 1; if (v > 600000) v = 600000;
+            PAV_LASER_CS_PLUS_DUR = v;
+            scheduler.SetLaserCsPlusPulse(PAV_LASER_CS_PLUS_FREQ, PAV_LASER_CS_PLUS_DUR, PAV_LASER_CS_PLUS_DELAY);
+            logParamChange(F("LASER"), F("cs_plus_duration"), PAV_LASER_CS_PLUS_DUR); break;
+          }
+          case Cmd::PAV_LASER_CS_PLUS_SET_DELAY: {
+            uint32_t v = (uint32_t)inputJson["delay"];
+            if (v > 600000) v = 600000;
+            PAV_LASER_CS_PLUS_DELAY = v;
+            scheduler.SetLaserCsPlusPulse(PAV_LASER_CS_PLUS_FREQ, PAV_LASER_CS_PLUS_DUR, PAV_LASER_CS_PLUS_DELAY);
+            logParamChange(F("LASER"), F("cs_plus_delay"), PAV_LASER_CS_PLUS_DELAY); break;
+          }
+          case Cmd::PAV_LASER_CS_MINUS_SET_FREQUENCY: {
+            uint32_t v = (uint32_t)inputJson["frequency"];
+            if (v < 1) v = 1; if (v > 65535) v = 65535;
+            PAV_LASER_CS_MINUS_FREQ = v;
+            scheduler.SetLaserCsMinusPulse(PAV_LASER_CS_MINUS_FREQ, PAV_LASER_CS_MINUS_DUR, PAV_LASER_CS_MINUS_DELAY);
+            logParamChange(F("LASER"), F("cs_minus_frequency"), PAV_LASER_CS_MINUS_FREQ); break;
+          }
+          case Cmd::PAV_LASER_CS_MINUS_SET_DURATION: {
+            uint32_t v = (uint32_t)inputJson["duration"];
+            if (v < 1) v = 1; if (v > 600000) v = 600000;
+            PAV_LASER_CS_MINUS_DUR = v;
+            scheduler.SetLaserCsMinusPulse(PAV_LASER_CS_MINUS_FREQ, PAV_LASER_CS_MINUS_DUR, PAV_LASER_CS_MINUS_DELAY);
+            logParamChange(F("LASER"), F("cs_minus_duration"), PAV_LASER_CS_MINUS_DUR); break;
+          }
+          case Cmd::PAV_LASER_CS_MINUS_SET_DELAY: {
+            uint32_t v = (uint32_t)inputJson["delay"];
+            if (v > 600000) v = 600000;
+            PAV_LASER_CS_MINUS_DELAY = v;
+            scheduler.SetLaserCsMinusPulse(PAV_LASER_CS_MINUS_FREQ, PAV_LASER_CS_MINUS_DUR, PAV_LASER_CS_MINUS_DELAY);
+            logParamChange(F("LASER"), F("cs_minus_delay"), PAV_LASER_CS_MINUS_DELAY); break;
           }
 
           // Controller commands
