@@ -1,4 +1,5 @@
 import logging
+import os
 import queue
 import json
 import time
@@ -298,6 +299,137 @@ def test_handle_data_hardware_settings(reacher, mocker):
     hw = {"level": "000", "device": "CUE", "frequency": 2900}
     reacher.handle_data(json.dumps(hw))
     assert hw in reacher.hardware_settings
+
+
+def test_handle_data_records_session_change_with_host_timestamp(reacher, mocker):
+    """reacher#12: level-000/001 frames are appended to _session_changes with a host-side received_at."""
+    mocker.patch("builtins.open", mocker.mock_open())
+    mocker.patch("os.fsync")
+    config = {"level": "000", "device": "CUE", "frequency": 2900}
+    with patch("time.time", return_value=1700000000.0):
+        reacher.handle_data(json.dumps(config))
+    assert len(reacher._session_changes) == 1
+    assert reacher._session_changes[0] == {**config, "received_at": 1700000000.0}
+
+
+def test_handle_data_ignores_non_config_levels_for_session_changes(reacher, mocker):
+    """Only level 000/001 are change-tracked — behavioral (007) events are not config."""
+    mocker.patch("builtins.open", mocker.mock_open())
+    mocker.patch("os.fsync")
+    reacher.program_running = True
+    reacher.program_flag.clear()
+    event = {
+        "level": "007",
+        "device": "PUMP",
+        "event": "INFUSION",
+        "start_timestamp": 12345,
+        "end_timestamp": 12346,
+    }
+    reacher.handle_data(json.dumps(event))
+    assert reacher._session_changes == []
+
+
+def test_build_session_summary_distills_initial_changes_final_state(reacher, mocker):
+    """reacher#12: summary separates first-seen config (initial), the full ordered trail
+    (changes), and the latest-known state (final_state, reused from firmware_information /
+    hardware_settings rather than replayed).
+
+    Real time.time() is left unpatched here: handle_data's own logger.info() calls also
+    consume time.time() internally for log formatting, so pinning a short side_effect list
+    to just the four session-change appends is not reliable — instead each change's own
+    recorded `received_at` is used as the expected value.
+    """
+    mocker.patch("builtins.open", mocker.mock_open())
+    mocker.patch("os.fsync")
+
+    identify = {"level": "000", "device": "CONTROLLER", "sketch": "fr", "version": "v2.0.0"}
+    arm = {"level": "001", "device": "PUMP", "pin": 7, "desc": "ARMED"}
+    cue_initial = {"level": "000", "device": "CUE", "frequency": 2900}
+    cue_updated = {"level": "000", "device": "CUE", "frequency": 8000}
+
+    for payload in (identify, arm, cue_initial, cue_updated):
+        reacher.handle_data(json.dumps(payload))
+
+    summary = reacher.get_session_summary()
+    changes = summary["changes"]
+    assert len(changes) == 4
+    assert all(isinstance(c["received_at"], float) for c in changes)
+    for change, expected in zip(changes, (identify, arm, cue_initial, cue_updated)):
+        assert expected.items() <= change.items()
+
+    # Initial configuration: first-seen CONTROLLER identify + first-seen CUE config only —
+    # the later CUE update must not overwrite it.
+    assert summary["initial_configuration"]["firmware"] == changes[0]
+    assert summary["initial_configuration"]["devices"] == {"CUE": changes[2]}
+
+    # Final state: latest-known value per device, reused from hardware_settings/firmware_information.
+    assert summary["final_state"]["devices"]["CUE"] == cue_updated
+    assert identify.items() <= summary["final_state"]["firmware"].items()
+
+
+def test_write_session_summary_writes_json_to_log_dir(reacher, mocker):
+    """_write_session_summary() persists session_summary.json into reacher_log_path."""
+    # Isolate the open() call under test from _write_controller_log's own open() —
+    # mock_open() shares one file handle across every open() target, so a real
+    # controller-log write would otherwise pollute the write() calls asserted below.
+    mocker.patch.object(reacher, "_write_controller_log")
+    hw = {"level": "000", "device": "CUE", "frequency": 2900}
+    reacher.handle_data(json.dumps(hw))
+
+    m_open = mocker.patch("builtins.open", mocker.mock_open())
+    mocker.patch("os.fsync")
+    reacher._write_session_summary()
+
+    expected_path = os.path.join(reacher.reacher_log_path, "session_summary.json")
+    m_open.assert_called_once_with(expected_path, "w")
+    written = "".join(call.args[0] for call in m_open().write.call_args_list)
+    payload = json.loads(written)
+    assert payload["final_state"]["devices"]["CUE"] == hw
+
+
+def test_stop_program_writes_session_summary(reacher, mocker, mock_serial):
+    """stop_program() persists the session summary alongside the CSV auto-export."""
+    reacher.ser.is_open = True
+    reacher.program_running = True
+    mocker.patch.object(reacher, "_join_queue_with_timeout")
+    mocker.patch.object(reacher, "close_serial")
+    mocker.patch.object(reacher, "_write_event_log")
+    mocker.patch.object(reacher, "_close_event_log")
+    mocker.patch.object(reacher, "_auto_export")
+    mocker.patch.object(reacher, "_write_session_summary")
+    reacher.stop_program()
+    reacher._write_session_summary.assert_called_once()
+
+
+def test_reset_preserves_session_changes_for_summary(reacher, mocker):
+    """reacher#12 regression: reset() must not clear _session_changes.
+
+    session_summary.json is documented to span the full log-directory lifetime,
+    same as controller_log.json (which reset() reuses, not rotates). A run ->
+    stop -> reset -> run -> stop sequence must produce a summary covering BOTH
+    runs, not just the post-reset one — otherwise the summary silently disagrees
+    with the append-only controller_log.json in the same directory.
+    """
+    mocker.patch.object(reacher, "stop_program")
+    mocker.patch.object(reacher, "clear_queue")
+    mocker.patch.object(reacher, "close_serial")
+    mocker.patch.object(reacher, "_write_controller_log")
+    mocker.patch("threading.Thread")
+
+    pre_reset = {"level": "000", "device": "CONTROLLER", "sketch": "fr", "version": "v2.0.0"}
+    reacher.handle_data(json.dumps(pre_reset))
+    assert len(reacher._session_changes) == 1
+
+    reacher.reset()
+
+    post_reset = {"level": "001", "device": "PUMP", "pin": 7, "desc": "ARMED"}
+    reacher.handle_data(json.dumps(post_reset))
+
+    summary = reacher.get_session_summary()
+    changes = summary["changes"]
+    assert len(changes) == 2
+    assert pre_reset.items() <= changes[0].items()
+    assert post_reset.items() <= changes[1].items()
 
 
 def test_handle_behavioral_events(reacher, mocker):

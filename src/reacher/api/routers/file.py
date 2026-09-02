@@ -279,6 +279,16 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
             ),
         )
 
+        # session_summary.json — distilled level-000/001 config/arm-disarm trail (reacher#12)
+        try:
+            session_summary = instance.get_session_summary()
+            zf.writestr("session_summary.json", json.dumps(session_summary, indent=2))
+        except Exception:
+            # Mirrors event_log.jsonl below: omit rather than fail an export the
+            # user is waiting on, whether the cause is a stub/mock instance
+            # missing the accessor or a genuine runtime error building it.
+            logger.warning("Failed to include session_summary.json for session %s", session_id, exc_info=True)
+
         # event_log.jsonl — authoritative cross-segment record of lifecycle, events, frames
         try:
             instance.flush_event_log()

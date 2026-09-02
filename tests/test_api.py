@@ -551,6 +551,84 @@ class TestFileEndpoints:
         # orphan cleanup no longer holds it for the extended unexported window.
         assert sm.get_session(sid).exported is True
 
+    def test_export_zip_includes_session_summary(self, client, tmp_path):
+        """reacher#12: a configured get_session_summary() lands in the export ZIP verbatim."""
+        resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
+        sid = resp.json()["session_id"]
+
+        sm = client.app.state.session_manager
+        instance = sm.get_instance(sid)
+        instance.get_filename.return_value = "test_file"
+        instance.get_data_destination.return_value = str(tmp_path)
+        folder = tmp_path / "test_file"
+        folder.mkdir()
+        instance.make_destination_folder.return_value = str(folder)
+        instance.get_behavior_data.return_value = []
+        instance.get_firmware_information.return_value = {"sketch": "fr", "version": "v2.0.0"}
+        instance.get_hardware_settings.return_value = []
+        instance.get_frame_data.return_value = []
+        instance.get_total_infusion_count.return_value = 0
+        instance.get_total_press_count.return_value = 0
+        instance.get_total_trial_count.return_value = 0
+        instance.get_segment_exports.return_value = []
+        instance.get_segment_event_counts.return_value = []
+        instance.get_event_log_path.return_value = str(tmp_path / "missing_event_log.jsonl")
+
+        summary = {
+            "session_id": sid,
+            "initial_configuration": {"firmware": {"sketch": "fr"}, "devices": {}},
+            "changes": [{"received_at": 1700000000.0, "level": "001", "device": "PUMP", "desc": "ARMED"}],
+            "final_state": {"firmware": {"sketch": "fr"}, "devices": {}},
+        }
+        instance.get_session_summary.return_value = summary
+
+        resp = client.post(
+            f"/api/file/{sid}/export/zip",
+            json={"session_name": "my_session"},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 200
+        zip_path = resp.json()["file_path"]
+        with zipfile.ZipFile(zip_path) as zf:
+            assert "session_summary.json" in zf.namelist()
+            assert json.loads(zf.read("session_summary.json")) == summary
+
+    def test_export_zip_omits_session_summary_when_unavailable(self, client, tmp_path):
+        """A stub/simulator instance without get_session_summary() must not fail the export."""
+        resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
+        sid = resp.json()["session_id"]
+
+        sm = client.app.state.session_manager
+        instance = sm.get_instance(sid)
+        instance.get_filename.return_value = "test_file"
+        instance.get_data_destination.return_value = str(tmp_path)
+        folder = tmp_path / "test_file"
+        folder.mkdir()
+        instance.make_destination_folder.return_value = str(folder)
+        instance.get_behavior_data.return_value = []
+        instance.get_firmware_information.return_value = {"sketch": "fr", "version": "v2.0.0"}
+        instance.get_hardware_settings.return_value = []
+        instance.get_frame_data.return_value = []
+        instance.get_total_infusion_count.return_value = 0
+        instance.get_total_press_count.return_value = 0
+        instance.get_total_trial_count.return_value = 0
+        instance.get_segment_exports.return_value = []
+        instance.get_segment_event_counts.return_value = []
+        instance.get_event_log_path.return_value = str(tmp_path / "missing_event_log.jsonl")
+        del instance.get_session_summary  # simulate a stub instance predating this accessor
+
+        resp = client.post(
+            f"/api/file/{sid}/export/zip",
+            json={"session_name": "my_session"},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 200
+        zip_path = resp.json()["file_path"]
+        with zipfile.ZipFile(zip_path) as zf:
+            assert "session_summary.json" not in zf.namelist()
+            # The rest of the export must still succeed.
+            assert "arduino_config.json" in zf.namelist()
+
     def test_export_zip_includes_pavlov_rows(self, client, tmp_path):
         """behavior_events.csv in the export must carry device=PAVLOV rows."""
         resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
