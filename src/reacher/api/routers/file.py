@@ -343,6 +343,10 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
     with open(zip_path, "wb") as f:
         f.write(buf.getvalue())
 
+    # Issue labrynth#22: releases this session from the extended
+    # unexported-stopped orphan-cleanup window now that its data is safe on disk.
+    sm.mark_exported(session_id)
+
     return {"file_path": zip_path, "folder_path": folder_path}
 
 

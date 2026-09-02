@@ -301,6 +301,16 @@ def _ensure_broadcast_worker():
 _session_disconnect_times: Dict[str, float] = {}
 _SESSION_ORPHAN_TIMEOUT = 60  # seconds with 0 WS clients before destroying a session
 _SESSION_ORPHAN_TIMEOUT_ACTIVE = 600  # extended timeout for running/paused/uploading sessions
+# Issue labrynth#22: a "stopped" session still holds data the user has not
+# exported yet. destroy_session() drops the REACHER instance the export
+# endpoints read from, so reaping it on the short default timeout turns a
+# closed laptop lid or a flaky network into permanent, silent data loss.
+# This window only applies while unexported (SessionManager.mark_exported
+# clears it back to _SESSION_ORPHAN_TIMEOUT once the export endpoint
+# succeeds), so a session that *is* exported is still reaped quickly, and a
+# session that never gets exported is still bounded — just generously, since
+# the alternative is destroying data the user came back for.
+_SESSION_ORPHAN_TIMEOUT_STOPPED_UNEXPORTED = 86400  # 24h
 _orphan_task = None
 
 
@@ -321,6 +331,8 @@ async def _orphan_cleanup():
                     info = sm._sessions.get(sid)
                     if info and info.state in ("running", "paused", "uploading"):
                         timeout = _SESSION_ORPHAN_TIMEOUT_ACTIVE
+                    elif info and info.state == "stopped" and not info.exported:
+                        timeout = _SESSION_ORPHAN_TIMEOUT_STOPPED_UNEXPORTED
                 except Exception:
                     pass
             if (now - ts) >= timeout:
