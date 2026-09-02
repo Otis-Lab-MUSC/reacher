@@ -19,7 +19,13 @@ public:
   /// @brief Schedule laser activation (CONTINGENT mode only).
   /// @param startTs Start timestamp (millis)
   /// @param dur Duration in ms
-  void Activate(uint32_t startTs, uint32_t dur);
+  /// @param freqOverride Frequency (Hz) for this activation only, or 0 (default) to
+  ///   use the persistent configured frequency. Never mutates the persistent
+  ///   frequency (see SetFrequency/Frequency) — only this activation's oscillation
+  ///   uses it, and every call (overridden or not) resyncs to a known value, so a
+  ///   caller that fires with an override on one call and without on the next never
+  ///   inherits the prior call's override.
+  void Activate(uint32_t startTs, uint32_t dur, uint32_t freqOverride = 0);
 
   /// @brief Advance laser state machine. Called every loop tick.
   void Await(uint32_t currentTimestamp);
@@ -49,7 +55,8 @@ public:
   bool IsContingent() const;
 
 private:
-  uint32_t frequency;               ///< Oscillation frequency in Hz (1 = continuous)
+  uint32_t frequency;               ///< Persistent configured frequency in Hz (1 = continuous). Only SetFrequency() writes this.
+  uint32_t activeFrequency;         ///< Frequency actually used by Oscillate()/UpdateHalfCycle() for the current activation window. Resynced to `frequency` (or a caller's override) on every Activate()/Test().
   uint32_t duration;                ///< Default activation duration in ms
   uint32_t onsetDelay;              ///< Delay (ms) from RH press to laser onset in RH-only mode
   uint32_t startTimestamp;          ///< Current activation window start

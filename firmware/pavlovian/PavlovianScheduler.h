@@ -209,12 +209,14 @@ private:
   /// @brief Check whether the laser should fire for this trial type.
   bool ShouldFireLaser(bool isCsMinus) const;
   /// @brief Resolve the effective laser frequency/duration/onset-delay for a trial
-  /// type. Each of the three fields independently uses its own override if set,
-  /// else the shared laser's live value — overriding one field never freezes the
-  /// other two. Applies an overridden frequency to the laser (mutates shared
-  /// laser state); duration/onsetDelay are returned by reference instead, since
-  /// Laser::Activate() already takes duration as a parameter.
-  void ResolveLaserPulse(bool isCsMinus, uint32_t& duration, uint32_t& onsetDelay);
+  /// type, all by value — never mutates the shared laser. Each of the three
+  /// fields independently uses its own override if set, else the shared laser's
+  /// current persistent value — overriding one field never freezes the other
+  /// two, and an unoverridden field on one trial never inherits a value left
+  /// behind by an override on a *different* trial type. The resolved frequency
+  /// is passed to Laser::Activate()'s per-activation override parameter by the
+  /// caller — it is never written back onto the laser via SetFrequency().
+  void ResolveLaserPulse(bool isCsMinus, uint32_t& frequency, uint32_t& duration, uint32_t& onsetDelay);
 
   /// @brief Serialize lever press event to serial JSON (level 007).
   void LogLeverPress(DeviceType source, PressClass cls);
