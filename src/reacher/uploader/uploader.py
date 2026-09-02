@@ -103,6 +103,16 @@ def _fetch_hex_from_github() -> Optional[str]:
     return _HEX_CACHE_DIR if os.path.isdir(_HEX_CACHE_DIR) else None
 
 
+class AvrdudeNotFoundError(RuntimeError):
+    """avrdude is not reachable at the resolved/configured path.
+
+    A subclass (not a bare RuntimeError) so callers — notably the upload
+    API route — can discriminate a missing-tool precondition, which is
+    client-actionable, from other RuntimeErrors that mean an actual
+    failure occurred and must stay a 500.
+    """
+
+
 class FirmwareUploader:
     """Upload pre-compiled .hex firmware to an Arduino via avrdude."""
 
@@ -328,12 +338,12 @@ class FirmwareUploader:
         # Pre-flight: verify avrdude is reachable before spawning subprocess
         if os.path.isabs(self.avrdude_path):
             if not os.path.isfile(self.avrdude_path):
-                raise RuntimeError(
+                raise AvrdudeNotFoundError(
                     f"avrdude not found at configured path: {self.avrdude_path}"
                 )
         else:
             if not shutil.which(self.avrdude_path):
-                raise RuntimeError(
+                raise AvrdudeNotFoundError(
                     "avrdude not found in PATH. Install it with: "
                     "sudo apt-get install avrdude"
                 )
