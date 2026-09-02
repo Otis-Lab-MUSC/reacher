@@ -113,6 +113,8 @@ class CommandCode(IntEnum):
     PAV_LASER_CS_MINUS_SET_FREQUENCY = 699
     PAV_LASER_CS_MINUS_SET_DURATION = 700
     PAV_LASER_CS_MINUS_SET_DELAY = 701
+    PAV_LASER_CS_PLUS_CLEAR_OVERRIDE = 702
+    PAV_LASER_CS_MINUS_CLEAR_OVERRIDE = 703
 
     # --- Microscope (9xx) ---
     MICROSCOPE_DISARM = 900
@@ -669,6 +671,16 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.PAV_LASER_CS_MINUS_SET_DELAY, "PAV_LASER_CS_MINUS_SET_DELAY",
         "Override laser onset delay (ms) fired on CS- trials; unset falls back to LASER_SET_ONSET_DELAY",
         payload_key="delay", payload_type="int",
+        paradigms=["pavlovian"],
+    ),
+    702: CommandSpec(
+        CommandCode.PAV_LASER_CS_PLUS_CLEAR_OVERRIDE, "PAV_LASER_CS_PLUS_CLEAR_OVERRIDE",
+        "Clear all CS+ trial laser pulse overrides (frequency/duration/delay revert to shared laser)",
+        paradigms=["pavlovian"],
+    ),
+    703: CommandSpec(
+        CommandCode.PAV_LASER_CS_MINUS_CLEAR_OVERRIDE, "PAV_LASER_CS_MINUS_CLEAR_OVERRIDE",
+        "Clear all CS- trial laser pulse overrides (frequency/duration/delay revert to shared laser)",
         paradigms=["pavlovian"],
     ),
 

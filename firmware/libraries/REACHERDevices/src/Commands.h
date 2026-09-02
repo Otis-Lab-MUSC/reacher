@@ -127,6 +127,8 @@ namespace Cmd {
   constexpr int PAV_LASER_CS_MINUS_SET_FREQUENCY = 699;  // CS- trial laser frequency override (Hz)
   constexpr int PAV_LASER_CS_MINUS_SET_DURATION  = 700;  // CS- trial laser duration override (ms)
   constexpr int PAV_LASER_CS_MINUS_SET_DELAY     = 701;  // CS- trial laser onset delay override (ms)
+  constexpr int PAV_LASER_CS_PLUS_CLEAR_OVERRIDE  = 702;  // Clear all CS+ pulse overrides (revert to shared laser)
+  constexpr int PAV_LASER_CS_MINUS_CLEAR_OVERRIDE = 703;  // Clear all CS- pulse overrides (revert to shared laser)
 
   // --- Microscope (9xx) ---
   constexpr int MICROSCOPE_DISARM    = 900;

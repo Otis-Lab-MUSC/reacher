@@ -23,13 +23,17 @@ PavlovianScheduler::PavlovianScheduler() {
   microscope = nullptr;
   laserTrialFilter = LaserTrialFilter::CS_BOTH;
   laserPhase = LaserPhase::REWARD;
-  laserCsPlusOverride = false;
+  laserCsPlusFreqSet = false;
   laserCsPlusFreq = 0;
+  laserCsPlusDurationSet = false;
   laserCsPlusDuration = 0;
+  laserCsPlusOnsetDelaySet = false;
   laserCsPlusOnsetDelay = 0;
-  laserCsMinusOverride = false;
+  laserCsMinusFreqSet = false;
   laserCsMinusFreq = 0;
+  laserCsMinusDurationSet = false;
   laserCsMinusDuration = 0;
+  laserCsMinusOnsetDelaySet = false;
   laserCsMinusOnsetDelay = 0;
   sessionOffset = 0;
   sessionActive = false;
@@ -100,18 +104,46 @@ void PavlovianScheduler::SetLaserPhase(LaserPhase phase) {
   laserPhase = phase;
 }
 
-void PavlovianScheduler::SetLaserCsPlusPulse(uint32_t freq, uint32_t duration, uint32_t onsetDelay) {
-  laserCsPlusOverride = true;
+void PavlovianScheduler::SetLaserCsPlusFrequency(uint32_t freq) {
+  laserCsPlusFreqSet = true;
   laserCsPlusFreq = freq;
+}
+
+void PavlovianScheduler::SetLaserCsPlusDuration(uint32_t duration) {
+  laserCsPlusDurationSet = true;
   laserCsPlusDuration = duration;
+}
+
+void PavlovianScheduler::SetLaserCsPlusOnsetDelay(uint32_t onsetDelay) {
+  laserCsPlusOnsetDelaySet = true;
   laserCsPlusOnsetDelay = onsetDelay;
 }
 
-void PavlovianScheduler::SetLaserCsMinusPulse(uint32_t freq, uint32_t duration, uint32_t onsetDelay) {
-  laserCsMinusOverride = true;
+void PavlovianScheduler::SetLaserCsMinusFrequency(uint32_t freq) {
+  laserCsMinusFreqSet = true;
   laserCsMinusFreq = freq;
+}
+
+void PavlovianScheduler::SetLaserCsMinusDuration(uint32_t duration) {
+  laserCsMinusDurationSet = true;
   laserCsMinusDuration = duration;
+}
+
+void PavlovianScheduler::SetLaserCsMinusOnsetDelay(uint32_t onsetDelay) {
+  laserCsMinusOnsetDelaySet = true;
   laserCsMinusOnsetDelay = onsetDelay;
+}
+
+void PavlovianScheduler::ClearLaserCsPlusOverride() {
+  laserCsPlusFreqSet = false;
+  laserCsPlusDurationSet = false;
+  laserCsPlusOnsetDelaySet = false;
+}
+
+void PavlovianScheduler::ClearLaserCsMinusOverride() {
+  laserCsMinusFreqSet = false;
+  laserCsMinusDurationSet = false;
+  laserCsMinusOnsetDelaySet = false;
 }
 
 bool PavlovianScheduler::ShouldFireLaser(bool isCsMinus) const {
@@ -121,16 +153,15 @@ bool PavlovianScheduler::ShouldFireLaser(bool isCsMinus) const {
 }
 
 void PavlovianScheduler::ResolveLaserPulse(bool isCsMinus, uint32_t& duration, uint32_t& onsetDelay) {
-  bool hasOverride = isCsMinus ? laserCsMinusOverride : laserCsPlusOverride;
-  if (!hasOverride) {
-    duration = laser->Duration();
-    onsetDelay = laser->OnsetDelay();
-    return;
+  bool freqSet = isCsMinus ? laserCsMinusFreqSet : laserCsPlusFreqSet;
+  bool durationSet = isCsMinus ? laserCsMinusDurationSet : laserCsPlusDurationSet;
+  bool onsetDelaySet = isCsMinus ? laserCsMinusOnsetDelaySet : laserCsPlusOnsetDelaySet;
+
+  if (freqSet) {
+    laser->SetFrequency(isCsMinus ? laserCsMinusFreq : laserCsPlusFreq);
   }
-  uint32_t freq = isCsMinus ? laserCsMinusFreq : laserCsPlusFreq;
-  duration = isCsMinus ? laserCsMinusDuration : laserCsPlusDuration;
-  onsetDelay = isCsMinus ? laserCsMinusOnsetDelay : laserCsPlusOnsetDelay;
-  laser->SetFrequency(freq);
+  duration = durationSet ? (isCsMinus ? laserCsMinusDuration : laserCsPlusDuration) : laser->Duration();
+  onsetDelay = onsetDelaySet ? (isCsMinus ? laserCsMinusOnsetDelay : laserCsPlusOnsetDelay) : laser->OnsetDelay();
 }
 
 void PavlovianScheduler::Update(uint32_t now) {
@@ -298,6 +329,18 @@ void PavlovianScheduler::EndSession(uint32_t now) {
   if (pump2) digitalWrite(pump2->Pin(), LOW);
   if (laser) laser->SetSessionActive(false);
   if (laser) digitalWrite(laser->Pin(), LOW);
+
+  // Clear per-trial-type laser pulse overrides here, not in StartSession(): the
+  // frontend sends PAV_LASER_CS_*_SET_* commands *before* SESSION_START, and
+  // ParseCommands() handles one command per loop() iteration, so by the time
+  // StartSession() runs, this session's own override commands (if any) have
+  // already been applied. Clearing there would erase an override the instant
+  // it was set, breaking the feature on its first use. Clearing here instead
+  // means the *next* session always starts from "no override" and only gets
+  // what its own pre-start commands explicitly set — a stale override from
+  // this session can never silently carry into the next one.
+  ClearLaserCsPlusOverride();
+  ClearLaserCsMinusOverride();
 }
 
 uint32_t PavlovianScheduler::SessionOffset() const {
