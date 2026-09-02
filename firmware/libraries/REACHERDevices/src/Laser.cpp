@@ -8,6 +8,7 @@
 Laser::Laser(int8_t pin, uint32_t frequency, uint32_t duration)
   : Device(pin, OUTPUT, "LASER") {
   this->frequency = frequency;
+  this->activeFrequency = frequency;
   this->duration = duration;
   this->onsetDelay = 0;
   startTimestamp = 0;
@@ -21,8 +22,11 @@ Laser::Laser(int8_t pin, uint32_t frequency, uint32_t duration)
   sessionActive = false;
 }
 
-void Laser::Activate(uint32_t startTs, uint32_t dur) {
+void Laser::Activate(uint32_t startTs, uint32_t dur, uint32_t freqOverride) {
   if (mode == CONTINGENT) {
+    // Resync every call, overridden or not, so this activation never inherits
+    // whatever a *previous* Activate() left activeFrequency at.
+    activeFrequency = (freqOverride > 0) ? freqOverride : frequency;
     startTimestamp = startTs;
     endTimestamp = startTs + dur;
     state = true;
@@ -50,6 +54,9 @@ void Laser::Await(uint32_t currentTimestamp) {
 }
 
 void Laser::Test(uint32_t currentTimestamp) {
+  // A manual test always reflects the persistent configured frequency, never
+  // whatever a prior Activate() override left activeFrequency at.
+  activeFrequency = frequency;
   startTimestamp = currentTimestamp;
   endTimestamp = currentTimestamp + duration;
   state = true;
@@ -82,7 +89,7 @@ void Laser::Oscillate(uint32_t currentTimestamp) {
   bool inWindow = (int32_t)(currentTimestamp - startTimestamp) >= 0 &&
                   (int32_t)(currentTimestamp - endTimestamp) <= 0;
   if (inWindow && state) {
-    if (frequency == 1) {
+    if (activeFrequency == 1) {
       On();
     } else {
       if ((int32_t)(currentTimestamp - halfCycleEndTimestamp) >= 0) {
@@ -123,6 +130,9 @@ void Laser::SetSessionActive(bool active) {
 void Laser::SetFrequency(uint32_t frequency) {
   if (frequency > 0) {
     this->frequency = frequency;
+    // Keep the active oscillation in step with an explicit live reconfigure
+    // (matches pre-existing behavior: 671 always took effect immediately).
+    this->activeFrequency = frequency;
   }
 }
 
@@ -156,9 +166,9 @@ void Laser::Off() {
 }
 
 void Laser::UpdateHalfCycle(uint32_t currentTimestamp) {
-  // Unconfigured (frequency == 0, the FR blank-state default): stay off rather
-  // than divide by zero and cast +/-inf to uint32_t (undefined behavior).
-  if (frequency == 0) {
+  // Unconfigured (activeFrequency == 0, the FR blank-state default): stay off
+  // rather than divide by zero and cast +/-inf to uint32_t (undefined behavior).
+  if (activeFrequency == 0) {
     halfCycleStartTimestamp = currentTimestamp;
     halfCycleEndTimestamp = currentTimestamp;
     halfState = false;
@@ -175,7 +185,7 @@ void Laser::UpdateHalfCycle(uint32_t currentTimestamp) {
   //      40    |     13         |   38.46    |  3.8%
   //      50    |     10         |   50.00    |  0.0%
   // Round half-cycle to nearest ms to minimize error.
-  float halfCycleLength = (1.0f / frequency) / 2.0f * 1000.0f;
+  float halfCycleLength = (1.0f / activeFrequency) / 2.0f * 1000.0f;
   halfCycleStartTimestamp = currentTimestamp;
   halfCycleEndTimestamp = currentTimestamp + static_cast<uint32_t>(halfCycleLength + 0.5f);
   halfState = !halfState;

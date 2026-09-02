@@ -74,6 +74,23 @@ public:
   /// @brief Set which phase the laser fires during.
   void SetLaserPhase(LaserPhase phase);
 
+  // Per-trial-type laser pulse overrides — each field is independently overridable
+  // and independently falls back to the shared laser's live value when unset, so
+  // e.g. overriding only CS+ frequency does not also freeze CS+ duration/delay at
+  // whatever the shared laser happened to have at override time.
+  void SetLaserCsPlusFrequency(uint32_t freq);
+  void SetLaserCsPlusDuration(uint32_t duration);
+  void SetLaserCsPlusOnsetDelay(uint32_t onsetDelay);
+  void SetLaserCsMinusFrequency(uint32_t freq);
+  void SetLaserCsMinusDuration(uint32_t duration);
+  void SetLaserCsMinusOnsetDelay(uint32_t onsetDelay);
+  /// @brief Clear all pulse overrides for CS+ trials — reverts to the shared laser's
+  /// live frequency/duration/onset delay.
+  void ClearLaserCsPlusOverride();
+  /// @brief Clear all pulse overrides for CS- trials — reverts to the shared laser's
+  /// live frequency/duration/onset delay.
+  void ClearLaserCsMinusOverride();
+
   /// @brief Main loop tick — advances trial state machine and output devices.
   void Update(uint32_t now);
 
@@ -121,6 +138,23 @@ private:
 
   LaserTrialFilter laserTrialFilter;
   LaserPhase       laserPhase;
+
+  // Per-trial-type, per-field laser pulse overrides. Each field has its own
+  // Set/Unset flag so overriding one field never drags the other two along.
+  // Cleared in EndSession() — never in StartSession(), which runs *after* the
+  // frontend has already sent this session's override commands (see EndSession).
+  bool     laserCsPlusFreqSet;
+  uint32_t laserCsPlusFreq;
+  bool     laserCsPlusDurationSet;
+  uint32_t laserCsPlusDuration;
+  bool     laserCsPlusOnsetDelaySet;
+  uint32_t laserCsPlusOnsetDelay;
+  bool     laserCsMinusFreqSet;
+  uint32_t laserCsMinusFreq;
+  bool     laserCsMinusDurationSet;
+  uint32_t laserCsMinusDuration;
+  bool     laserCsMinusOnsetDelaySet;
+  uint32_t laserCsMinusOnsetDelay;
 
   // Session state
   uint32_t sessionOffset;
@@ -174,6 +208,15 @@ private:
   void TickOutputs(uint32_t now);
   /// @brief Check whether the laser should fire for this trial type.
   bool ShouldFireLaser(bool isCsMinus) const;
+  /// @brief Resolve the effective laser frequency/duration/onset-delay for a trial
+  /// type, all by value — never mutates the shared laser. Each of the three
+  /// fields independently uses its own override if set, else the shared laser's
+  /// current persistent value — overriding one field never freezes the other
+  /// two, and an unoverridden field on one trial never inherits a value left
+  /// behind by an override on a *different* trial type. The resolved frequency
+  /// is passed to Laser::Activate()'s per-activation override parameter by the
+  /// caller — it is never written back onto the laser via SetFrequency().
+  void ResolveLaserPulse(bool isCsMinus, uint32_t& frequency, uint32_t& duration, uint32_t& onsetDelay);
 
   /// @brief Serialize lever press event to serial JSON (level 007).
   void LogLeverPress(DeviceType source, PressClass cls);
