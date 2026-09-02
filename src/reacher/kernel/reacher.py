@@ -313,7 +313,11 @@ class REACHER:
         self._data_warning_emitted = False  # Fix: F-002 — Reset warning flag
         self._event_log_write_count = 0  # Fix: F-010 — Reset write counter
         self._controller_log_write_count = 0  # Fix 4.9 — Reset write counter
-        self._session_changes = []
+        # reacher#12 fix: _session_changes is NOT cleared here — session_summary.json
+        # is documented (see _write_session_summary) to span the full log-directory
+        # lifetime, same as controller_log.json, which stays open across reset().
+        # Clearing this list here silently dropped pre-reset history from the summary
+        # while the raw controller_log.json kept it, so the two diverged.
 
         self.program_start_time = None
         self.program_end_time = None

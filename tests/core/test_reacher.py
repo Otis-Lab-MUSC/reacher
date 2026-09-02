@@ -400,6 +400,37 @@ def test_stop_program_writes_session_summary(reacher, mocker, mock_serial):
     reacher._write_session_summary.assert_called_once()
 
 
+def test_reset_preserves_session_changes_for_summary(reacher, mocker):
+    """reacher#12 regression: reset() must not clear _session_changes.
+
+    session_summary.json is documented to span the full log-directory lifetime,
+    same as controller_log.json (which reset() reuses, not rotates). A run ->
+    stop -> reset -> run -> stop sequence must produce a summary covering BOTH
+    runs, not just the post-reset one — otherwise the summary silently disagrees
+    with the append-only controller_log.json in the same directory.
+    """
+    mocker.patch.object(reacher, "stop_program")
+    mocker.patch.object(reacher, "clear_queue")
+    mocker.patch.object(reacher, "close_serial")
+    mocker.patch.object(reacher, "_write_controller_log")
+    mocker.patch("threading.Thread")
+
+    pre_reset = {"level": "000", "device": "CONTROLLER", "sketch": "fr", "version": "v2.0.0"}
+    reacher.handle_data(json.dumps(pre_reset))
+    assert len(reacher._session_changes) == 1
+
+    reacher.reset()
+
+    post_reset = {"level": "001", "device": "PUMP", "pin": 7, "desc": "ARMED"}
+    reacher.handle_data(json.dumps(post_reset))
+
+    summary = reacher.get_session_summary()
+    changes = summary["changes"]
+    assert len(changes) == 2
+    assert pre_reset.items() <= changes[0].items()
+    assert post_reset.items() <= changes[1].items()
+
+
 def test_handle_behavioral_events(reacher, mocker):
     """Test that handle_data processes behavioral event data into behavior_data."""
     mocker.patch("builtins.open", mocker.mock_open())
