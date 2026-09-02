@@ -337,6 +337,14 @@ class FirmwareSimulator:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=3)
         self._thread = None
+        # Mirrors firmware's EndSession() (e.g. fr.ino:225-233), which prints the
+        # CONTROLLER END event synchronously in the cmd-100 handler. Without this,
+        # stop_program()'s _controller_end_received.wait() (reacher.py) always hits
+        # its 8s timeout against the simulator.
+        self._send({
+            "level": "007", "device": "CONTROLLER",
+            "event": "END", "timestamp": self._clock,
+        })
 
     def _run_loop(self):
         schedule = self.schedule
