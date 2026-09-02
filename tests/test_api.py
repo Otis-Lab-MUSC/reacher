@@ -358,6 +358,43 @@ class TestDataEndpoints:
         assert resp.status_code == 200
         assert len(resp.json()["data"]) == 2
 
+    def test_get_recovery_empty(self, client):
+        resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
+        sid = resp.json()["session_id"]
+        resp = client.get(f"/api/data/{sid}/recovery", headers=AUTH_HEADER)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body == {
+            "behavior": {"data": [], "total": 0},
+            "frames": {"frames": [], "count": 0},
+            "slm": {"slm": [], "count": 0},
+        }
+
+    def test_get_recovery_bundles_all_three_streams(self, client):
+        # Issue labrynth#100: behavior, frames, and slm are independent
+        # streams — the recovery endpoint must report each on its own count,
+        # not conflate them.
+        resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)
+        sid = resp.json()["session_id"]
+        sm = client.app.state.session_manager
+        instance = sm.get_instance(sid)
+        instance.get_behavior_data.return_value = [
+            {"device": "LEVER_RH", "event": "PRESS", "start_timestamp": 1, "end_timestamp": 1}
+        ]
+        instance.get_frame_data.return_value = [10, 20, 30]
+        instance.get_slm_data.return_value = [15, 25]
+
+        resp = client.get(f"/api/data/{sid}/recovery", headers=AUTH_HEADER)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["behavior"]["total"] == 1
+        assert body["frames"] == {"frames": [10, 20, 30], "count": 3}
+        assert body["slm"] == {"slm": [15, 25], "count": 2}
+
+    def test_get_recovery_nonexistent_session(self, client):
+        resp = client.get("/api/data/nonexistent/recovery", headers=AUTH_HEADER)
+        assert resp.status_code == 404
+
 
 class TestFileEndpoints:
     def test_export_zip_no_config(self, client, tmp_path):
