@@ -279,6 +279,16 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
             ),
         )
 
+        # session_summary.json — distilled level-000/001 config/arm-disarm trail (reacher#12)
+        try:
+            session_summary = instance.get_session_summary()
+            zf.writestr("session_summary.json", json.dumps(session_summary, indent=2))
+        except (AttributeError, TypeError):
+            # A stub or simulator instance without the accessor, or a mock
+            # returning a non-serializable value in tests — omit rather than
+            # fail an export the user is waiting on.
+            logger.info("session_summary.json unavailable for session %s — skipping", session_id)
+
         # event_log.jsonl — authoritative cross-segment record of lifecycle, events, frames
         try:
             instance.flush_event_log()

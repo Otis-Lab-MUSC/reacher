@@ -203,6 +203,12 @@ class REACHER:
         self.behavior_data: List[Dict[str, Union[str, int]]] = []
         self.frame_data: List[int] = []
         self.slm_data: List[int] = []
+        # Config/state change trail for the session summary (issue #12): every
+        # level-000 (config) and level-001 (arm/disarm, state) event, in
+        # arrival order. Host-stamped with `received_at` because firmware
+        # carries no onboard clock for these frames (unlike level-007 events,
+        # which come with their own start/end millis).
+        self._session_changes: List[Dict] = []
         self._infusion_count: int = 0  # Atomic counter — avoids O(n) rescan in check_limit_met
         # Counted off the serial stream for the same reason as infusions: an
         # export must not depend on a browser's tally of what it happened to
@@ -307,6 +313,7 @@ class REACHER:
         self._data_warning_emitted = False  # Fix: F-002 — Reset warning flag
         self._event_log_write_count = 0  # Fix: F-010 — Reset write counter
         self._controller_log_write_count = 0  # Fix 4.9 — Reset write counter
+        self._session_changes = []
 
         self.program_start_time = None
         self.program_end_time = None
@@ -670,6 +677,10 @@ class REACHER:
             if level is None:
                 self.logger.warning("Firmware event missing 'level': %s", data)
                 return
+
+            if level in ("000", "001"):
+                with self.thread_lock:  # Fix: F-009 — guard cross-thread list access
+                    self._session_changes.append({"received_at": time.time(), **data})
             handler = self.code_dict.get(level)
             if handler is not None:
                 handler(data)
@@ -1174,6 +1185,81 @@ class REACHER:
             self.logger.warning("Auto-export failed", exc_info=True)
             self._emit("export_failed", {"reason": str(e)})
 
+    def _build_session_summary(self) -> Dict:
+        """Distill level-000/001 events into initial config, ordered changes, and final state.
+
+        reacher#12: config/arm-disarm frames carry no onboard clock (unlike
+        level-007 events, which come with their own start/end millis), so
+        `received_at` on each change is the host's wall-clock time at serial
+        receipt, not a firmware timestamp. `final_state` reuses
+        `firmware_information`/`hardware_settings` directly rather than
+        replaying `changes`, since those dicts are already maintained as the
+        latest-value-per-device view by `update_firmware_information`.
+        """
+        with self.thread_lock:  # Fix: F-009 — snapshot under lock
+            changes = [dict(entry) for entry in self._session_changes]
+            firmware_information = dict(self.firmware_information)
+            hardware_settings = [dict(entry) for entry in self.hardware_settings]
+
+        initial_firmware = None
+        initial_devices: Dict[str, Dict] = {}
+        for entry in changes:
+            if entry.get("level") != "000":
+                continue
+            device = entry.get("device")
+            if device == "CONTROLLER":
+                if initial_firmware is None:
+                    initial_firmware = entry
+                continue
+            if device and device not in initial_devices:
+                initial_devices[device] = entry
+
+        return {
+            "session_id": self.session_id,
+            "generated_at": time.time(),
+            "note": (
+                "received_at is the host's wall-clock time when the frame was read "
+                "off serial, not a firmware timestamp — level-000/001 frames carry "
+                "none. Treat it as accurate to serial-read latency, not to the "
+                "on-device clock that level-007 behavioral events use."
+            ),
+            "initial_configuration": {
+                "firmware": initial_firmware,
+                "devices": initial_devices,
+            },
+            "changes": changes,
+            "final_state": {
+                "firmware": firmware_information,
+                "devices": {
+                    entry["device"]: entry for entry in hardware_settings if entry.get("device")
+                },
+            },
+        }
+
+    def get_session_summary(self) -> Dict:
+        """Thread-safe accessor for the distilled session change-tracking summary (reacher#12)."""
+        return self._build_session_summary()
+
+    def _write_session_summary(self) -> None:
+        """Write session_summary.json to the session log directory.
+
+        Called automatically on stop_program(), mirroring _auto_export(). Spans
+        the full connected lifetime of this log directory (like
+        controller_log.json), not just the most recent program run. Failure
+        never blocks shutdown.
+        """
+        try:
+            summary = self._build_session_summary()
+            path = os.path.join(self.reacher_log_path, "session_summary.json")
+            with open(path, "w") as f:
+                f.write(json.dumps(summary, indent=2))
+                f.flush()
+                os.fsync(f.fileno())
+            self.logger.info("Session summary written: %s", path)
+        except Exception as e:
+            self.logger.warning("Failed to write session_summary.json", exc_info=True)
+            self._emit("export_failed", {"reason": str(e), "artifact": "session_summary.json"})
+
     @staticmethod
     def _find_frame_index(frame_timestamps: list, event_ts: int):
         """Return the index of the last frame at or before *event_ts*, or None."""
@@ -1328,6 +1414,7 @@ class REACHER:
         self._write_event_log({"type": "SESSION_END", "timestamp": self.program_end_time})
         self._close_event_log()  # Fix: F-010 — Ensure all events flushed before export
         self._auto_export()
+        self._write_session_summary()  # reacher#12
         self.logger.info(f"Program ended at {self.get_time()}")
 
     def pause_program(self) -> None:
