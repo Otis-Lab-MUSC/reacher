@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from ...uploader.boards import DEFAULT_BOARD, SUPPORTED_BOARDS
-from ...uploader.uploader import PARADIGMS, FirmwareUploader
+from ...uploader.uploader import PARADIGMS, AvrdudeNotFoundError, FirmwareUploader
 from . import websocket as ws_mod
 
 _MAX_HEX_SIZE = 200 * 1024  # 200 KB — hex files are typically 15-40 KB
@@ -97,6 +97,14 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
         _logger.error("Firmware file not found for session %s: %s", session_id, e)
         sm.set_state(session_id, "idle")
         raise HTTPException(status_code=404, detail=str(e))
+    except AvrdudeNotFoundError as e:
+        # Missing tool is a precondition the operator can fix (install
+        # avrdude), not a server malfunction — 409 matches this codebase's
+        # other "current state conflicts with the request" usages (see
+        # duplicate-port and pin-assignment state-gate responses).
+        _logger.error("avrdude not found for session %s: %s", session_id, e)
+        sm.set_state(session_id, "idle")
+        raise HTTPException(status_code=409, detail=str(e))
     except RuntimeError as e:
         _logger.error("Upload tool error for session %s: %s", session_id, e)
         sm.set_state(session_id, "idle")
