@@ -175,6 +175,49 @@ class TestDiscoveryMerge:
         assert fresh_discovery.get_peers()["remote-xyz"]["host"] == "10.0.0.7"
 
 
+class TestDiscoveryStart:
+    """labrynth#117: mDNS registration can legitimately fail (stale name from a
+    previous run that didn't shut down cleanly, no multicast route, restricted
+    network). It must log as a warning, not an unhandled ERROR traceback, and
+    must not prevent the ServiceBrowser from starting — browsing for *other*
+    peers is unaffected by this device's own registration failing."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_module_state(self, monkeypatch):
+        monkeypatch.setattr(discovery, "_zeroconf", None)
+        monkeypatch.setattr(discovery, "_browser", None)
+        monkeypatch.setattr(discovery, "_info", None)
+
+    def test_registration_conflict_logs_warning_and_still_browses(self, monkeypatch, caplog):
+        import zeroconf as zc_module
+
+        mock_instance = Mock()
+        mock_instance.register_service.side_effect = zc_module.NonUniqueNameException("name in use")
+        monkeypatch.setattr(zc_module, "Zeroconf", Mock(return_value=mock_instance))
+        mock_browser_cls = Mock()
+        monkeypatch.setattr(zc_module, "ServiceBrowser", mock_browser_cls)
+
+        with caplog.at_level("DEBUG", logger="reacher.discovery"):
+            discovery.start("test-device-id", 6229, "0.0.0-test")
+
+        assert not [r for r in caplog.records if r.levelname == "ERROR"], "expected registration failure must not log at ERROR"
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert any("registration failed" in m for m in warnings)
+
+        mock_browser_cls.assert_called_once()  # browsing for peers must still start
+        assert discovery._info is None  # nothing to unregister on shutdown
+
+    def test_unexpected_failure_still_logs_exception(self, monkeypatch, caplog):
+        import zeroconf as zc_module
+
+        monkeypatch.setattr(zc_module, "Zeroconf", Mock(side_effect=RuntimeError("boom")))
+
+        with caplog.at_level("DEBUG", logger="reacher.discovery"):
+            discovery.start("test-device-id", 6229, "0.0.0-test")
+
+        assert [r for r in caplog.records if r.levelname == "ERROR"], "genuinely unexpected failures must still be logged loudly"
+
+
 # --------------------------------------------------------------------------- #
 # Proxy: per-machine credential routing + ws-token relay
 # --------------------------------------------------------------------------- #
