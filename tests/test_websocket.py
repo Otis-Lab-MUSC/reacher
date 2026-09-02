@@ -172,6 +172,51 @@ class TestOrphanCleanupF002:
 
         mock_sm.destroy_session.assert_not_called()
 
+    async def test_orphan_spares_unexported_stopped_session_past_active_timeout(self):
+        # Issue labrynth#22: a stopped-but-unexported session must survive past
+        # the 600s "active" window too — it gets the dedicated long grace period.
+        sid = "sess_stopped_unexported"
+        ws._session_disconnect_times[sid] = time.monotonic() - 700  # > 600s, < 24h
+
+        mock_session = Mock()
+        mock_session.state = "stopped"
+        mock_session.exported = False
+        mock_sm = Mock()
+        mock_sm._sessions = {sid: mock_session}
+        mock_app = Mock()
+        mock_app.state.session_manager = mock_sm
+        ws._app_ref = mock_app
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            mock_sleep.side_effect = [None, asyncio.CancelledError()]
+            with pytest.raises(asyncio.CancelledError):
+                await ws._orphan_cleanup()
+
+        mock_sm.destroy_session.assert_not_called()
+
+    async def test_orphan_destroys_exported_stopped_session_after_short_timeout(self):
+        # Once exported, a stopped session is reaped on the normal short timeout.
+        sid = "sess_stopped_exported"
+        ws._session_disconnect_times[sid] = time.monotonic() - 90  # 90s > 60s
+
+        mock_session = Mock()
+        mock_session.state = "stopped"
+        mock_session.exported = True
+        mock_sm = Mock()
+        mock_sm._sessions = {sid: mock_session}
+        mock_app = Mock()
+        mock_app.state.session_manager = mock_sm
+        ws._app_ref = mock_app
+        ws._loop = asyncio.get_event_loop()
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            mock_sleep.side_effect = [None, asyncio.CancelledError()]
+            with patch("reacher.api.routers.hardware.release_session"):
+                with pytest.raises(asyncio.CancelledError):
+                    await ws._orphan_cleanup()
+
+        mock_sm.destroy_session.assert_called_once_with(sid)
+
     async def test_orphan_destroys_idle_session_after_short_timeout(self):
         # A session in "idle" state should be destroyed after 60s.
         sid = "sess_idle"

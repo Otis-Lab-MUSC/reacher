@@ -490,6 +490,10 @@ class TestFileEndpoints:
             assert ft_rows[0] == {"frame_index": "0", "timestamp_ms": "50"}
             assert ft_rows[4] == {"frame_index": "4", "timestamp_ms": "450"}
 
+        # Issue labrynth#22: a successful export must flag the session so
+        # orphan cleanup no longer holds it for the extended unexported window.
+        assert sm.get_session(sid).exported is True
+
     def test_export_zip_includes_pavlov_rows(self, client, tmp_path):
         """behavior_events.csv in the export must carry device=PAVLOV rows."""
         resp = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER)

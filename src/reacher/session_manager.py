@@ -29,6 +29,7 @@ class SessionInfo:
     instance: REACHER
     board: Optional[str] = None
     state: str = "idle"  # idle | uploading | connected | running | paused | stopped
+    exported: bool = False  # True once a "stopped" session's data has been exported (see mark_exported)
 
 
 class SessionManager:
@@ -171,6 +172,10 @@ class SessionManager:
             return  # Session already destroyed
         previous = info.state
         info.state = state
+        # Any state transition invalidates a prior export flag — a fresh
+        # "stopped" holds not-yet-exported data, and leaving "stopped" (e.g.
+        # via reset) means the flag no longer describes the current run.
+        info.exported = False
         if previous != state:
             _diag_log(
                 "session.state",
@@ -184,6 +189,18 @@ class SessionManager:
                 paradigm=info.paradigm,
             )
         self._broadcast_state(session_id, state)
+
+    def mark_exported(self, session_id: str) -> None:
+        """Flag a session's data as exported.
+
+        Lets orphan cleanup drop a "stopped" session back to the short default
+        timeout instead of holding it for the full unexported-stopped grace
+        window (see websocket._SESSION_ORPHAN_TIMEOUT_STOPPED_UNEXPORTED).
+        """
+        with self._lock:
+            info = self._sessions.get(session_id)
+            if info is not None:
+                info.exported = True
 
     def set_paradigm(self, session_id: str, paradigm: str) -> None:
         # Fix: F-008 — Lock protects _sessions access
