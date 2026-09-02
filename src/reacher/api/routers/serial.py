@@ -1,12 +1,14 @@
 """Serial connection endpoints."""
 
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from serial.tools import list_ports
 
 from ...uploader.boards import detect_board_from_port
-from ... import pin_overrides
+from ...kernel.commands import COMMAND_REGISTRY, CommandCode
+from ... import pin_overrides, pump_target
 from . import websocket as _ws
 
 logger = logging.getLogger(__name__)
@@ -122,6 +124,36 @@ async def connect_serial(session_id: str, request: Request):
             msg += f"; skipped {len(skipped_pins)}: {', '.join(skipped_names)}"
         _ws.enqueue_event(session_id, "log", {"level": "warn", "message": msg})
 
+    # --- Replay persisted reward-chain pump target (per-port) ---
+    # Firmware's activePumpTarget lives only in Arduino RAM and resets to the
+    # primary pump on every boot, so without this a researcher who selected
+    # the secondary pump last session silently reverts to the primary one.
+    # Only replay when the detected paradigm still supports SET_ACTIVE_PUMP
+    # (e.g. not pavlovian) — mirrors the paradigm gate the /command endpoint
+    # enforces for a live send.
+    replayed_pump_target: Optional[bool] = None
+    try:
+        saved_pump_target = pump_target.get(info.port)
+        spec = COMMAND_REGISTRY.get(int(CommandCode.SET_ACTIVE_PUMP))
+        paradigm_ok = (
+            detected_paradigm is not None
+            and spec is not None
+            and (not spec.paradigms or detected_paradigm.lower() in spec.paradigms)
+        )
+        if saved_pump_target is not None and paradigm_ok:
+            instance.send_command(int(CommandCode.SET_ACTIVE_PUMP), int(saved_pump_target))
+            replayed_pump_target = saved_pump_target
+            _ws.enqueue_event(
+                session_id,
+                "log",
+                {
+                    "level": "warn",
+                    "message": f"Replayed reward-chain pump target on connect: pump2={saved_pump_target}",
+                },
+            )
+    except Exception:
+        logger.exception("Pump target replay failed on session %s", session_id)
+
     return {
         "status": "connected",
         "port": info.port,
@@ -129,6 +161,7 @@ async def connect_serial(session_id: str, request: Request):
         "detected_board": detected_board,
         "replayed_pins": replayed_pins,
         "skipped_pins": skipped_pins,
+        "replayed_pump_target": replayed_pump_target,
     }
 
 
@@ -161,4 +194,17 @@ async def get_pin_overrides():
 async def clear_pin_overrides(port: str):
     """Clear all pin overrides for the given port path (pass as query param)."""
     pin_overrides.clear(port)
+    return {"status": "cleared", "port": port}
+
+
+@router.get("/pump-target")
+async def get_pump_targets():
+    """Return the persisted reward-chain pump-target selection, keyed by port."""
+    return pump_target.get_all()
+
+
+@router.delete("/pump-target")
+async def clear_pump_target(port: str):
+    """Clear the persisted pump-target selection for the given port path (query param)."""
+    pump_target.clear(port)
     return {"status": "cleared", "port": port}
