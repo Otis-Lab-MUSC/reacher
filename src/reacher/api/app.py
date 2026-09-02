@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .. import __version__, diagnostics, discovery, machines, pairing, pin_overrides
+from .. import __version__, diagnostics, discovery, machines, pairing, pin_overrides, pump_target
 from ..child_env import clean_child_env, clean_environ
 from ..device_id import DEVICE_ID
 from ..session_manager import SessionManager
@@ -207,6 +207,9 @@ async def lifespan(app: FastAPI):
 
     # Load persisted per-port Arduino pin overrides
     pin_overrides.load()
+
+    # Load persisted per-port reward-chain pump-target selection
+    pump_target.load()
 
     # Restore persisted paired state before starting code rotation so the
     # first _rotate() call respects whether this device is already paired.

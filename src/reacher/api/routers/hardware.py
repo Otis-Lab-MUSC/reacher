@@ -8,8 +8,8 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 
-from ...kernel.commands import COMMAND_REGISTRY, get_commands_for_paradigm
-from ... import pin_overrides
+from ...kernel.commands import COMMAND_REGISTRY, CommandCode, get_commands_for_paradigm
+from ... import pin_overrides, pump_target
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -107,6 +107,15 @@ async def send_command(session_id: str, body: CommandRequest, request: Request):
             raise HTTPException(status_code=409, detail="Session not connected — connect to a serial port first")
         logger.error("Command %s failed", spec.name, exc_info=True)
         raise HTTPException(status_code=500, detail="Command failed")
+
+    # Remember the reward-chain pump-target selection per-port so a fresh
+    # serial connect (firmware's activePumpTarget resets to primary on boot)
+    # can replay it instead of silently reverting to the primary pump.
+    if body.code == int(CommandCode.SET_ACTIVE_PUMP):
+        try:
+            pump_target.save(info.port, bool(body.value))
+        except Exception:
+            logger.exception("Failed to persist pump target for session %s", session_id)
 
     return {"status": "sent", "command": spec.name, "code": body.code}
 
