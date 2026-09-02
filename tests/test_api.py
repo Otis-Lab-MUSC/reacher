@@ -377,7 +377,8 @@ class TestFileEndpoints:
         assert resp.status_code == 200
         assert "file_path" in resp.json()
         import os
-        instance.set_data_destination.assert_called_once_with(os.path.expanduser("~/Downloads"))
+        instance.set_data_destination.assert_not_called()
+        instance.make_destination_folder.assert_called_once_with(os.path.expanduser("~/Downloads"))
         instance.set_filename.assert_called_once()
         assert len(instance.set_filename.call_args[0][0]) > 0
 

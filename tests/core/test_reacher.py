@@ -444,8 +444,21 @@ def test_make_destination_folder(reacher, mocker):
         assert folder == "/data/experiment"
 
 
+def test_make_destination_folder_explicit_override_not_persisted(reacher, mocker):
+    """An explicit destination argument wins over the configured one and is never persisted."""
+    mocker.patch("os.makedirs")
+    mocker.patch("os.path.exists", return_value=False)
+    with patch.object(reacher, "get_time", return_value="2023-01-01_12-00-00"):
+        reacher.data_destination = None
+        reacher.behavior_filename = "experiment"
+        folder = reacher.make_destination_folder("/explicit/path")
+        assert folder == "/explicit/path/experiment"
+        assert reacher.data_destination is None
+
+
 def test_make_destination_folder_partial_none(reacher, mocker):
-    """make_destination_folder must not raise when only data_destination is None."""
+    """make_destination_folder must not raise when only data_destination is None,
+    and must not persist the ~/Downloads fallback into data_destination."""
     mocker.patch("os.makedirs")
     mocker.patch("os.path.exists", return_value=False)
     with patch.object(reacher, "get_time", return_value="2023-01-01_12-00-00"):
@@ -454,7 +467,7 @@ def test_make_destination_folder_partial_none(reacher, mocker):
         folder = reacher.make_destination_folder()
         import os
         assert folder.startswith(os.path.expanduser("~/Downloads"))
-        assert reacher.data_destination == os.path.expanduser("~/Downloads")
+        assert reacher.data_destination is None
 
 
 def test_event_callback_fires(mock_serial):

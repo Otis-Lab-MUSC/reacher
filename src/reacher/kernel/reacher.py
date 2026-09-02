@@ -1577,27 +1577,33 @@ class REACHER:
         """
         self.behavior_filename = filename
 
-    def make_destination_folder(self) -> str:
+    def make_destination_folder(self, destination: Optional[str] = None) -> str:
         """Create a destination folder for data files.
 
         **Description:**
         - Creates a unique folder for storing data based on filename and timestamp.
-        - Uses a default path (`~/REACHER/DATA`) if not specified.
+        - Uses `destination` if given, else the configured destination, else falls
+          back to `~/Downloads`. The fallback is resolved locally and never written
+          to `data_destination` — `get_data_destination()` stays unset until the
+          caller explicitly saves one.
+
+        **Args:**
+        - `destination (Optional[str])`: Folder to use instead of the configured
+          destination, without persisting it.
 
         **Returns:**
         - `str`: The path to the created folder.
         """
-        if not self.data_destination:
-            self.data_destination = os.path.expanduser("~/Downloads")
+        resolved_destination = destination or self.data_destination or os.path.expanduser("~/Downloads")
         if not self.behavior_filename:
             self.behavior_filename = f"{self.get_time()}"
-        containing_folder = os.path.join(self.data_destination, self.behavior_filename.split('.')[0])
+        containing_folder = os.path.join(resolved_destination, self.behavior_filename.split('.')[0])
         if os.path.exists(containing_folder):
-            data_folder_path = os.path.join(self.data_destination, f"{self.behavior_filename.split('.')[0]}-{time.time_ns()}")
+            data_folder_path = os.path.join(resolved_destination, f"{self.behavior_filename.split('.')[0]}-{time.time_ns()}")
         else:
-            data_folder_path = containing_folder   
+            data_folder_path = containing_folder
         os.makedirs(data_folder_path, exist_ok=True)
-        return data_folder_path         
+        return data_folder_path
 
     def set_box_name(self, box_name: str) -> None:
         """Set the name of the box for data organization.

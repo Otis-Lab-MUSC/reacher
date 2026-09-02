@@ -196,9 +196,8 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
     instance.set_filename(filename)
     if not destination:
         destination = os.path.expanduser("~/Downloads")
-        instance.set_data_destination(destination)
 
-    folder_path = instance.make_destination_folder()
+    folder_path = instance.make_destination_folder(destination)
 
     # Gather data
     behavior = instance.get_behavior_data()
