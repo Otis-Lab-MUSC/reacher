@@ -7,7 +7,7 @@ import os
 import zipfile
 
 import pytest
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, AsyncMock
 from fastapi.testclient import TestClient
 from reacher.api.app import create_app
 from reacher.api.middleware.auth import API_KEY
@@ -160,6 +160,63 @@ class TestHardwareEndpoints:
             client.post(f"/api/hardware/{sid}/command", json={"code": 99999}, headers=AUTH_HEADER)
         resp = client.post(f"/api/hardware/{sid}/command", json={"code": 99999}, headers=AUTH_HEADER)
         assert resp.status_code == 429
+
+
+class TestFirmwareUploadEndpoint:
+    """POST /api/firmware/upload/{id} — status codes must discriminate a
+    missing-tool precondition (client-actionable) from a genuine upload
+    failure (server-side, stays a 500)."""
+
+    def _session(self, client, port="/dev/ttyUSB0"):
+        resp = client.post("/api/sessions", json={"port": port, "paradigm": "fr"}, headers=AUTH_HEADER)
+        return resp.json()["session_id"]
+
+    def test_avrdude_missing_returns_409_not_500(self, client):
+        from reacher.uploader.uploader import AvrdudeNotFoundError
+
+        sid = self._session(client)
+        with patch(
+            "reacher.api.routers.firmware._uploader.upload",
+            new=AsyncMock(side_effect=AvrdudeNotFoundError(
+                "avrdude not found in PATH. Install it with: sudo apt-get install avrdude"
+            )),
+        ):
+            resp = client.post(
+                f"/api/firmware/upload/{sid}",
+                json={"paradigm": "fr"},
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 409
+        assert "avrdude" in resp.json()["detail"]
+
+    def test_other_runtime_error_still_returns_500(self, client):
+        """A RuntimeError that is NOT the missing-tool case must not be
+        swept into the 4xx conversion — it stays a genuine 500."""
+        sid = self._session(client)
+        with patch(
+            "reacher.api.routers.firmware._uploader.upload",
+            new=AsyncMock(side_effect=RuntimeError("unexpected subprocess spawn failure")),
+        ):
+            resp = client.post(
+                f"/api/firmware/upload/{sid}",
+                json={"paradigm": "fr"},
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 500
+
+    def test_genuine_upload_failure_returns_500(self, client):
+        """avrdude ran and exited non-zero — a real failure, not a 4xx."""
+        sid = self._session(client)
+        with patch(
+            "reacher.api.routers.firmware._uploader.upload",
+            new=AsyncMock(return_value=False),
+        ), patch("reacher.api.routers.firmware._uploader.last_error", "avrdude exited 1"):
+            resp = client.post(
+                f"/api/firmware/upload/{sid}",
+                json={"paradigm": "fr"},
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 500
 
 
 class TestPinAssignments:
@@ -489,6 +546,10 @@ class TestFileEndpoints:
             assert len(ft_rows) == 5
             assert ft_rows[0] == {"frame_index": "0", "timestamp_ms": "50"}
             assert ft_rows[4] == {"frame_index": "4", "timestamp_ms": "450"}
+
+        # Issue labrynth#22: a successful export must flag the session so
+        # orphan cleanup no longer holds it for the extended unexported window.
+        assert sm.get_session(sid).exported is True
 
     def test_export_zip_includes_session_summary(self, client, tmp_path):
         """reacher#12: a configured get_session_summary() lands in the export ZIP verbatim."""

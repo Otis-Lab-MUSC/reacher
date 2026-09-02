@@ -2,6 +2,7 @@ import logging
 import os
 import queue
 import json
+import time
 
 import pytest
 import serial
@@ -1411,3 +1412,36 @@ class TestFirmwareErrorReporting:
         event = {"level": "006", "desc": "Command not found", "command": 685}
         instance.handle_firmware_error(event)
         assert seen == [("error", event)]
+
+
+class TestSimulatorControllerEnd:
+    """reacher#8 follow-up: simulator.py never sent the CONTROLLER END event
+    that stop_program() blocks on, so every simulated stop burned the full
+    8s _controller_end_received timeout (+2s fallback sleep) for nothing.
+    Uses a real REACHER instance with real threads against SimulatedSerial —
+    the `reacher` fixture's mocked serial/threads can't exercise this path.
+    """
+
+    @pytest.fixture
+    def sim_reacher(self):
+        instance = REACHER(session_id="test-sim-controller-end")
+        instance.set_COM_port("SIMULATOR")
+        instance.open_serial()
+        yield instance
+        if instance.ser.is_open:
+            instance.close_serial()
+
+    def test_stop_program_resolves_promptly_via_simulator(self, sim_reacher):
+        """Previously this took ~10s (8s wait + 2s fallback sleep) because the
+        simulator never acked CONTROLLER END; now it should resolve in well
+        under a second once the simulator's run-loop thread has joined."""
+        sim_reacher.start_program()
+        time.sleep(0.2)  # let the simulator's run-loop thread get going
+
+        start = time.monotonic()
+        sim_reacher.stop_program()
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 3.0, f"stop_program() took {elapsed:.2f}s — CONTROLLER END likely timed out"
+        assert sim_reacher._controller_end_received.is_set()
+        assert sim_reacher.program_flag.is_set()

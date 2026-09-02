@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Backend: `pump_target.py` — persists the reward-chain `SET_ACTIVE_PUMP` (221) selection
+  per serial port and replays it on connect, mirroring `pin_overrides.py`. Firmware's
+  `activePumpTarget` lives only in Arduino RAM and resets to the primary pump on every
+  boot, so without this a researcher who selected the secondary pump reverted to the
+  primary one on the next connect. New `GET`/`DELETE /api/serial/pump-target` endpoints
+  ([#35](https://github.com/Otis-Lab-MUSC/labrynth/issues/35))
+
 ---
 
 ## [3.3.0] - 2026-07-27

@@ -77,6 +77,29 @@ class TestSetState:
         info = sm.get_session(sid)
         assert info.state == "running"
 
+    def test_state_change_clears_exported_flag(self, sm):
+        # Issue labrynth#22: a fresh "stopped" (or a transition away from it,
+        # e.g. reset) must not inherit a stale exported=True from a prior run.
+        sid = sm.create_session("/dev/ttyUSB0")
+        sm.set_state(sid, "stopped")
+        sm.mark_exported(sid)
+        assert sm.get_session(sid).exported is True
+
+        sm.set_state(sid, "connected")
+        assert sm.get_session(sid).exported is False
+
+
+class TestMarkExported:
+    def test_flags_existing_session(self, sm):
+        sid = sm.create_session("/dev/ttyUSB0")
+        sm.set_state(sid, "stopped")
+        assert sm.get_session(sid).exported is False
+        sm.mark_exported(sid)
+        assert sm.get_session(sid).exported is True
+
+    def test_nonexistent_session_noop(self, sm):
+        sm.mark_exported("nonexistent")  # Should not raise
+
 
 class TestDestroyAll:
     def test_clears_all(self, sm):
