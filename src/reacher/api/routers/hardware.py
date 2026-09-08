@@ -76,6 +76,19 @@ async def send_command(session_id: str, body: CommandRequest, request: Request):
             detail=f"Command {spec.name} not available for {info.paradigm} paradigm",
         )
 
+    # An armed session is frozen. The TTL edge can land at any instant and
+    # config is applied one command per request — there is no transactional
+    # apply — so a trigger arriving mid-edit would start the session on a
+    # half-applied configuration. Cancel the trigger, edit, re-arm.
+    if info.state == "armed":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Session is armed and waiting for an external trigger; "
+                "disarm it before changing configuration"
+            ),
+        )
+
     # Pin-reassignment commands have board- and role-aware validation, plus
     # a state gate (only allowed when the rig is connected but not running).
     if body.code in pin_overrides.PIN_CONSTRAINTS:

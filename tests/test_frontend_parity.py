@@ -110,21 +110,14 @@ def test_c5b_pcint_constraints_match(meta):
     )
 
 
-def test_c5c_no_component_requires_interrupt():
-    """`requires_interrupt` is validated but never set, and has no TS mirror.
-
-    `pin_overrides.validate_pin` enforces it, yet no PIN_CONSTRAINTS entry sets
-    it and `pinMeta.ts` has no equivalent field. The day a component genuinely
-    needs an interrupt-capable pin, the frontend would silently offer invalid
-    ones — so this must fail loudly on that day rather than the field quietly
-    doing nothing forever.
-    """
-    offenders = [
-        c.component_key for c in pin_overrides.PIN_CONSTRAINTS.values() if c.requires_interrupt
-    ]
-    assert not offenders, (
-        f"{offenders} now require an interrupt-capable pin, but pinMeta.ts has no "
-        "COMPONENT_REQUIRES_INTERRUPT mirror. Add it there and extend this check."
+def test_c5c_interrupt_constraints_match(meta):
+    """Was a tripwire asserting nothing set `requires_interrupt`; the external
+    start trigger tripped it, `COMPONENT_REQUIRES_INT` was added to pinMeta.ts,
+    and this is the comparison it asked for."""
+    backend = {k: c.requires_interrupt for k, c in _constraint_by_component().items()}
+    assert meta["requires_interrupt"] == backend, (
+        f"COMPONENT_REQUIRES_INT vs PinConstraint.requires_interrupt: "
+        f"{ {k for k in backend if backend[k] != meta['requires_interrupt'].get(k)} }"
     )
 
 

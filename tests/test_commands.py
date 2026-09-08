@@ -123,6 +123,14 @@ class TestGetCommandsForParadigm:
 
 TWO_PHOTON_CODES = [900, 901, 903, 976, 1100, 1101, 1102, 1103, 1176]
 
+# The external trigger is not two-photon hardware, but it is stripped from the
+# lite builds for the same reason: the UNO has no free external-interrupt pin
+# (INT0 is the fixed microscope timestamp input, INT1 is the cue output).
+EXT_TRIGGER_CODES = [1200, 1201, 1276]
+
+# Everything a "_lite" build legitimately loses relative to its base paradigm.
+MEGA_ONLY_CODES = TWO_PHOTON_CODES + EXT_TRIGGER_CODES
+
 # The one paradigm-defining parameter each schedule cannot work without.
 PARADIGM_PARAM_CODE = {"pr": 205, "vi": 204, "omission": 203}
 
@@ -146,7 +154,7 @@ class TestLiteParadigms:
         ``paradigms`` list, which would leave the board unable to be configured.
         """
         base = lite.removesuffix("_lite")
-        expected = set(get_commands_for_paradigm(base)) - set(TWO_PHOTON_CODES)
+        expected = set(get_commands_for_paradigm(base)) - set(MEGA_ONLY_CODES)
         assert set(get_commands_for_paradigm(lite)) == expected
 
     def test_laser_included(self, lite):

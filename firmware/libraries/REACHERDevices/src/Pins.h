@@ -40,6 +40,16 @@ constexpr int8_t PIN_CUE_2          = 7;
 /// Secondary syringe pump relay
 constexpr int8_t PIN_PUMP_2         = 8;
 
+/// External TTL session-start input (Mega external-interrupt pin, INPUT_PULLUP).
+/// Assignable only to 18/19/20/21 (INT5/INT4/INT3/INT2) — the Mega's remaining
+/// external-interrupt pins. INT0 (2) and INT1 (3) are excluded deliberately:
+/// 2 is the fixed microscope timestamp input and re-attaching it would silently
+/// replace Microscope::TimestampISR, killing frame logging with no error.
+/// NOTE: all four assignable pins are dual-purpose on the Mega — 18/19 are
+/// Serial1 TX/RX and 20/21 are I2C SDA/SCL. Nothing in this firmware uses
+/// either peripheral today; revisit before adding one.
+constexpr int8_t PIN_EXT_TRIGGER    = 18;
+
 /// @}
 
 #endif // PINS_H

@@ -124,6 +124,15 @@ class CommandCode(IntEnum):
     # the Mega 2560 target (8–13 on an UNO). See pin_overrides.MEGA_PCINT0.
     SLM_SET_PIN = 1176
 
+    # --- External Trigger (12xx) ---
+    # TTL session-start input. Arming makes the firmware watch the pin; the next
+    # rising edge starts the session and the trigger self-disarms.
+    EXT_TRIGGER_DISARM = 1200
+    EXT_TRIGGER_ARM = 1201
+    # Assignable to 18/19/20/21 only (Mega INT5/INT4/INT3/INT2).
+    # See pin_overrides.EXT_TRIGGER_PINS.
+    EXT_TRIGGER_SET_PIN = 1276
+
     # --- RH Lever (10xx) ---
     LEVER_RH_DISARM = 1000
     LEVER_RH_ARM = 1001
@@ -649,6 +658,29 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     976: CommandSpec(
         CommandCode.MICROSCOPE_SET_TRIG_PIN, "MICROSCOPE_SET_TRIG_PIN",
         "Reassign the microscope trigger output pin (timestamp pin is fixed)",
+        payload_key="pin", payload_type="int",
+        paradigms=NON_LITE_PARADIGMS,
+    ),
+
+    # --- External Trigger ---
+    # NON_LITE_PARADIGMS is load-bearing, not decorative: the frontend sniffs
+    # code 1201 to decide whether to show the external-trigger UI at all, and
+    # CommandSpec.paradigms defaults to ALL_PARADIGMS. Dropping it here would
+    # advertise the trigger on "_lite" (UNO) sessions, whose sketches have no
+    # ExternalTrigger and whose boards have no free interrupt pin.
+    1200: CommandSpec(
+        CommandCode.EXT_TRIGGER_DISARM, "EXT_TRIGGER_DISARM",
+        "Stop watching the external trigger pin",
+        paradigms=NON_LITE_PARADIGMS,
+    ),
+    1201: CommandSpec(
+        CommandCode.EXT_TRIGGER_ARM, "EXT_TRIGGER_ARM",
+        "Watch the external trigger pin; the next rising edge starts the session",
+        paradigms=NON_LITE_PARADIGMS,
+    ),
+    1276: CommandSpec(
+        CommandCode.EXT_TRIGGER_SET_PIN, "EXT_TRIGGER_SET_PIN",
+        "Reassign the external trigger input pin (Mega external-interrupt pins 18-21 only)",
         payload_key="pin", payload_type="int",
         paradigms=NON_LITE_PARADIGMS,
     ),

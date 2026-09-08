@@ -153,6 +153,7 @@ def parse_pin_meta(path: Path) -> dict:
         "default_pin": parse_number_record(source, "DEFAULT_PIN", MIN_COMPONENTS),
         "requires_pwm": parse_bool_record(source, "COMPONENT_REQUIRES_PWM", MIN_COMPONENTS),
         "requires_pcint": parse_bool_record(source, "COMPONENT_REQUIRES_PCINT", MIN_COMPONENTS),
+        "requires_interrupt": parse_bool_record(source, "COMPONENT_REQUIRES_INT", MIN_COMPONENTS),
         "pin_sets": {
             "uno": {
                 "digital": parse_pin_set(source, "UNO_DIGITAL"),

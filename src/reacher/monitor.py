@@ -45,6 +45,7 @@ _STATE_STYLES: dict[str, str] = {
     "stopped": "red",
     "uploading": "cyan",
     "connected": "blue",
+    "armed": "bold magenta",
     "idle": "dim",
 }
 

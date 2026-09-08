@@ -122,6 +122,12 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     1102: ("SLM", "frequency", _USE_VALUE),
     1103: ("SLM", "duration", _USE_VALUE),
     1176: ("SLM", "pin", _USE_VALUE),
+    # --- External trigger ---
+    # The firmware also disarms itself when the trigger fires; that transition
+    # arrives as a level-001 event and is mirrored by handle_state_event().
+    1200: ("EXT_TRIGGER", "armed", False),
+    1201: ("EXT_TRIGGER", "armed", True),
+    1276: ("EXT_TRIGGER", "pin", _USE_VALUE),
 }
 
 class REACHER:
@@ -132,6 +138,7 @@ class REACHER:
         session_id: Optional[str] = None,
         event_callback: Optional[Callable[[str, str, dict], None]] = None,
         on_stop: Optional[Callable[[], None]] = None,
+        on_start: Optional[Callable[[], None]] = None,
     ) -> None:
         """Initialize a REACHER instance.
 
@@ -141,11 +148,21 @@ class REACHER:
                 broadcasting events over WebSocket.
             on_stop: Optional callback invoked after ``stop_program()`` completes,
                 used by SessionManager to broadcast the "stopped" state.
+            on_start: Optional callback invoked when a session starts without an
+                HTTP request having driven it — i.e. an external TTL trigger.
+                The manager uses it to broadcast the "running" state, which the
+                ``/start`` route does inline for software starts.
         """
 
         self.session_id: Optional[str] = session_id
         self.event_callback = event_callback
         self._on_stop = on_stop
+        self._on_start = on_start
+        # True while the firmware has an interrupt attached to the external
+        # trigger pin. This is host-held knowledge of *board* state: nothing
+        # else can tell, so every path that ends or abandons a session has to
+        # release it. See release_external_trigger().
+        self._external_trigger_armed: bool = False
 
         # Serial variables
         self._is_simulated: bool = False
@@ -278,7 +295,7 @@ class REACHER:
         self.behavior_filename: Optional[str] = None
         self.code_dict: Dict = {
             "000": self.update_firmware_information,
-            "001": self.logger.info,
+            "001": self.handle_state_event,
             "006": self.handle_firmware_error,
             "007": self.update_behavioral_events,
             "008": self.update_frame_events,
@@ -298,6 +315,8 @@ class REACHER:
         """
         
         self.logger.info("Resetting REACHER instance")
+
+        self.release_external_trigger()
 
         if not self.program_flag.is_set():
             self.stop_program()
@@ -582,7 +601,10 @@ class REACHER:
                     )
                     # Fix: F-003 — Discard if queue is full; prevents OOM on I/O lag
                     try:
-                        self.queue.put_nowait(decoded)
+                        # Receipt time rides along so a firmware-initiated
+                        # session start can back-date its t0 past the queue hop
+                        # and the 100 ms idle sleep below.
+                        self.queue.put_nowait((decoded, time.monotonic()))
                     except queue.Full:
                         # Fix 2.6: surface overflow to the frontend so a silent
                         # data-loss window is visible. Throttle to one emission
@@ -644,20 +666,21 @@ class REACHER:
         """
         while True:
             try:
-                line = self.queue.get(timeout=1)
+                item = self.queue.get(timeout=1)
                 self.queue.task_done()
-                if line is None:
+                if item is None:
                     self.logger.info("Sentinel received. Exiting queue thread.")
                     break
+                line, rx_monotonic = item
                 self.logger.info(f"--> Data in queue: {line}")
 
-                self.handle_data(line)
+                self.handle_data(line, rx_monotonic)
             except queue.Empty:
                 if self.serial_flag.is_set():
                     break
                 continue
 
-    def handle_data(self, line: str) -> None:
+    def handle_data(self, line: str, rx_monotonic: Optional[float] = None) -> None:
         """Process a line of data from the queue.
 
         **Description:**
@@ -667,6 +690,8 @@ class REACHER:
 
         **Args:**
         - `line (str)`: The raw data line to process.
+        - `rx_monotonic (float | None)`: ``time.monotonic()`` when ``read_serial``
+          took this line off the wire, or None when called outside that path.
         """
 
         try:
@@ -687,7 +712,13 @@ class REACHER:
                     self._session_changes.append({"received_at": time.time(), **data})
             handler = self.code_dict.get(level)
             if handler is not None:
-                handler(data)
+                # Only the behavioral-event handler needs the receipt time (an
+                # externally triggered START back-dates t0 from it); the rest
+                # keep their single-argument signature.
+                if level == "007":
+                    handler(data, rx_monotonic)
+                else:
+                    handler(data)
             else:
                 self.logger.warning(f"Unknown event level: {level}. Data: {data}")
 
@@ -697,6 +728,26 @@ class REACHER:
             # Fix: F-006 — Notify frontend of processing failures so events aren't silently dropped
             self.logger.error(f"Error processing data: {e}. Raw line: {line}")
             self._emit("kernel_error", {"reason": str(e), "raw": line})
+
+    def handle_state_event(self, event: dict) -> None:
+        """Handle firmware arm/disarm state events (level 001).
+
+        These are log-only, as they have always been — with one exception.
+        EXT_TRIGGER transitions can be firmware-initiated (the trigger disarms
+        itself the moment it fires), so unlike every other device the backend
+        cannot infer this state from the command it sent. Mirroring it into
+        hardware_settings emits a "config" event, which is how the frontend
+        learns the trigger has stopped watching.
+        """
+        self.logger.info(event)
+        if event.get("device") != "EXT_TRIGGER":
+            return
+        armed = event.get("event") == "ARMED"
+        self._external_trigger_armed = armed
+        updates: Dict[str, Union[str, int, bool]] = {"armed": armed}
+        if (pin := event.get("pin")) is not None:
+            updates["pin"] = pin
+        self._update_hardware_setting("EXT_TRIGGER", updates)
 
     def handle_firmware_error(self, event: dict) -> None:
         """Handle firmware error events (level 006).
@@ -824,7 +875,7 @@ class REACHER:
                 emit_data = dict(new_entry)
         self._emit("config", emit_data)
 
-    def update_behavioral_events(self, event: dict) -> None:
+    def update_behavioral_events(self, event: dict, rx_monotonic: Optional[float] = None) -> None:
         entry_dict: Dict[str, Union[str, int]] = {}
         
         match event.get('device'):
@@ -851,6 +902,13 @@ class REACHER:
                 entry_dict['end_timestamp'] = event.get('timestamp')
                 if event.get('event') == 'END':
                     self._controller_end_received.set()
+                elif event.get('event') == 'START' and event.get('source') == 'external':
+                    # Firmware started the session itself on a TTL edge. Do the
+                    # host-side bookkeeping HERE, inside the match, so that the
+                    # session_state -> "running" broadcast is enqueued before
+                    # the _emit("event") below: clients must see the state
+                    # change ahead of the event that caused it.
+                    self._begin_external_session(rx_monotonic)
             case "PAVLOV":
                 entry_dict['device'] = event.get('device')
                 entry_dict['event'] = event.get('event')
@@ -1349,12 +1407,13 @@ class REACHER:
         """
         self.stop_delay = delay
 
-    def start_program(self) -> None:
-        """Start the experimental program.
+    def _reset_session_buffers(self) -> None:
+        """Clear all per-session data buffers and counters.
 
-        **Description:**
-        - Initiates the experiment by sending "START-PROGRAM" to the microcontroller.
-        - Records the start time for limit checking.
+        Split out of ``start_program`` so the external-trigger path can reset at
+        *arm* time. Resetting when the trigger fires would wipe the START event
+        that caused the start: it is appended by ``update_behavioral_events`` on
+        the queue thread, in the same call that begins the session.
         """
         self.behavior_data = []
         self.frame_data = []
@@ -1370,6 +1429,15 @@ class REACHER:
         self._segment_event_counts = []
         self.paused_time = 0
         self.last_infusion_time = None
+
+    def start_program(self) -> None:
+        """Start the experimental program.
+
+        **Description:**
+        - Initiates the experiment by sending "START-PROGRAM" to the microcontroller.
+        - Records the start time for limit checking.
+        """
+        self._reset_session_buffers()
         if self.program_flag.is_set():
             self.program_flag.clear()
         self.program_running = True
@@ -1377,6 +1445,110 @@ class REACHER:
         self.program_start_time = time.time()
         self._write_event_log({"type": "SESSION_START", "timestamp": self.program_start_time})
         self.logger.info(f"Program started at {self.get_time()}")
+
+    def arm_external_trigger(self) -> None:
+        """Arm the firmware's external TTL trigger and stage the session.
+
+        Buffers are reset here rather than when the trigger fires — see
+        ``_reset_session_buffers``. ``program_start_time`` is cleared so a
+        session armed after an earlier run cannot carry the previous anchor
+        into ``check_limit_met`` before the trigger stamps a new one.
+        """
+        self._reset_session_buffers()
+        self.program_start_time = None
+        self.send_serial_command({"cmd": int(CommandCode.EXT_TRIGGER_ARM)})
+        self._external_trigger_armed = True
+        self.logger.info("External trigger armed — waiting for TTL edge")
+
+    def disarm_external_trigger(self) -> None:
+        """Stop the firmware watching the external trigger pin.
+
+        Raises if the port is closed. Teardown paths want
+        ``release_external_trigger`` instead.
+        """
+        self.send_serial_command({"cmd": int(CommandCode.EXT_TRIGGER_DISARM)})
+        self._external_trigger_armed = False
+        self.logger.info("External trigger disarmed")
+
+    def release_external_trigger(self) -> bool:
+        """Best-effort disarm for lifecycle teardown. Never raises.
+
+        Arming attaches an interrupt on the Mega and only the host knows to
+        detach it — ``close_serial()`` closes the host port but does not reset
+        the board. Every path that ends or abandons a session has to call this,
+        or the board keeps watching the pin and a later edge runs
+        ``StartSession()``: it pulses the scope and begins a run with nothing
+        listening, on a session the host believes is gone.
+
+        Unlike ``disarm_external_trigger`` this tolerates a closed port, because
+        teardown often closes serial first and a failure here must not block the
+        teardown. The board genuinely is still armed in that case, so it is
+        logged loudly and reported rather than swallowed.
+
+        Idempotent: a no-op when the trigger was never armed, so it is safe to
+        call unconditionally from every exit path.
+
+        Returns:
+            True if the firmware was told (or was never armed); False if the
+            trigger was armed and could not be reached.
+        """
+        if not self._external_trigger_armed:
+            return True
+        try:
+            self.send_serial_command({"cmd": int(CommandCode.EXT_TRIGGER_DISARM)})
+        except Exception:
+            self._external_trigger_armed = False
+            self.logger.warning(
+                "Could not disarm the external trigger — the board may still be "
+                "armed and would start a session on the next TTL edge",
+                exc_info=True,
+            )
+            return False
+        self._external_trigger_armed = False
+        self.logger.info("External trigger released during teardown")
+        return True
+
+    def _begin_external_session(self, rx_monotonic: Optional[float] = None) -> None:
+        """Host-side start bookkeeping for a firmware-initiated (TTL) session.
+
+        Mirrors ``start_program`` minus two things:
+
+        - No buffer reset — that happened in ``arm_external_trigger``.
+        - No ``{"cmd": 101}``. The firmware has already started; re-sending
+          SESSION_START would re-fire ``microscope.Trigger()``, and that pulse
+          is a *toggle*, so it would stop the scope scanning mid-session.
+
+        ``program_start_time`` is back-dated to when ``read_serial`` took the
+        START line off the wire. Firmware stamped t0 at the TTL edge and every
+        exported timestamp is already relative to it, so this only corrects the
+        wall-clock anchor that ``check_limit_met`` measures elapsed time
+        against — without it a Time limit would over-run by the serial latency.
+        """
+        if self.program_flag.is_set():
+            self.program_flag.clear()
+        self.program_running = True
+        # The firmware self-disarms on the edge and reports it as a level-001
+        # event, but do not depend on that arriving first.
+        self._external_trigger_armed = False
+        lag = 0.0
+        if rx_monotonic is not None:
+            lag = max(0.0, time.monotonic() - rx_monotonic)
+        self.program_start_time = time.time() - lag
+        self._write_event_log({
+            "type": "SESSION_START",
+            "timestamp": self.program_start_time,
+            "source": "external",
+            "receipt_lag_s": round(lag, 4),
+        })
+        self.logger.info(
+            "Program started by external trigger at %s (receipt lag %.3fs)",
+            self.get_time(), lag,
+        )
+        if self._on_start:
+            try:
+                self._on_start()
+            except Exception:
+                self.logger.warning("on_start callback failed", exc_info=True)
 
     def stop_program(self) -> None:
         """Stop the experimental program.
@@ -1387,7 +1559,12 @@ class REACHER:
         - Cleans up resources and records the end time.
         - Invokes the ``on_stop`` callback so the session manager can
           broadcast the "stopped" state to the frontend.
+
+        Releases the external trigger first, *before* the re-entrance guard: an
+        armed session has ``program_running`` False, so anything behind that
+        guard would leave the board armed.
         """
+        self.release_external_trigger()
         with self.thread_lock:
             if not self.program_running:
                 return

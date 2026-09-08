@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
+from ...schema import LITE_STRIPPED_CMD_PREFIXES as _LITE_STRIPPED_PREFIXES
 from .registry import CheckContext, Result, Status, register
-
-_TWO_PHOTON_PREFIXES = ("MICROSCOPE_", "SLM_")
 
 # Named source sets, so a failing result can say what it actually read. See the
 # provenance rationale in registry.py.
@@ -73,15 +72,19 @@ def c2_registry_coverage(ctx: CheckContext) -> Result:
     )
 
 
-@register("C13", "Lite twins carry every non-two-photon command", "firmware",
+@register("C13", "Lite twins carry every command not stripped for the UNO", "firmware",
           requires=("schema", "firmware"))
 def c13_lite_twin_parity(ctx: CheckContext) -> Result:
-    """A _lite build is its base minus two-photon support — nothing else.
+    """A _lite build is its base minus the Mega-only hardware — nothing else.
+
+    Two-photon is most of that strip but not all of it: the external start
+    trigger goes too, because the UNO has no free external-interrupt pin (INT0
+    is the fixed microscope timestamp input, INT1 is the cue output).
 
     Compares Cmd:: reference sets rather than diffing text: the strip removes
-    whole blocks whose interior lines carry no two-photon token, so a line-level
-    diff needs an ever-growing allowlist, while a set comparison is exact and
-    survives reordering.
+    whole blocks whose interior lines carry no distinguishing token, so a
+    line-level diff needs an ever-growing allowlist, while a set comparison is
+    exact and survives reordering.
     """
     check = _check(ctx, "C13")
     sketches = {s["name"]: s for s in ctx.schema["firmware"]["sketches"]}
@@ -93,10 +96,10 @@ def c13_lite_twin_parity(ctx: CheckContext) -> Result:
         if base is None:
             continue
         base_refs, lite_refs = set(base["cmd_refs"]), set(sketch["cmd_refs"])
-        two_photon = {c for c in base_refs if c.startswith(_TWO_PHOTON_PREFIXES)}
-        if gap := sorted((base_refs - two_photon) - lite_refs):
+        stripped = {c for c in base_refs if c.startswith(_LITE_STRIPPED_PREFIXES)}
+        if gap := sorted((base_refs - stripped) - lite_refs):
             missing[name] = gap
-        if extra := sorted(c for c in lite_refs if c.startswith(_TWO_PHOTON_PREFIXES)):
+        if extra := sorted(c for c in lite_refs if c.startswith(_LITE_STRIPPED_PREFIXES)):
             leaked[name] = extra
     if not (missing or leaked):
         return Result(check.id, check.title, check.severity, Status.PASS,
@@ -104,8 +107,8 @@ def c13_lite_twin_parity(ctx: CheckContext) -> Result:
                       provenance=_P_SKETCHES)
     return Result(
         check.id, check.title, check.severity, Status.FAIL,
-        "a _lite twin diverged from its base for a non-two-photon reason",
-        evidence={"missing_from_lite": missing, "two_photon_leaked_into_lite": leaked},
+        "a _lite twin diverged from its base for a reason other than the Mega-only strip",
+        evidence={"missing_from_lite": missing, "stripped_leaked_into_lite": leaked},
         fix_hint="Mirror the change into the _lite twin; they are hand-maintained copies.",
         provenance=_P_SKETCHES,
         suggests_removal=bool(leaked),

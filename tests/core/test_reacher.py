@@ -1137,7 +1137,14 @@ class TestFrameTimestampStopSemantics:
         emit_calls = []
         reacher._emit = lambda event, data: emit_calls.append((event, data))
         warn_calls = []
-        reacher.logger.warning = lambda msg: warn_calls.append(msg)
+        # patch.object so pytest-mock restores it: REACHER builds its logger as
+        # logging.getLogger(f"reacher.{session_id or 'default'}"), so every
+        # session_id=None instance shares one logger object and a bare
+        # assignment here leaks the stub into every later test.
+        mocker.patch.object(
+            reacher.logger, "warning",
+            side_effect=lambda msg, *a, **kw: warn_calls.append(msg),
+        )
         reacher.program_flag.clear()
         reacher.update_frame_events({"timestamp": 1000, "missed": 0})
         assert reacher.frame_data == [1000]
@@ -1151,7 +1158,14 @@ class TestFrameTimestampStopSemantics:
         emit_calls = []
         reacher._emit = lambda event, data: emit_calls.append((event, data))
         warn_calls = []
-        reacher.logger.warning = lambda msg: warn_calls.append(msg)
+        # patch.object so pytest-mock restores it: REACHER builds its logger as
+        # logging.getLogger(f"reacher.{session_id or 'default'}"), so every
+        # session_id=None instance shares one logger object and a bare
+        # assignment here leaks the stub into every later test.
+        mocker.patch.object(
+            reacher.logger, "warning",
+            side_effect=lambda msg, *a, **kw: warn_calls.append(msg),
+        )
         reacher.program_flag.clear()
         reacher.update_frame_events({"timestamp": 2000, "missed": 2})
         assert reacher.frame_data == [2000]

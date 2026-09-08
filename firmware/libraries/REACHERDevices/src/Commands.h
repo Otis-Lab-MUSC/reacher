@@ -6,7 +6,7 @@
 // Encoding: [Device Prefix][Action Suffix]
 //   Prefix:  1xx=Controller  2xx=Session  3xx=Cue  4xx=Pump
 //            5xx=Lick  6xx=Laser  9xx=Microscope
-//            10xx=RH Lever  11xx=SLM  13xx=LH Lever
+//            10xx=RH Lever  11xx=SLM  12xx=External Trigger  13xx=LH Lever
 //   Suffix:  x00=disarm  x01=arm  x03=test
 //            x71=set frequency  x72=set duration
 //            x74=set timeout  x75=set ratio  x76=set pin
@@ -135,6 +135,16 @@ namespace Cmd {
   // Timestamp pin is configurable within the PCINT0/PORTB group: pins 10–13 on
   // the Mega 2560 target (8–13 on an UNO). Slm::SetPin rejects anything else.
   constexpr int SLM_SET_PIN          = 1176;
+
+  // --- External Trigger (12xx) ---
+  // TTL session-start input. Arming makes the firmware watch the pin; the next
+  // rising edge starts the session exactly as SESSION_START would, then the
+  // trigger self-disarms so a stray edge cannot re-enter StartSession mid-run.
+  constexpr int EXT_TRIGGER_DISARM   = 1200;
+  constexpr int EXT_TRIGGER_ARM      = 1201;
+  // Assignable to 18/19/20/21 only (Mega INT5/INT4/INT3/INT2). ExternalTrigger::SetPin
+  // rejects anything else — notably pin 2, whose ISR belongs to Microscope.
+  constexpr int EXT_TRIGGER_SET_PIN  = 1276;
 
   // --- RH Lever (10xx) ---
   constexpr int LEVER_RH_DISARM      = 1000;

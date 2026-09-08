@@ -76,6 +76,7 @@ All pin assignments are defined in `libraries/REACHERDevices/src/Pins.h`:
 | 9 | `PIN_MICROSCOPE_TRIG` | OUTPUT | Microscope trigger pulse (50 ms HIGH) |
 | 10 | `PIN_LEVER_RH` | INPUT_PULLUP | Right-hand lever |
 | 13 | `PIN_LEVER_LH` | INPUT_PULLUP | Left-hand lever (note: shares the onboard LED line; INPUT_PULLUP validated but revisit if reads are unstable) |
+| 18 | `PIN_EXT_TRIGGER` | INPUT_PULLUP (INT5) | External TTL session start — rising edge starts the session. Mega only; assignable to 18/19/20/21. **Not** 2 or 3: pin 2's INT0 belongs to the microscope timestamp ISR and `attachInterrupt` would replace it. Note 18/19 are also Serial1 and 20/21 are I2C |
 
 ---
 
@@ -245,6 +246,8 @@ DeviceSet          — Struct grouping all device pointers for helper functions
 
 **Microscope** — Manages two pins: trigger output (50 ms HIGH pulse) and INT0 ISR for frame timestamp capture
 
+**ExternalTrigger** — TTL session-start input. When armed, a rising edge latches in the ISR and `loop()` runs the normal `StartSession()` path. One-shot: `Consume()` self-disarms, so a stray edge cannot re-enter `StartSession()` mid-run and re-pulse the (toggle-style) scope trigger. Not a `DeviceSet` member — it must survive `armToggleDevices(false)` at session end
+
 ### Scheduler (Operant Paradigms)
 
 The `Scheduler` class implements a trigger-chain-action system for the four operant paradigms:
@@ -293,6 +296,10 @@ The `Scheduler` class implements a trigger-chain-action system for the four oper
 | `006` | Error messages |
 | `007` | Behavioral events (presses, infusions, licks, device activations) |
 | `008` | Microscope frame timestamps |
+| `009` | SLM timestamps |
+
+The level-`007` CONTROLLER `START` event carries a `"source"` field: `"external"` when an
+external TTL trigger started the session, `"software"` when `SESSION_START` (101) did.
 
 ### Identification response format
 
@@ -319,6 +326,7 @@ The `Scheduler` class implements a trigger-chain-action system for the four oper
 | 600–682 | Laser | ARM (601), DISARM (600), TEST (603), FREQ (671), DUR (672), CONTINGENT (681), INDEPENDENT (682) |
 | 900–903 | Microscope | DISARM (900), ARM (901), TEST (903) |
 | 1000–1081 | Right lever | ARM (1001), DISARM (1000), TIMEOUT (1074), RATIO (1075), INACTIVE (1080), ACTIVE (1081) |
+| 1200–1276 | External trigger | DISARM (1200), ARM (1201), SET_PIN (1276 — 18/19/20/21 only) |
 | 1300–1381 | Left lever | ARM (1301), DISARM (1300), TIMEOUT (1374), RATIO (1375), INACTIVE (1380), ACTIVE (1381) |
 
 ---

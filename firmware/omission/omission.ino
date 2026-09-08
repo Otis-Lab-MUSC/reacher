@@ -22,6 +22,7 @@
 #include <Laser.h>
 #include <Microscope.h>
 #include <Slm.h>
+#include <ExternalTrigger.h>
 #include <Scheduler.h>
 #include <ReacherHelpers.h>
 #include "Config.h"
@@ -61,6 +62,8 @@ LickCircuit lickCircuit(PIN_LICK_CIRCUIT);
 Laser       laser(PIN_LASER, LASER_FREQUENCY, LASER_DURATION);
 Microscope  microscope(PIN_MICROSCOPE_TRIG, PIN_MICROSCOPE_TS);
 Slm         slm(PIN_SLM_TS);
+// Not a DeviceSet member: must survive armToggleDevices(false) at session end.
+ExternalTrigger externalTrigger(PIN_EXT_TRIGGER);
 
 Scheduler scheduler;
 
@@ -74,7 +77,7 @@ bool sessionEndPending = false;
 
 // Forward declarations
 void ParseCommands();
-void StartSession();
+void StartSession(bool external = false);
 void EndSession();
 void ReconfigureChain();
 void SendIdentification();
@@ -146,6 +149,15 @@ void loop() {
     slm.ArmToggle(false);
     sessionEndPending = false;
   }
+  // External TTL start. Consume() self-disarms, so a stray edge later in the run
+  // cannot re-enter StartSession() and re-pulse the microscope trigger — that
+  // pulse is a toggle, not a level, so a second one would stop the scope.
+  if (externalTrigger.Consume() && !scheduler.IsSessionActive()) {
+    StartSession(true);
+    setDeviceTimestampOffset(devices, SESSION_START_TIMESTAMP);
+    slm.SetOffset(SESSION_START_TIMESTAMP);
+  }
+
   ParseCommands();
 }
 
@@ -193,13 +205,15 @@ void ReconfigureChain() {
   }
 }
 
-void StartSession() {
+void StartSession(bool external) {
   SESSION_START_TIMESTAMP = millis();
   microscope.Trigger();
   scheduler.StartSession(SESSION_START_TIMESTAMP);
   ReconfigureChain();
 
-  Serial.println(F("{\"level\":\"007\",\"device\":\"CONTROLLER\",\"event\":\"START\",\"timestamp\":0}"));
+  Serial.print(F("{\"level\":\"007\",\"device\":\"CONTROLLER\",\"event\":\"START\",\"timestamp\":0,\"source\":\""));
+  Serial.print(external ? F("external") : F("software"));
+  Serial.println(F("\"}"));
 
   Serial.print(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"paradigm\":\"OMISSION\",\"active_lever\":\""));
   Serial.print((activeLever == &rLever) ? F("RH") : F("LH"));
@@ -222,6 +236,7 @@ void StartSession() {
 }
 
 void EndSession() {
+  if (externalTrigger.Armed()) externalTrigger.ArmToggle(false);
   SESSION_END_TIMESTAMP = millis();
   microscope.Pause(SESSION_END_TIMESTAMP);
   scheduler.EndSession(SESSION_END_TIMESTAMP);
@@ -389,6 +404,19 @@ void ParseCommands() {
           case Cmd::SLM_SET_LASER_DURATION:
             slm.SetLaserDuration((uint32_t)inputJson["duration"]);
             logParamChange(F("SLM"), F("duration"), slm.LaserDuration()); break;
+
+          case Cmd::EXT_TRIGGER_ARM:    externalTrigger.ArmToggle(true); break;
+          case Cmd::EXT_TRIGGER_DISARM: externalTrigger.ArmToggle(false); break;
+          case Cmd::EXT_TRIGGER_SET_PIN: {
+            // Passed through unclamped so ExternalTrigger::SetPin's 18-21 guard
+            // can reject it with a level-006 error instead of silently
+            // substituting a different pin. Bounded only to the int8_t range
+            // for representability; no value in it is a valid trigger pin.
+            int req = inputJson["pin"] | (int)PIN_EXT_TRIGGER;
+            if (req < 0)   req = 0;
+            if (req > 127) req = 127;
+            externalTrigger.SetPin((int8_t)req); break;
+          }
 
           default:
             logUnknownCommand(command);

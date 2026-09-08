@@ -88,28 +88,26 @@ def c5b_pcint(ctx: CheckContext) -> Result:
     )
 
 
-@register("C5c", "No component requires an interrupt-capable pin", "pins",
-          severity=Severity.WARNING, requires=("schema",))
+@register("C5c", "Interrupt role constraints match", "pins", requires=("schema", "frontend"))
 def c5c_interrupt(ctx: CheckContext) -> Result:
-    """`requires_interrupt` is enforced by validate_pin but has no TS mirror.
+    """`requires_interrupt` vs the frontend's COMPONENT_REQUIRES_INT.
 
-    No PIN_CONSTRAINTS entry sets it today, so the gap is harmless. The day one
-    does, the frontend would silently offer non-interrupt pins — so this must
-    fail loudly then, rather than the field quietly doing nothing forever.
+    This began as a tripwire: the field was enforced by validate_pin but no
+    constraint set it and no TS mirror existed, so it asserted the set was
+    empty and told whoever tripped it to add the mirror and extend the check.
+    The external start trigger tripped it, `COMPONENT_REQUIRES_INT` was added,
+    and this is that extension — a real comparison now.
+
+    Note the constraint is documentary for `ext_trigger` rather than the thing
+    doing the work: `validate_pin` returns on `allowed_pins` before it reaches
+    the role flags. Keeping the two sides in step still matters, because the
+    frontend uses its mirror to decide which pins to offer.
     """
-    check = _check("C5c")
-    offenders = sorted(k for k, c in _constraints(ctx).items() if c["requires_interrupt"])
-    if not offenders:
-        return Result(check.id, check.title, check.severity, Status.PASS,
-                      "no component requires an interrupt-capable pin",
-                      provenance=("pin_overrides.PIN_CONSTRAINTS",))
-    return Result(
-        check.id, check.title, check.severity, Status.FAIL,
-        f"{len(offenders)} components now require an interrupt pin, with no frontend mirror",
-        evidence={"components": offenders},
-        fix_hint=("Add COMPONENT_REQUIRES_INTERRUPT to pinMeta.ts, teach validPinsFor about it, "
-                  "and extend C5 to compare it."),
-        provenance=("pin_overrides.PIN_CONSTRAINTS",),
+    backend = {k: c["requires_interrupt"] for k, c in _constraints(ctx).items()}
+    return compare_mappings(
+        _check("C5c"), "PinConstraint.requires_interrupt", backend,
+        "pinMeta.ts COMPONENT_REQUIRES_INT", ctx.pin_meta["requires_interrupt"],
+        fix_hint="External-interrupt pins are INT0-INT5: 2, 3, 18, 19, 20, 21 on the Mega.",
     )
 
 
