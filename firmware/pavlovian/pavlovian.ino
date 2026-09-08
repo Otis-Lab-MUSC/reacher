@@ -39,6 +39,7 @@
 #include <Microscope.h>
 #ifdef __AVR_ATmega2560__
 #include <Slm.h>
+#include <ExternalTrigger.h>
 #endif
 #include <ReacherHelpers.h>
 #include "PavlovianScheduler.h"
@@ -76,6 +77,8 @@ Laser       laser(PIN_LASER, 40, 5000);
 Microscope  microscope(PIN_MICROSCOPE_TRIG, PIN_MICROSCOPE_TS);
 #ifdef __AVR_ATmega2560__
 Slm         slm(PIN_SLM_TS);
+// Not a DeviceSet member: must survive armToggleDevices(false) at session end.
+ExternalTrigger externalTrigger(PIN_EXT_TRIGGER);
 #endif
 
 // Laser shadow variables
@@ -106,7 +109,7 @@ uint32_t SESSION_END_TIMESTAMP;
 
 // Forward declarations
 void ParseCommands();
-void StartSession();
+void StartSession(bool external = false);
 void EndSession();
 void ReconfigureScheduler();
 void SendIdentification();
@@ -197,6 +200,17 @@ void loop() {
 #ifdef __AVR_ATmega2560__
   slm.HandleTimestampSignal();
 #endif
+
+  // External TTL start. Consume() self-disarms, so a stray edge later in the run
+  // cannot re-enter StartSession() and re-pulse the microscope trigger — that
+  // pulse is a toggle, not a level, so a second one would stop the scope.
+  if (externalTrigger.Consume() && !scheduler.IsSessionActive()) {
+    StartSession(true);
+    setDeviceTimestampOffset(devices, SESSION_START_TIMESTAMP);
+#ifdef __AVR_ATmega2560__
+    slm.SetOffset(SESSION_START_TIMESTAMP);
+#endif
+  }
 
   // Process serial commands
   ParseCommands();
@@ -415,6 +429,19 @@ void ParseCommands() {
           }
 #endif
 
+          case Cmd::EXT_TRIGGER_ARM:    externalTrigger.ArmToggle(true); break;
+          case Cmd::EXT_TRIGGER_DISARM: externalTrigger.ArmToggle(false); break;
+          case Cmd::EXT_TRIGGER_SET_PIN: {
+            // Passed through unclamped so ExternalTrigger::SetPin's 18-21 guard
+            // can reject it with a level-006 error instead of silently
+            // substituting a different pin. Bounded only to the int8_t range
+            // for representability; no value in it is a valid trigger pin.
+            int req = inputJson["pin"] | (int)PIN_EXT_TRIGGER;
+            if (req < 0)   req = 0;
+            if (req > 127) req = 127;
+            externalTrigger.SetPin((int8_t)req); break;
+          }
+
           default:
             logUnknownCommand(command);
             break;
@@ -436,12 +463,14 @@ void ReconfigureScheduler() {
 }
 
 /// @brief Begin a session: trigger microscope, initialize scheduler, emit settings JSON.
-void StartSession() {
+void StartSession(bool external) {
   SESSION_START_TIMESTAMP = millis();
   microscope.Trigger();
   scheduler.StartSession(SESSION_START_TIMESTAMP);
 
-  Serial.println(F("{\"level\":\"007\",\"device\":\"CONTROLLER\",\"event\":\"START\",\"timestamp\":0}"));
+  Serial.print(F("{\"level\":\"007\",\"device\":\"CONTROLLER\",\"event\":\"START\",\"timestamp\":0,\"source\":\""));
+  Serial.print(external ? F("external") : F("software"));
+  Serial.println(F("\"}"));
 
   // Send Pavlovian settings
   Serial.print(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"paradigm\":\"PAVLOVIAN\",\"cs_plus_count\":"));
@@ -491,6 +520,7 @@ void StartSession() {
 
 /// @brief End a session: trigger microscope, shut down scheduler, emit end event.
 void EndSession() {
+  if (externalTrigger.Armed()) externalTrigger.ArmToggle(false);
   if (!scheduler.IsSessionActive()) return;  // Already ended
   SESSION_END_TIMESTAMP = millis();
   microscope.Pause(SESSION_END_TIMESTAMP);

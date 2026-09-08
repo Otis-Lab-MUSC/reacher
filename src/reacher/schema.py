@@ -78,6 +78,7 @@ PIN_SYMBOL_TO_COMPONENT: dict[str, str] = {
     "PIN_LASER": "laser",
     "PIN_MICROSCOPE_TRIG": "microscope_trigger",
     "PIN_SLM_TS": "slm",
+    "PIN_EXT_TRIGGER": "ext_trigger",
 }
 
 # Pins fixed in firmware, with the reason. Consumers surface these so a user is
@@ -214,6 +215,14 @@ KNOWN_FIRMWARE_GAPS: dict[str, dict[str, Any]] = {
 # A lite sketch is its base minus two-photon support, so MICROSCOPE_* and SLM_*
 # divergence is the strip working as intended; anything else is drift.
 TWO_PHOTON_CMD_PREFIXES = ("MICROSCOPE_", "SLM_")
+
+# Everything a "_lite" twin legitimately loses. Two-photon is most of it, but not
+# all: the external start trigger is stripped for a different reason — the UNO
+# has no free external-interrupt pin, since INT0 is the fixed microscope
+# timestamp input and INT1 is the cue output. Lite-twin parity checks compare
+# against this, not TWO_PHOTON_CMD_PREFIXES, so a Mega-only device that is not
+# 2P hardware does not read as drift.
+LITE_STRIPPED_CMD_PREFIXES = TWO_PHOTON_CMD_PREFIXES + ("EXT_TRIGGER_",)
 
 
 def parse_commands_header(path: Path) -> dict[str, int]:

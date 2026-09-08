@@ -57,6 +57,15 @@ MEGA_PWM = frozenset(range(2, 14)) | {44, 45, 46}
 MEGA_INT = frozenset({2, 3, 18, 19, 20, 21})
 MEGA_PCINT0 = frozenset({10, 11, 12, 13})
 
+# External-trigger input pins. Deliberately NARROWER than MEGA_INT, which also
+# contains 2 and 3: pin 2 carries the fixed microscope timestamp ISR and
+# attachInterrupt() *replaces* a pin's handler, so allowing it would silently
+# stop two-photon frame logging with no error raised anywhere. Pin 3 is the cue
+# output. requires_interrupt alone is therefore NOT sufficient to express this
+# constraint — allowed_pins is what enforces it. Mirrors
+# ExternalTrigger::IsAssignablePin in the firmware.
+EXT_TRIGGER_PINS = frozenset({18, 19, 20, 21})
+
 
 @dataclass(frozen=True)
 class PinConstraint:
@@ -66,6 +75,10 @@ class PinConstraint:
     requires_pwm: bool = False
     requires_interrupt: bool = False
     requires_pcint: bool = False  # must be in PCINT0/PORTB group (10–13 on Mega) for ISR
+    # Explicit allow-list, intersected with the board's digital pins. Takes
+    # precedence over the requires_* role sets when set — use it when a role
+    # flag would otherwise admit a pin that is physically claimed elsewhere.
+    allowed_pins: Optional[frozenset] = None
 
 
 # Map command code -> PinConstraint. Cue/Cue2/Laser drive PWM; Microscope
@@ -82,6 +95,9 @@ PIN_CONSTRAINTS: dict[int, PinConstraint] = {
     int(CommandCode.LEVER_RH_SET_PIN):         PinConstraint("lever_rh"),
     int(CommandCode.LEVER_LH_SET_PIN):         PinConstraint("lever_lh"),
     int(CommandCode.SLM_SET_PIN):              PinConstraint("slm", requires_pcint=True),
+    int(CommandCode.EXT_TRIGGER_SET_PIN):      PinConstraint(
+        "ext_trigger", requires_interrupt=True, allowed_pins=EXT_TRIGGER_PINS,
+    ),
 }
 
 # Reverse lookup: component_key -> set-pin command code.
@@ -98,6 +114,20 @@ SET_PIN_CODE_FOR: dict[str, int] = {
 COMPONENT_KEYS: tuple[str, ...] = tuple(SET_PIN_CODE_FOR.keys())
 
 
+KNOWN_BOARDS = frozenset({"mega", "uno"})
+
+
+def board_is_known(board: Optional[str]) -> bool:
+    """True when *board* was actually identified, not merely defaulted.
+
+    USB-ID detection returns None for clones and unrecognised adapters on real
+    hardware, and ``board_sets`` answers that with the UNO fallback. Callers
+    that need to distinguish "this is an UNO" from "we could not tell" — see
+    ``allowed_pins`` in ``validate_pin`` — have to ask separately.
+    """
+    return bool(board) and board.lower() in KNOWN_BOARDS
+
+
 def board_sets(
     board: Optional[str],
 ) -> tuple[frozenset[int], frozenset[int], frozenset[int], frozenset[int]]:
@@ -112,6 +142,15 @@ def board_sets(
     and board detection legitimately returns None for clone/unrecognized USB IDs
     on real Mega hardware. MEGA_PCINT0 is valid on *both* boards (it is a subset
     of UNO_PCINT0), so it is the correct conservative choice when we don't know.
+
+    .. warning::
+       Do **not** mirror this fallback to derive what a component with an
+       explicit ``allowed_pins`` accepts. That branch of :func:`validate_pin`
+       deliberately does not use the UNO fallback: an allow-list already encodes
+       board knowledge, and intersecting it with a guessed board would reject
+       everything. The two disagree on purpose. :func:`validate_pin` is the
+       authority for any component in ``PIN_CONSTRAINTS``; this function only
+       answers "what does board X have", not "what may this component use".
     """
     if board and board.lower() == "mega":
         return MEGA_DIGITAL, MEGA_PWM, MEGA_INT, MEGA_PCINT0
@@ -130,8 +169,39 @@ def validate_pin(code: int, pin: int, board: Optional[str]) -> Optional[dict]:
     if constraint is None:
         return None
     digital, pwm, interrupt, pcint0 = board_sets(board)
-    # For PCINT-only devices, valid pins are the PCINT0/PORTB group, not all digital pins.
-    valid_range = pcint0 if constraint.requires_pcint else digital
+
+    # An explicit allow-list supersedes the role flags entirely: it is strictly
+    # more specific than "any interrupt pin", and it already encodes the board
+    # knowledge the role sets would re-derive. EXT_TRIGGER_PINS is Mega-specific
+    # by construction, so intersecting it with a *guessed* board is
+    # double-guarding — and because the guess is UNO, the result would be empty:
+    # a Mega clone with an unrecognised USB ID could use the trigger on its
+    # default pin but never move it, failing with a bewildering `allowed: []`.
+    # So intersect only when the board was genuinely identified; a known UNO
+    # still correctly rejects all four. Firmware re-validates regardless
+    # (ExternalTrigger::SetPin emits a level-006 error outside 18/19/20/21), so
+    # an unknown board that really is an UNO gets a clear error from the board
+    # rather than a silently wrong assignment.
+    if constraint.allowed_pins is not None:
+        allowed = constraint.allowed_pins
+        if board_is_known(board):
+            allowed = allowed & digital
+        if pin not in allowed:
+            return {
+                "error": "pin_out_of_range",
+                "component": constraint.component_key,
+                "got": pin,
+                "board": (board or "uno").lower(),
+                "board_known": board_is_known(board),
+                "allowed": sorted(allowed),
+            }
+        return None
+
+    if constraint.requires_pcint:
+        # For PCINT-only devices, valid pins are the PCINT0/PORTB group, not all digital pins.
+        valid_range = pcint0
+    else:
+        valid_range = digital
     if pin not in valid_range:
         return {
             "error": "pin_out_of_range",

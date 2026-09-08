@@ -7,6 +7,8 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional
 
+from ...kernel.commands import CommandCode, get_commands_for_paradigm
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -62,6 +64,12 @@ async def start_program(session_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Session not found")
 
     try:
+        # Manual override from the armed state ("Start Now"). Disarm first:
+        # leaving the firmware watching the pin means a later stray edge
+        # re-enters StartSession() mid-run, which re-fires the microscope
+        # trigger — a toggle, not a level — and stops the scope scanning.
+        if info.state == "armed":
+            info.instance.disarm_external_trigger()
         info.instance.start_program()
     except Exception:
         logger.error("start_program failed for session %s", session_id, exc_info=True)
@@ -69,6 +77,70 @@ async def start_program(session_id: str, request: Request):
 
     sm.set_state(session_id, "running")
     return {"status": "started"}
+
+
+@router.post("/{session_id}/arm-trigger")
+async def arm_trigger(session_id: str, request: Request):
+    """Arm the external TTL trigger: the next rising edge starts the session.
+
+    Deliberately reachable only from "connected". Config and pin changes are
+    rejected while armed (they go through the hardware router, which requires
+    "connected"), because config is applied one serial command per request —
+    there is no transactional apply, so a trigger landing mid-edit would start
+    the session on a half-applied configuration. Cancel, edit, re-arm.
+    """
+    sm = request.app.state.session_manager
+    try:
+        info = sm.get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if info.state != "connected":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot arm the external trigger in '{info.state}' state",
+        )
+
+    # Paradigm gate mirrors the frontend capability sniff: "_lite" sketches have
+    # no ExternalTrigger and the UNO has no free external-interrupt pin.
+    if int(CommandCode.EXT_TRIGGER_ARM) not in get_commands_for_paradigm(info.paradigm or "fr"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Paradigm '{info.paradigm}' has no external trigger support",
+        )
+
+    try:
+        info.instance.arm_external_trigger()
+    except Exception:
+        logger.error("arm_external_trigger failed for session %s", session_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to arm external trigger")
+
+    sm.set_state(session_id, "armed")
+    return {"status": "armed"}
+
+
+@router.post("/{session_id}/disarm-trigger")
+async def disarm_trigger(session_id: str, request: Request):
+    """Cancel an armed external trigger and return the session to "connected"."""
+    sm = request.app.state.session_manager
+    try:
+        info = sm.get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if info.state != "armed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot disarm the external trigger in '{info.state}' state",
+        )
+
+    # Best-effort: if serial was closed while armed the firmware is unreachable,
+    # but the session must still leave the "armed" state or it has no exit at
+    # all. The board really may still be armed, so say so rather than implying
+    # a clean disarm.
+    released = info.instance.release_external_trigger()
+    sm.set_state(session_id, "connected")
+    return {"status": "disarmed", "firmware_notified": released}
 
 
 @router.post("/{session_id}/stop")
@@ -79,6 +151,13 @@ async def stop_program(session_id: str, request: Request):
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    # An armed session has program_running False, so stop_program() returns at
+    # its re-entrance guard and on_stop never fires. Without this the route
+    # reported "stopped" while the board kept watching the pin, and a later edge
+    # started recording a session the operator had explicitly stopped.
+    # stop_program() releases the trigger itself; this only fixes the state.
+    was_armed = info.state == "armed"
+
     try:
         # Fix: F-001 — run_in_executor so time.sleep(2) in stop_program() doesn't block the event loop
         loop = asyncio.get_event_loop()
@@ -86,6 +165,9 @@ async def stop_program(session_id: str, request: Request):
     except Exception:
         logger.error("stop_program failed for session %s", session_id, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to stop program")
+
+    if was_armed:
+        sm.set_state(session_id, "stopped")
 
     return {"status": "stopped"}
 
@@ -118,11 +200,27 @@ async def pause_program(session_id: str, request: Request):
 
 @router.post("/{session_id}/limit")
 async def set_limit(session_id: str, body: LimitRequest, request: Request):
+    """Set the session's time/infusion limits.
+
+    Rejected while armed for the same reason device config is: the limits
+    describe the run the trigger is about to start, and the edge can land at
+    any instant. No serial write is involved, so this is contract consistency
+    rather than a half-applied-firmware hazard.
+    """
     sm = request.app.state.session_manager
     try:
         info = sm.get_session(session_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    if info.state == "armed":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Session is armed and waiting for an external trigger; "
+                "disarm it before changing limits"
+            ),
+        )
 
     instance = info.instance
     if body.type not in ("Time", "Infusion", "Both", "Trials"):

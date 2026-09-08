@@ -64,16 +64,42 @@ The `REACHER` class manages a single Arduino instance. It runs three daemon thre
 2. `queue_thread` — processes queued messages and dispatches to event handlers
 3. `time_check_thread` — enforces experiment time/infusion limits
 
-Commands are defined in `commands.py` as a `COMMAND_REGISTRY` (71 entries), each with a `CommandSpec` that includes paradigm filtering (FR, PR, VI, Omission, Pavlovian). `simulator.py` provides a hardware-free test stub.
+Commands are defined in `commands.py` as a `COMMAND_REGISTRY` (107 entries), each with a `CommandSpec` that includes paradigm filtering (FR, PR, VI, Omission, Pavlovian). `simulator.py` provides a hardware-free test stub.
 
 ### Session Manager (`src/reacher/session_manager.py`)
-Coordinates multiple independent `REACHER` instances. Enforces port locking (prevents two sessions from binding the same COM port). Session lifecycle: `idle → uploading → connected → running → paused → stopped`. Sessions are identified by 12-character hex strings.
+Coordinates multiple independent `REACHER` instances. Enforces port locking (prevents two sessions from binding the same COM port). Session lifecycle: `idle → uploading → connected → running → paused → stopped`, plus `armed` between `connected` and `running` when a session is waiting on an external TTL trigger. An `armed` session is *frozen* — the hardware router rejects config and pin commands with 409 — because config is applied one serial command per request and a trigger landing mid-edit would start the session on a half-applied configuration. It also counts as live for the shutdown watchdog. Sessions are identified by 12-character hex strings.
 
 ### FastAPI App (`src/reacher/api/`)
 - `app.py` — lifespan management, CORS, static file mounting, auth middleware
 - `middleware/auth.py` — Bearer-token gate over `/api/*`; `/health` is exempt (used by mDNS discovery and `reacher-monitor`); WebSocket auth uses `?token=<key>` query param
 - 12 routers under `api/routers/`: `session`, `serial`, `firmware`, `hardware`, `program`, `data`, `file`, `websocket`, `discovery`, `pairing`, `proxy`, `lifecycle`
+- `routers/program.py` — `/start`, `/stop`, `/pause`, `/limit`, `/split`, `/restart`, plus `/arm-trigger` and `/disarm-trigger` for the external TTL start. `/start` from `armed` is the "Start Now" override and disarms the firmware first, or a later stray edge would re-enter `StartSession()` mid-run
 - `routers/proxy.py` — transparent HTTP + WebSocket proxy for paired remote machines (`/api/proxy/{device_id}/...`). The browser always talks to the local server, eliminating CORS configuration; WebSockets authenticate against the *local* API key via a short-lived ws-token.
+
+### External Trigger (TTL session start)
+An optional third-party TTL pulse starts the session instead of the UI. Firmware
+watches a Mega external-interrupt pin (`ExternalTrigger`, default 18, assignable
+to 18/19/20/21 only) and runs its normal `StartSession()` on a rising edge, so
+the two-photon frame output and all acquisition begin exactly as they would for
+a software start. The level-`007` CONTROLLER `START` event gains
+`"source":"external"`, which `update_behavioral_events` uses to run the
+host-side start bookkeeping — inside the `match`, so the `session_state`
+broadcast is enqueued *before* the behavioral event that caused it.
+
+Three things are deliberate and easy to break:
+- **Buffers reset at arm time**, not when the trigger fires — the START event is
+  appended by the same call that begins the session.
+- **The host never re-sends `SESSION_START` (101)** on an external start.
+  `microscope.Trigger()` is a 50 ms *toggle*, not a level; a second pulse stops
+  the scope scanning.
+- **`program_start_time` is back-dated** by the receipt lag stamped in
+  `read_serial()`. Exported data is unaffected (everything is firmware-relative
+  via `SetOffset`); this only corrects the wall-clock anchor `check_limit_met`
+  measures against.
+
+`PinConstraint.allowed_pins` — not `requires_interrupt` — is what keeps the
+trigger off pin 2: `MEGA_INT` contains 2 and 3, and `attachInterrupt` *replaces*
+a pin's handler, so admitting pin 2 would silently kill microscope frame logging.
 
 ### Pin Overrides (`src/reacher/pin_overrides.py`)
 Persistent per-port Arduino pin remapping at `~/.reacher/pin_overrides.json` (mode `0o600`), keyed by serial port path. Owns the single source of truth for board pin validation metadata (UNO/Mega digital/PWM/interrupt sets) and the component→`CommandCode` mapping, shared between the HTTP router and the serial-connect replay path that re-applies overrides on every reconnect.

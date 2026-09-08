@@ -188,12 +188,19 @@ def test_c5b_detects_a_flipped_pcint_flag(live):
     _assert_fails_with_evidence(ctx, "C5b", mentions=["slm"])
 
 
-def test_c5c_fires_when_a_component_starts_requiring_an_interrupt(live):
-    """Harmless today because nothing sets it; must fail loudly the day one does."""
+def test_c5c_detects_a_flipped_interrupt_flag(live):
+    """C5c was a tripwire until the external trigger tripped it; now that both
+    sides declare the flag, it is a comparison like C5a/C5b."""
+    ctx = _drift(live, lambda c: c.pin_meta["requires_interrupt"].update({"ext_trigger": False}))
+    _assert_fails_with_evidence(ctx, "C5c", mentions=["ext_trigger"])
+
+
+def test_c5c_detects_a_backend_only_interrupt_requirement(live):
+    """The original hazard, still covered: a backend constraint the frontend
+    does not mirror would let the UI offer non-interrupt pins."""
     def mutate(c):
         c.schema["python"]["pin_constraints"][0]["requires_interrupt"] = True
-    result = _assert_fails_with_evidence(_drift(live, mutate), "C5c")
-    assert "COMPONENT_REQUIRES_INTERRUPT" in result["fix_hint"]
+    _assert_fails_with_evidence(_drift(live, mutate), "C5c")
 
 
 def test_c6_detects_a_default_pin_drifting_from_firmware(live):

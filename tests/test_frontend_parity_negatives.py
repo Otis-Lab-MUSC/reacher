@@ -148,6 +148,26 @@ def test_renamed_declaration_raises_rather_than_returning_empty():
         ts.parse_number_record(drifted, "SET_PIN_CODE", ts.MIN_PIN_CODES)
 
 
+def test_a_header_comment_naming_the_constants_does_not_fool_the_parser():
+    """The identifiers are load-bearing across repos, so pinMeta.ts documents
+    them in a header comment. A parser anchored on the bare name matched that
+    prose instead of the declaration and every table came back empty — which the
+    floor caught, but only because the floor exists. Documenting a contract must
+    not break the parser that enforces it.
+    """
+    documented = (
+        "/**\n"
+        " * These identifiers are load-bearing BY NAME outside this repo:\n"
+        " *   Component  COMPONENT_KEYS  SET_PIN_CODE  DEFAULT_PIN\n"
+        " *   COMPONENT_REQUIRES_PWM  COMPONENT_REQUIRES_PCINT  UNO_DIGITAL\n"
+        " */\n"
+    ) + FIXTURE
+    assert ts.parse_number_record(documented, "SET_PIN_CODE", 8) == \
+        ts.parse_number_record(FIXTURE, "SET_PIN_CODE", 8)
+    assert ts.parse_component_keys(documented) == ts.parse_component_keys(FIXTURE)
+    assert ts.parse_pin_set(documented, "UNO_DIGITAL") == ts.parse_pin_set(FIXTURE, "UNO_DIGITAL")
+
+
 def test_emptied_record_raises_below_the_floor():
     drifted = FIXTURE.replace(
         "  lever_rh: 1076, lever_lh: 1376, cue: 376, cue2: 386, pump: 476,\n"

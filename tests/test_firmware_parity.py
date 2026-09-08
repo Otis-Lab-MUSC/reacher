@@ -89,8 +89,8 @@ def test_lite_twin_shares_every_non_two_photon_command(base_name, sketches):
     """
     base_refs = set(sketches[base_name]["cmd_refs"])
     lite_refs = set(sketches[f"{base_name}_lite"]["cmd_refs"])
-    two_photon = {c for c in base_refs if c.startswith(schema.TWO_PHOTON_CMD_PREFIXES)}
-    missing = (base_refs - two_photon) - lite_refs
+    stripped = {c for c in base_refs if c.startswith(schema.LITE_STRIPPED_CMD_PREFIXES)}
+    missing = (base_refs - stripped) - lite_refs
     assert not missing, (
         f"{base_name}_lite is missing commands handled by {base_name}: {sorted(missing)}"
     )
@@ -100,7 +100,7 @@ def test_lite_twin_shares_every_non_two_photon_command(base_name, sketches):
 def test_lite_twin_handles_no_two_photon_commands(base_name, sketches):
     """The strip must be complete — a lite build has no two-photon hardware at all."""
     lite_refs = set(sketches[f"{base_name}_lite"]["cmd_refs"])
-    leaked = {c for c in lite_refs if c.startswith(schema.TWO_PHOTON_CMD_PREFIXES)}
+    leaked = {c for c in lite_refs if c.startswith(schema.LITE_STRIPPED_CMD_PREFIXES)}
     assert not leaked, f"{base_name}_lite references two-photon commands: {sorted(leaked)}"
 
 
