@@ -2,10 +2,17 @@
 
 ``web/src/components/hardware/pinMeta.ts`` duplicates, by hand and with nothing
 checking it, three separate backend facts: the component key set and their
-SET_PIN command codes (``pin_overrides.py``), the per-component PWM/PCINT role
-constraints (``pin_overrides.PIN_CONSTRAINTS``), and the firmware default pins
-(``Pins.h``). ``types/index.ts`` duplicates the board id set
-(``uploader/boards.py``). None of it is generated; all of it can drift silently.
+SET_PIN command codes (``pin_overrides.py``), the per-component
+PWM/PCINT/interrupt role constraints (``pin_overrides.PIN_CONSTRAINTS``), and
+the firmware default pins (``Pins.h``). ``types/index.ts`` duplicates the board
+id set (``uploader/boards.py``). None of it is generated; all of it can drift
+silently.
+
+The coupling runs the other way too, and is easy to miss from the labrynth side:
+these parsers match **exact identifiers**, so renaming one of the constants
+listed in ``parse_pin_meta`` breaks reacher's CI, not labrynth's. Anything not
+named there — ``COMPONENT_LABEL``, the ``*_ASSIGNABLE`` sets — is free to
+change.
 
 These parsers are deliberately shallow — regex over source text, no TypeScript
 toolchain — for the same reason ``test_command_parity.py`` regexes ``Commands.h``
@@ -43,8 +50,14 @@ def _block(source: str, symbol: str) -> str:
 
     Brace-counting rather than a lazy regex, so a nested object literal inside a
     table does not truncate the block.
+
+    Anchored on the ``const`` keyword, not on the bare name. These identifiers
+    are load-bearing across repos, so pinMeta.ts documents them in a header
+    comment — and a bare-name anchor matched that prose instead of the
+    declaration, making every parse return nothing. Documenting a contract must
+    not break the parser that enforces it.
     """
-    match = re.search(rf"\b{re.escape(symbol)}\b[^=]*=\s*", source)
+    match = re.search(rf"(?:export\s+)?const\s+{re.escape(symbol)}\b[^=]*=\s*", source)
     if match is None:
         raise TypeScriptParseError(f"declaration {symbol!r} not found")
     start = match.end()
