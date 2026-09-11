@@ -437,6 +437,11 @@ class REACHER:
         self.logger.info("Opening serial connection")
         
         if self.ser.is_open:
+            # F-2: force-closing an armed, already-open port on a reconnect
+            # would leave the board watching the pin with the host reporting
+            # a fresh connect — release first, same as every other path that
+            # closes an open port out from under an armed session.
+            self.release_external_trigger()
             self.ser.close()
             time.sleep(1)
         self.ser.open()

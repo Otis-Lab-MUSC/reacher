@@ -79,6 +79,13 @@ class FirmwareSimulator:
         self.lever_rh_timeout = 20000  # ms
         self.lever_lh_timeout = 20000  # ms
 
+        # External TTL trigger — mirrors ExternalTrigger.cpp. Not part of
+        # _capture_arm_state/_restore_arm_state: like the real device, it is
+        # not a DeviceSet member and does not survive armToggleDevices(false).
+        self.ext_trigger_armed = False
+        self.ext_trigger_pin = 18  # PIN_EXT_TRIGGER default (Pins.h)
+        self._ext_trigger_lock = threading.Lock()
+
         # Pavlovian parameters
         self.pav_cs_plus_count = 10
         self.pav_cs_minus_count = 5
@@ -218,6 +225,13 @@ class FirmwareSimulator:
             self.lever_lh_timeout = cmd_data.get("timeout", self.lever_lh_timeout)
         elif cmd == 1375:
             self.ratio = cmd_data.get("ratio", self.ratio)
+        # External trigger
+        elif cmd == 1200:  # EXT_TRIGGER_DISARM
+            self._ext_trigger_disarm()
+        elif cmd == 1201:  # EXT_TRIGGER_ARM
+            self._ext_trigger_arm()
+        elif cmd == 1276:  # EXT_TRIGGER_SET_PIN
+            self._ext_trigger_set_pin(cmd_data.get("pin"))
         # Pavlovian parameters
         elif cmd == 208:
             self.pav_cs_plus_count = cmd_data.get("count", self.pav_cs_plus_count)
@@ -278,6 +292,14 @@ class FirmwareSimulator:
             self._send({"level": "000", "device": "MICROSCOPE", "armed": True})
         if self.laser_armed:
             self._send({"level": "000", "device": "LASER", "armed": True})
+        # The frontend's armed indicator is a read-only mirror synced from this
+        # dump (REACHER.update_firmware_information); _lite boards never
+        # instantiate ExternalTrigger, so they emit no row here either.
+        if self._ext_trigger_supported():
+            self._send({
+                "level": "000", "device": "EXT_TRIGGER",
+                "armed": self.ext_trigger_armed, "pin": self.ext_trigger_pin,
+            })
 
     def _send_device_test(self, device: str, pin: int, event: str, duration: int):
         ts = self._clock
@@ -317,10 +339,88 @@ class FirmwareSimulator:
         self.laser_armed = snap.get("laser_armed", self.laser_armed)
         self.microscope_armed = snap.get("microscope_armed", self.microscope_armed)
 
-    def start(self):
-        if self._running:
+    # --- External trigger ---
+
+    def _ext_trigger_supported(self) -> bool:
+        """ExternalTrigger.cpp is compiled out of every "_lite" sketch (the
+        UNO has no free external-interrupt pin — INT0 is the fixed microscope
+        timestamp input, INT1 is the cue output). Command codes 1200/1201/1276
+        are simply never handled there, so silently dropping them here mirrors
+        that gap rather than the router's paradigm gate, which the kernel does
+        not see. See firmware/CLAUDE.md and schema.LITE_STRIPPED_CMD_PREFIXES.
+        """
+        return not self.paradigm.endswith("_lite")
+
+    def _send_ext_trigger_state(self):
+        self._send({
+            "level": "001", "device": "EXT_TRIGGER",
+            "event": "ARMED" if self.ext_trigger_armed else "DISARMED",
+            "pin": self.ext_trigger_pin,
+        })
+
+    def _ext_trigger_arm(self):
+        if not self._ext_trigger_supported():
             return
-        # Restore arm states captured at previous session end
+        with self._ext_trigger_lock:
+            self.ext_trigger_armed = True
+        self._send_ext_trigger_state()
+
+    def _ext_trigger_disarm(self):
+        if not self._ext_trigger_supported():
+            return
+        with self._ext_trigger_lock:
+            self.ext_trigger_armed = False
+        self._send_ext_trigger_state()
+
+    def _ext_trigger_set_pin(self, pin):
+        if not self._ext_trigger_supported():
+            return
+        try:
+            pin_int = int(pin)
+        except (TypeError, ValueError):
+            pin_int = None
+        if pin_int not in (18, 19, 20, 21):
+            self._send({
+                "level": "006", "device": "EXT_TRIGGER",
+                "error_code": "EXT_PIN_INVALID",
+                "desc": "External trigger pin must be 18, 19, 20 or 21",
+                "got": pin,
+            })
+            return
+        # Armed state is preserved across a pin reassignment — mirrors
+        # ExternalTrigger::SetPin, which re-attaches on the new pin if it was
+        # armed rather than forcing a disarm.
+        self.ext_trigger_pin = pin_int
+        self._send({"level": "000", "device": "EXT_TRIGGER", "param": "pin", "value": pin_int})
+
+    def fire_external_trigger(self) -> bool:
+        """Simulate a rising TTL edge on the armed external-trigger pin.
+
+        One-shot: self-disarms before returning, mirroring
+        ExternalTrigger::Consume(). Returns False (no effect) when not armed —
+        covers both "never armed" and "a previous edge already fired".
+        """
+        with self._ext_trigger_lock:
+            # The `_running` check mirrors firmware's `!IsSessionActive()`
+            # guard — belt-and-suspenders, since arm_external_trigger() is
+            # never called while a session is active.
+            if not self.ext_trigger_armed or self._running:
+                return False
+            self.ext_trigger_armed = False
+        # Wire order matches firmware: Consume() prints DISARMED (inside
+        # ArmToggle/LogState) before StartSession(true) prints the START line.
+        self._send({
+            "level": "001", "device": "EXT_TRIGGER",
+            "event": "DISARMED", "pin": self.ext_trigger_pin,
+        })
+        self._send({
+            "level": "007", "device": "CONTROLLER", "event": "START",
+            "timestamp": 0, "source": "external",
+        })
+        self._begin_run()
+        return True
+
+    def _begin_run(self):
         if hasattr(self, "_saved_arm_state"):
             self._restore_arm_state(self._saved_arm_state)
         self._running = True
@@ -328,6 +428,11 @@ class FirmwareSimulator:
         self._clock = 0
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
+
+    def start(self):
+        if self._running:
+            return
+        self._begin_run()
 
     def stop(self):
         # Capture arm states before disarming (mirrors firmware behavior)
