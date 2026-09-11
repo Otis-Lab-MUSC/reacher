@@ -25,10 +25,15 @@ jobs:
       - name: Ruff lint
         run: ruff check .
 
-  # Advisory — runs the suite for visibility. Not yet a required check:
-  # two command-registry tests in tests/test_commands.py need triage
-  # (whether PAV_COUNTERBALANCE/212 belongs in the pavlovian set), and the
-  # tree is not yet `ruff format`-clean. Promote to required once green.
+  # Advisory — runs the suite for visibility. Previously kept non-required
+  # citing two failing tests/test_commands.py command-registry tests and an
+  # unclean `ruff format` tree; a clean-env `pip install -e ".[dev]"` + pytest
+  # run (2026-09-10 audit) showed 0 test failures, so the test-failure half of
+  # that justification was stale. `ruff format --check` does still fail on
+  # dozens of files, but this workflow never runs it, so it isn't protecting
+  # anything here either way. Note: making this job actually block merges
+  # needs a GitHub branch-protection change — editing this file alone does
+  # not make the job required.
   test:
     name: test
     runs-on: ubuntu-latest

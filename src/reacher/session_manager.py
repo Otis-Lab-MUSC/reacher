@@ -257,6 +257,16 @@ class SessionManager:
         if info is None:
             return
         previous = info.state
+        # An unplug while armed is the one exit that otherwise leaves this
+        # flag stale True — every other teardown path already releases.
+        try:
+            if not info.instance.release_external_trigger():
+                logger.warning(
+                    "Session %s disconnected while its board may still be armed",
+                    session_id,
+                )
+        except Exception:
+            logger.warning("Error releasing external trigger for %s", session_id, exc_info=True)
         info.state = "disconnected"
         self._broadcast_state(session_id, "disconnected")
         logger.warning("Session %s disconnected: %s", session_id, reason)
