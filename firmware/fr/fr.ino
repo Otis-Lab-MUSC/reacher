@@ -36,6 +36,9 @@ uint32_t LASER_DURATION     = DEFAULT_LASER_DURATION;
 bool     LASER_RH_ONLY_MODE = false;
 DeviceType LASER_LEVER_FILTER = DeviceType::LEVER_RH;  // Lever isolating the laser in RH/LH-only mode (#67)
 uint32_t TIMEOUT_INTERVAL   = DEFAULT_TIMEOUT_INTERVAL;
+// 0 = every active press starts the timeout (legacy default), 1 = reward-triggering press only.
+// Scheduler-wide, not per-lever: cmds 1077 and 1377 both write this one shadow.
+uint8_t  TIMEOUT_MODE       = TIMEOUT_MODE_EVERY_PRESS;
 
 // Per-device onset delay shadows (ms) — survive ReconfigureChain()
 uint32_t CUE_ONSET_DELAY   = 0;
@@ -126,6 +129,7 @@ void setup() {
   lLever.SetActiveLever(false);
 
   scheduler.SetTimeoutInterval(TIMEOUT_INTERVAL);
+  scheduler.SetTimeoutMode(TIMEOUT_MODE);
   configureFixedRatio(scheduler, cue, cue2, *activePump, laser, 1, DeviceType::LEVER_RH, activePumpTarget);
 
   SendIdentification();
@@ -220,6 +224,8 @@ void StartSession(bool external) {
 
   Serial.print(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"paradigm\":\"FIXED_RATIO\",\"timeout\":"));
   Serial.print(TIMEOUT_INTERVAL);
+  Serial.print(F(",\"timeout_mode\":"));
+  Serial.print(TIMEOUT_MODE);
   Serial.print(F(",\"active_lever\":\""));
   Serial.print((activeLever == &rLever) ? F("RH") : F("LH"));
   Serial.println(F("\"}"));
@@ -309,6 +315,10 @@ void ParseCommands() {
           case Cmd::LEVER_RH_SET_TIMEOUT:
             TIMEOUT_INTERVAL = inputJson["timeout"]; scheduler.SetTimeoutInterval(TIMEOUT_INTERVAL);
             logParamChange(F("LEVER_RH"), F("timeout"), TIMEOUT_INTERVAL); break;
+          case Cmd::LEVER_RH_SET_TIMEOUT_MODE:
+            scheduler.SetTimeoutMode(inputJson["timeout_mode"]);
+            TIMEOUT_MODE = scheduler.TimeoutMode();  // read back: the scheduler clamps > 1 to 1
+            logParamChange(F("LEVER_RH"), F("timeout_mode"), (uint32_t)TIMEOUT_MODE); break;
           case Cmd::LEVER_RH_SET_RATIO:
             scheduler.SetRatio(inputJson["ratio"]);
             logParamChange(F("LEVER_RH"), F("ratio"), (uint32_t)inputJson["ratio"]); break;
@@ -325,6 +335,10 @@ void ParseCommands() {
           case Cmd::LEVER_LH_SET_TIMEOUT:
             TIMEOUT_INTERVAL = inputJson["timeout"]; scheduler.SetTimeoutInterval(TIMEOUT_INTERVAL);
             logParamChange(F("LEVER_LH"), F("timeout"), TIMEOUT_INTERVAL); break;
+          case Cmd::LEVER_LH_SET_TIMEOUT_MODE:
+            scheduler.SetTimeoutMode(inputJson["timeout_mode"]);
+            TIMEOUT_MODE = scheduler.TimeoutMode();  // read back: the scheduler clamps > 1 to 1
+            logParamChange(F("LEVER_LH"), F("timeout_mode"), (uint32_t)TIMEOUT_MODE); break;
           case Cmd::LEVER_LH_SET_RATIO:
             scheduler.SetRatio(inputJson["ratio"]);
             logParamChange(F("LEVER_LH"), F("ratio"), (uint32_t)inputJson["ratio"]); break;

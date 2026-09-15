@@ -88,7 +88,9 @@ All pin assignments are defined in `libraries/REACHERDevices/src/Pins.h`:
 
 **Press classifications:**
 - `ACTIVE` — press on the reinforced lever outside the timeout period; counted toward the ratio
-- `TIMEOUT` — press during the post-reward timeout period
+- `TIMEOUT` — press during the timeout period; logged, but never reaches the
+  trigger, so it does not count toward the ratio. Which presses open that period
+  depends on the timeout mode below
 - `INACTIVE` — press on the non-reinforced lever
 
 **Default configuration** (`fr/Config.h`) — the board ships blank: every value
@@ -104,7 +106,23 @@ observable output (no tone, no infusion, no laser pulse) until it is set:
 | Laser frequency | 0 Hz | Laser oscillation frequency |
 | Laser duration | 0 ms | Laser pulse duration |
 | Timeout | 0 ms | Post-reward timeout interval |
+| Timeout mode | 0 | When the timeout starts — `0` = every ACTIVE press, `1` = reward-triggering press only |
 | Cue/Pump/Laser onset delay | 0 ms | Delay from press onset to each device's own activation |
+
+**Timeout mode** (`LEVER_RH_SET_TIMEOUT_MODE` 1077 / `LEVER_LH_SET_TIMEOUT_MODE`
+1377) selects *when* the timeout window is armed. It is scheduler-wide, not
+per-lever: both codes write the same flag, exactly as 1074/1374 both write the
+single timeout interval, so the last write wins.
+
+- **Mode `0` (default, legacy behavior).** Every ACTIVE press arms the window.
+  Because a TIMEOUT-classified press never reaches the trigger, it is not
+  counted toward the ratio — so with ratio > 1 and a non-zero timeout the
+  animal must space **every** press by at least the timeout interval to earn
+  anything. With the shipped FR default of `0 ms` this is inert; it only bites
+  on rigs configured with a non-zero timeout.
+- **Mode `1`.** Only a press that actually fires the reward chain arms the
+  window, so intermediate presses toward the ratio count normally and the
+  post-reward lockout is unchanged.
 
 **Reward chain:** Cue, Pump, and Laser each fire at `press onset + their own
 onset delay` (`CUE_SET_ONSET_DELAY` 377 / `PUMP_SET_ONSET_DELAY` 477 /
@@ -128,6 +146,10 @@ ends, set the pump's onset delay equal to the cue's duration.
 
 All other defaults are the same as FR. The threshold increases as: `threshold += step` after each reward.
 
+Timeout mode (1077/1377) applies here too, and matters more than in FR: PR ships
+a 20000 ms timeout (`pr/Config.h`), and the thresholds grow, so in mode `0` every
+press of a rising threshold must be spaced by ≥ 20 s.
+
 ---
 
 ### Variable Interval (VI)
@@ -143,6 +165,12 @@ All other defaults are the same as FR. The threshold increases as: `threshold +=
 | VI interval | 15000 ms | Total interval length (window is placed randomly within it) |
 
 The availability window start and end positions are sampled uniformly within each interval. After a reward or interval expiry, a new interval begins with a new random window.
+
+Timeout mode (1077/1377) applies here too. VI also ships a 20000 ms timeout
+(`vi/Config.h`), and in mode `0` the cost is a missed reward rather than a slow
+one: an ACTIVE press just before a window opens locks the lever out, so presses
+inside the window classify TIMEOUT, never reach the trigger, and the window
+expires unclaimed. Mode `1` leaves the lever open until a reward actually fires.
 
 ---
 
@@ -325,9 +353,9 @@ external TTL trigger started the session, `"software"` when `SESSION_START` (101
 | 500–501 | Lick circuit | DISARM (500), ARM (501) |
 | 600–682 | Laser | ARM (601), DISARM (600), TEST (603), FREQ (671), DUR (672), CONTINGENT (681), INDEPENDENT (682) |
 | 900–903 | Microscope | DISARM (900), ARM (901), TEST (903) |
-| 1000–1081 | Right lever | ARM (1001), DISARM (1000), TIMEOUT (1074), RATIO (1075), INACTIVE (1080), ACTIVE (1081) |
+| 1000–1081 | Right lever | ARM (1001), DISARM (1000), TIMEOUT (1074), RATIO (1075), TIMEOUT_MODE (1077 — scheduler-wide), INACTIVE (1080), ACTIVE (1081) |
 | 1200–1276 | External trigger | DISARM (1200), ARM (1201), SET_PIN (1276 — 18/19/20/21 only) |
-| 1300–1381 | Left lever | ARM (1301), DISARM (1300), TIMEOUT (1374), RATIO (1375), INACTIVE (1380), ACTIVE (1381) |
+| 1300–1381 | Left lever | ARM (1301), DISARM (1300), TIMEOUT (1374), RATIO (1375), TIMEOUT_MODE (1377 — same flag as 1077), INACTIVE (1380), ACTIVE (1381) |
 
 ---
 

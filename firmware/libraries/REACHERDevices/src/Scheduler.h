@@ -32,6 +32,11 @@ static constexpr uint8_t MAX_CHAINS   = 2;
 /// Maximum number of deferred actions in the pending queue.
 static constexpr uint8_t MAX_PENDING  = 16;
 
+/// Timeout starts on every ACTIVE press (legacy behavior, default).
+static constexpr uint8_t TIMEOUT_MODE_EVERY_PRESS = 0;
+/// Timeout starts only on an ACTIVE press that fires a reward chain.
+static constexpr uint8_t TIMEOUT_MODE_REWARD_ONLY = 1;
+
 /// @brief Central contingency engine: classifies lever presses, fires reward chains,
 /// manages pending action queue and device tick loop.
 /// @see Trigger, Chain, Action, Config.h
@@ -89,6 +94,15 @@ public:
 
   /// @brief Set the press ratio for the first PRESS_COUNT trigger found.
   void     SetRatio(uint8_t ratio);
+
+  /// @brief Select when an ACTIVE press starts the lever timeout window.
+  /// @param mode TIMEOUT_MODE_EVERY_PRESS (0, legacy) or TIMEOUT_MODE_REWARD_ONLY (1).
+  ///             Values > 1 are clamped to TIMEOUT_MODE_REWARD_ONLY.
+  /// @note Scheduler-wide, not per-lever: Cmd 1077 and 1377 both land here.
+  void     SetTimeoutMode(uint8_t mode);
+
+  /// @brief Current timeout mode (see SetTimeoutMode).
+  uint8_t  TimeoutMode() const;
 
   /// @brief Deactivate all pending actions in the queue.
   void ClearPending();
@@ -149,6 +163,7 @@ private:
   // Session state
   uint32_t sessionOffset;    ///< millis() at session start (for relative timestamps)
   uint32_t timeoutInterval;  ///< Post-reward timeout duration in ms
+  uint8_t  timeoutMode;      ///< When the timeout starts (see SetTimeoutMode)
   bool     sessionActive;    ///< True between StartSession/EndSession
   bool     testMode;         ///< True when full-pipeline test mode is active
   bool     sessionPaused;    ///< True when session is paused via SESSION_PAUSE
@@ -160,6 +175,8 @@ private:
 
   /// @brief Classify a lever press as ACTIVE, INACTIVE, or TIMEOUT.
   PressClass ClassifyPress(DeviceType source, uint32_t timestamp);
+  /// @brief True if the chain contains a SET_TIMEOUT step, i.e. it is a reward chain.
+  bool ChainAppliesTimeout(uint8_t chainIndex);
   /// @brief Execute all steps in a chain (immediate or deferred).
   void FireChain(uint8_t chainIndex, uint32_t now);
   /// @brief Dispatch a single action to the appropriate device.

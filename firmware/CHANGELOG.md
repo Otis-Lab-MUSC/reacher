@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `LEVER_RH_SET_TIMEOUT_MODE (1077)` / `LEVER_LH_SET_TIMEOUT_MODE (1377)` — select when the lever timeout window is armed. `0` = every ACTIVE press (the existing behavior, and the default), `1` = only a press that fires the reward chain. Accepted by `fr`, `fr_lite`, `pr`, `pr_lite`, `vi`, `vi_lite`; omission and pavlovian are excluded (omission forces a `0` interval, pavlovian is non-operant and has no lever timeout). Like `1074`/`1374`, the two codes are **not** independent: both write one scheduler-wide flag and the last write wins
+- `Scheduler::SetTimeoutMode()` / `TimeoutMode()` and the `TIMEOUT_MODE_EVERY_PRESS` / `TIMEOUT_MODE_REWARD_ONLY` constants (`Scheduler.h`). Runtime state only — no EEPROM; the host re-sends it on every connect, as it does for the timeout interval. Values above `1` are clamped
+- `"timeout_mode"` field on the level-`000` CONTROLLER config line emitted at session start by `fr`/`pr`/`vi` and their lite twins
+- `Scheduler::ChainAppliesTimeout()` — private helper that identifies a reward chain by the presence of a `SET_TIMEOUT` step. This is what mode `1` keys on, rather than "any trigger fired": in the FR/PR `LASER_RH_ONLY` mode a second trigger fires chain 1 on every active press, and chain 1 has no `SET_TIMEOUT` step, so it correctly is not treated as a reward
+
+### Changed
+- `Scheduler::OnInputEvent()` now offers the press to the triggers *before* arming the timeout window. In mode `0` this is behavior-preserving: on a rewarded press the chain's own `SET_TIMEOUT` step writes the same `now + TimeoutInterval()` to the same lever, and nothing inside `FireChain()` reads `timeoutEnd`
+
+### Notes
+- The mode `0` consequence, unchanged but worth stating: a `TIMEOUT`-classified press is logged but never reaches `Trigger::OnInputEvent`, so it does not count toward the ratio. With ratio > 1 and a non-zero timeout the animal must therefore space **every** press by at least the timeout interval to earn anything, and in VI an ACTIVE press just before an availability window opens can cost the reward outright. FR ships `timeout = 0` (`fr/Config.h`) and is immune at defaults; PR and VI ship `20000`
+- Not verified on hardware — no rig was available. Behavioral claims here come from code reading plus the host-side simulator
+
 ---
 
 ## [2.1.0] - 2026-06-09

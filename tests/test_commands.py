@@ -264,3 +264,56 @@ class TestPinCommands:
     def test_build_payload_with_pin(self):
         payload = build_command_payload(376, 11)
         assert payload == {"cmd": 376, "pin": 11}
+
+
+class TestTimeoutModeCommands:
+    """Timeout-mode command codes (suffix x77) and their registry entries."""
+
+    EXPECTED = [
+        ("LEVER_RH_SET_TIMEOUT_MODE", 1077),
+        ("LEVER_LH_SET_TIMEOUT_MODE", 1377),
+    ]
+
+    def test_codes_match(self):
+        for name, code in self.EXPECTED:
+            assert CommandCode[name] == code
+
+    def test_registered(self):
+        for _, code in self.EXPECTED:
+            assert code in COMMAND_REGISTRY
+
+    def test_payload_key_is_timeout_mode(self):
+        for _, code in self.EXPECTED:
+            spec = COMMAND_REGISTRY[code]
+            assert spec.payload_key == "timeout_mode", f"{spec.name} payload_key={spec.payload_key!r}"
+            # int, not bool: a bool payload would coerce 2 to true instead of
+            # letting the router's (0, 1) range reject it.
+            assert spec.payload_type == "int"
+
+    def test_not_deprecated(self):
+        for _, code in self.EXPECTED:
+            assert not COMMAND_REGISTRY[code].deprecated
+
+    def test_description_says_scheduler_wide(self):
+        """1077 and 1377 write one firmware global — the spec must say so."""
+        for _, code in self.EXPECTED:
+            desc = COMMAND_REGISTRY[code].description.lower()
+            assert "scheduler-wide" in desc, f"{COMMAND_REGISTRY[code].name}: {desc!r}"
+
+    @pytest.mark.parametrize("paradigm", ["fr", "pr", "vi", "fr_lite", "pr_lite", "vi_lite"])
+    def test_offered_for_timeout_paradigms(self, paradigm):
+        codes = get_commands_for_paradigm(paradigm)
+        for _, code in self.EXPECTED:
+            assert code in codes, f"{code} missing for {paradigm}"
+
+    @pytest.mark.parametrize("paradigm", ["omission", "omission_lite", "pavlovian"])
+    def test_absent_where_firmware_has_no_timeout(self, paradigm):
+        """Omission forces a 0 interval and pavlovian is non-operant — neither
+        sketch handles 1077/1377, so the registry must not offer it there."""
+        codes = get_commands_for_paradigm(paradigm)
+        for _, code in self.EXPECTED:
+            assert code not in codes, f"{code} wrongly offered for {paradigm}"
+
+    def test_build_payload(self):
+        assert build_command_payload(1077, 1) == {"cmd": 1077, "timeout_mode": 1}
+        assert build_command_payload(1377, 0) == {"cmd": 1377, "timeout_mode": 0}

@@ -10,6 +10,7 @@
 //   Suffix:  x00=disarm  x01=arm  x03=test
 //            x71=set frequency  x72=set duration
 //            x74=set timeout  x75=set ratio  x76=set pin
+//            x77=set timeout mode
 //            x80=set inactive/mode B  x81=set active/mode A  x82=set mode B
 //
 // Output JSON levels (firmware -> host):
@@ -152,6 +153,10 @@ namespace Cmd {
   constexpr int LEVER_RH_SET_TIMEOUT = 1074;
   constexpr int LEVER_RH_SET_RATIO   = 1075;
   constexpr int LEVER_RH_SET_PIN     = 1076;
+  // 0 = every active press starts the timeout (legacy), 1 = reward-triggering
+  // press only. Scheduler-wide: 1077 and 1377 write the same flag, exactly as
+  // 1074/1374 both write the one timeout interval.
+  constexpr int LEVER_RH_SET_TIMEOUT_MODE = 1077;
   constexpr int LEVER_RH_SET_INACTIVE = 1080;
   constexpr int LEVER_RH_SET_ACTIVE  = 1081;
 
@@ -161,6 +166,8 @@ namespace Cmd {
   constexpr int LEVER_LH_SET_TIMEOUT = 1374;
   constexpr int LEVER_LH_SET_RATIO   = 1375;
   constexpr int LEVER_LH_SET_PIN     = 1376;
+  // See LEVER_RH_SET_TIMEOUT_MODE — same scheduler-wide flag, not per-lever.
+  constexpr int LEVER_LH_SET_TIMEOUT_MODE = 1377;
   constexpr int LEVER_LH_SET_INACTIVE = 1380;
   constexpr int LEVER_LH_SET_ACTIVE  = 1381;
 }

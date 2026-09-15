@@ -39,6 +39,59 @@ SCHEDULE_TO_SKETCH = {
 }
 
 
+# Scheduler.h's timeout-mode constants, mirrored host-side.
+TIMEOUT_MODE_EVERY_PRESS = 0
+TIMEOUT_MODE_REWARD_ONLY = 1
+
+# Schedules whose sketches implement the lever timeout at all. Omission forces
+# SetTimeoutInterval(0) at setup and handles neither 1074/1374 nor 1077/1377;
+# pavlovian is non-operant and has no lever timeout.
+_TIMEOUT_SCHEDULES = ("FIXED_RATIO", "PROGRESSIVE_RATIO", "VARIABLE_INTERVAL")
+
+
+class TimeoutWindow:
+    """Pure host-side model of the firmware lever-timeout window.
+
+    Mirrors three pieces of ``Scheduler``/``SwitchLever`` behavior, with the
+    simulated timestamp passed in rather than read from a clock, so it can be
+    unit-tested on its own:
+
+    * ``SwitchLever::InTimeout`` is ``ts <= timeoutEnd``, and
+      ``Scheduler::ClassifyPress`` turns an in-window press on the reinforced
+      lever into ``TIMEOUT``. A ``TIMEOUT`` press is logged but never reaches
+      ``Trigger::OnInputEvent``, so it does not advance the ratio.
+    * mode 0 (legacy default) arms the window on *every* ACTIVE press,
+    * mode 1 arms it only on an ACTIVE press that fired a reward chain.
+
+    An interval of 0 arms nothing: firmware would write ``ts + 0``, which only
+    re-classifies a press landing in the very same millisecond.
+    """
+
+    def __init__(self, interval: int = 0, mode: int = TIMEOUT_MODE_EVERY_PRESS):
+        self.interval = interval
+        self.mode = mode
+        self._end: dict = {}
+
+    def reset(self) -> None:
+        """Clear both levers' windows (mirrors Scheduler::StartSession)."""
+        self._end.clear()
+
+    def in_timeout(self, orientation: str, now: int) -> bool:
+        end = self._end.get(orientation)
+        return end is not None and now <= end
+
+    def classify(self, orientation: str, now: int) -> str:
+        """ACTIVE, or TIMEOUT when the lever's window is still open."""
+        return "TIMEOUT" if self.in_timeout(orientation, now) else "ACTIVE"
+
+    def note_active_press(self, orientation: str, now: int, rewarded: bool) -> None:
+        """Arm the window for an ACTIVE press, if this mode calls for it."""
+        if self.interval <= 0:
+            return
+        if self.mode == TIMEOUT_MODE_EVERY_PRESS or rewarded:
+            self._end[orientation] = now + self.interval
+
+
 class FirmwareSimulator:
     """Generates firmware-protocol-compliant JSON output for a simulated session."""
 
@@ -78,6 +131,10 @@ class FirmwareSimulator:
         self.pump2_active = False
         self.lever_rh_timeout = 20000  # ms
         self.lever_lh_timeout = 20000  # ms
+        # Scheduler-wide, not per-lever — 1077 and 1377 both write this one
+        # value, exactly as 1074/1374 both write the one firmware interval.
+        self.lever_timeout_mode = TIMEOUT_MODE_EVERY_PRESS
+        self._timeout = TimeoutWindow()
 
         # External TTL trigger — mirrors ExternalTrigger.cpp. Not part of
         # _capture_arm_state/_restore_arm_state: like the real device, it is
@@ -219,12 +276,20 @@ class FirmwareSimulator:
             self.laser_mode = "INDEPENDENT"
         elif cmd == 1074:
             self.lever_rh_timeout = cmd_data.get("timeout", self.lever_rh_timeout)
+            self._sync_timeout_config()
         elif cmd == 1075:
             self.ratio = cmd_data.get("ratio", self.ratio)
         elif cmd == 1374:
             self.lever_lh_timeout = cmd_data.get("timeout", self.lever_lh_timeout)
+            self._sync_timeout_config()
         elif cmd == 1375:
             self.ratio = cmd_data.get("ratio", self.ratio)
+        elif cmd in (1077, 1377):  # LEVER_{RH,LH}_SET_TIMEOUT_MODE
+            # Both codes write the single scheduler-wide flag; the firmware
+            # clamps anything above 1 (Scheduler::SetTimeoutMode).
+            mode = cmd_data.get("timeout_mode", self.lever_timeout_mode)
+            self.lever_timeout_mode = min(int(mode), TIMEOUT_MODE_REWARD_ONLY)
+            self._sync_timeout_config()
         # External trigger
         elif cmd == 1200:  # EXT_TRIGGER_DISARM
             self._ext_trigger_disarm()
@@ -420,12 +485,54 @@ class FirmwareSimulator:
         self._begin_run()
         return True
 
+    def _timeout_applies(self) -> bool:
+        """True for the schedules whose sketches implement a lever timeout."""
+        return self.schedule in _TIMEOUT_SCHEDULES
+
+    def _active_orientation(self) -> str:
+        return "RH" if self.lever_rh_active else "LH"
+
+    def _sync_timeout_config(self):
+        """Push interval/mode into the window model.
+
+        Called at session start and from every command that changes either, so
+        a mid-session edit takes effect on the next press — the firmware
+        contract for 1074/1374, and now for 1077/1377 too.
+        """
+        orientation = self._active_orientation()
+        self._timeout.interval = (
+            self.lever_rh_timeout if orientation == "RH" else self.lever_lh_timeout
+        )
+        self._timeout.mode = self.lever_timeout_mode
+
+    def _send_session_config(self):
+        """Level-000 CONTROLLER config line printed at session start.
+
+        Mirrors fr.ino/pr.ino/vi.ino's StartSession dump, which is where the
+        host learns the timeout and its mode. Omission and pavlovian are
+        excluded: their sketches carry no timeout_mode field.
+        """
+        if not self._timeout_applies():
+            return
+        orientation = self._active_orientation()
+        self._send({
+            "level": "000", "device": "CONTROLLER",
+            "paradigm": self.schedule,
+            "timeout": self.lever_rh_timeout if orientation == "RH" else self.lever_lh_timeout,
+            "timeout_mode": self.lever_timeout_mode,
+            "active_lever": orientation,
+        })
+
     def _begin_run(self):
         if hasattr(self, "_saved_arm_state"):
             self._restore_arm_state(self._saved_arm_state)
         self._running = True
         self._stop_event.clear()
         self._clock = 0
+        # Scheduler::StartSession clears both levers' timeout windows.
+        self._timeout.reset()
+        self._sync_timeout_config()
+        self._send_session_config()
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
@@ -481,10 +588,16 @@ class FirmwareSimulator:
                 self._emit_lever_press("INACTIVE")
                 continue
 
-            self._emit_lever_press("ACTIVE")
+            press_ts = self._clock
+            if self._emit_lever_press("ACTIVE") != "ACTIVE":
+                # Classified TIMEOUT: logged by firmware, but it never reaches
+                # Trigger::OnInputEvent, so it does not advance the ratio.
+                continue
             press_count += 1
 
-            if press_count >= self.ratio:
+            rewarded = press_count >= self.ratio
+            self._timeout.note_active_press(self._active_orientation(), press_ts, rewarded)
+            if rewarded:
                 press_count = 0
                 self._emit_reinforcement_chain()
 
@@ -506,8 +619,17 @@ class FirmwareSimulator:
                 if not self._running:
                     break
                 self._clock += int(delay * 1000)
-                self._emit_lever_press("ACTIVE")
+                press_ts = self._clock
+                if self._emit_lever_press("ACTIVE") != "ACTIVE":
+                    # TIMEOUT-classified press: logged, not counted (see _run_fr).
+                    if random.random() < 0.1:
+                        self._emit_lever_press("INACTIVE")
+                    self._emit_microscope_frame()
+                    continue
                 press_count += 1
+                self._timeout.note_active_press(
+                    self._active_orientation(), press_ts, press_count >= current_ratio,
+                )
 
                 if random.random() < 0.1:
                     self._emit_lever_press("INACTIVE")
@@ -537,7 +659,11 @@ class FirmwareSimulator:
                     break
                 self._clock += int(delay * 1000)
                 elapsed += delay
-                self._emit_lever_press("ACTIVE")
+                press_ts = self._clock
+                if self._emit_lever_press("ACTIVE") == "ACTIVE":
+                    # Never rewarded (the window has not opened yet), so mode 0
+                    # locks the lever out here and mode 1 leaves it open.
+                    self._timeout.note_active_press(self._active_orientation(), press_ts, False)
                 self._emit_microscope_frame()
 
             if not self._running or self._stop_event.is_set():
@@ -548,7 +674,13 @@ class FirmwareSimulator:
             if self._stop_event.wait(delay):
                 break
             self._clock += int(delay * 1000)
-            self._emit_lever_press("ACTIVE")
+            press_ts = self._clock
+            if self._emit_lever_press("ACTIVE") != "ACTIVE":
+                # An earlier ACTIVE press locked the lever, so the press that
+                # should have collected this availability window classifies
+                # TIMEOUT and the reward is lost outright. Mode 1 avoids this.
+                continue
+            self._timeout.note_active_press(self._active_orientation(), press_ts, True)
             self._emit_reinforcement_chain()
             if random.random() < 0.2:
                 self._emit_lick()
@@ -652,15 +784,23 @@ class FirmwareSimulator:
     # --- Event emitters ---
 
     def _emit_lever_press(self, press_class: str):
+        """Emit one press and return the class actually logged (None if disarmed).
+
+        A press requested as ACTIVE is re-classified TIMEOUT when the lever's
+        timeout window is still open, exactly as Scheduler::ClassifyPress does —
+        so callers must check the return value before counting it toward a ratio.
+        """
         if press_class == "ACTIVE":
             orientation = "RH" if self.lever_rh_active else "LH"
+            if self._timeout_applies():
+                press_class = self._timeout.classify(orientation, self._clock)
         else:
             # Inactive press comes from the non-reinforced lever
             orientation = "LH" if self.lever_rh_active else "RH"
 
         armed = self.lever_rh_armed if orientation == "RH" else self.lever_lh_armed
         if not armed:
-            return
+            return None
 
         pin = 2 if orientation == "RH" else 3
         duration = random.randint(80, 200)
@@ -672,6 +812,7 @@ class FirmwareSimulator:
             "orientation": orientation,
         })
         self._clock += duration
+        return press_class
 
     def _emit_reinforcement_chain(self):
         # Cue

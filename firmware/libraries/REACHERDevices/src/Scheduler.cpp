@@ -23,6 +23,7 @@ Scheduler::Scheduler() {
   microscope = nullptr;
   sessionOffset = 0;
   timeoutInterval = 20000;
+  timeoutMode = TIMEOUT_MODE_EVERY_PRESS;  // legacy default; sketches re-assert it at setup()
   sessionActive = false;
   testMode = false;
   sessionPaused = false;
@@ -115,20 +116,47 @@ void Scheduler::OnInputEvent(DeviceType source, uint32_t timestamp) {
     lastPressClassLH = cls;
   }
 
-  // Every ACTIVE press resets the timeout window (matching original behavior)
   if (cls == PressClass::ACTIVE) {
-    SwitchLever* lever = GetLever(source);
-    if (lever) {
-      lever->SetTimeoutEnd(timestamp + timeoutInterval);
-    }
-
-    // Offer to triggers; fire chain if threshold met
+    // Offer to triggers; fire chain if threshold met.
+    // A chain carrying a SET_TIMEOUT step is what "reward" means here — in the
+    // FR/PR LASER_RH_ONLY mode, trigger 1 fires chain 1 on *every* active press,
+    // and chain 1 has no SET_TIMEOUT step, so it correctly is not a reward.
+    bool rewardFired = false;
     for (uint8_t i = 0; i < MAX_TRIGGERS; i++) {
       if (triggers[i].OnInputEvent(source, timestamp)) {
+        if (ChainAppliesTimeout(triggers[i].chainIndex)) rewardFired = true;
         FireChain(triggers[i].chainIndex, timestamp);
       }
     }
+
+    // Mode 0 (default) = legacy: every ACTIVE press arms the timeout window.
+    // Mode 1 = only a reward-triggering press does.
+    //
+    // Running this *after* FireChain is a no-op in mode 0: on a rewarded press
+    // the chain's own SET_TIMEOUT step has just written
+    // now + TimeoutInterval() to the same lever (ExecuteAction, offset 0), and
+    // this writes the identical value at the identical timestamp. Nothing inside
+    // FireChain reads timeoutEnd, so the ordering cannot be observed.
+    //
+    // Note the chain's SET_TIMEOUT step targets the configured active lever, not
+    // the pressed one — with both levers reinforced the non-pressed lever can
+    // still receive a timeout on reward. Pre-existing and unchanged here.
+    if (timeoutMode == TIMEOUT_MODE_EVERY_PRESS || rewardFired) {
+      SwitchLever* lever = GetLever(source);
+      if (lever) {
+        lever->SetTimeoutEnd(timestamp + timeoutInterval);
+      }
+    }
   }
+}
+
+bool Scheduler::ChainAppliesTimeout(uint8_t chainIndex) {
+  if (chainIndex >= MAX_CHAINS) return false;
+  const Chain& chain = chains[chainIndex];
+  for (uint8_t i = 0; i < chain.numSteps; i++) {
+    if (chain.steps[i].type == ActionType::SET_TIMEOUT) return true;
+  }
+  return false;
 }
 
 void Scheduler::OnInputRelease(DeviceType source) {
@@ -356,8 +384,16 @@ void Scheduler::SetRatio(uint8_t ratio) {
   }
 }
 
+void Scheduler::SetTimeoutMode(uint8_t mode) {
+  timeoutMode = (mode > TIMEOUT_MODE_REWARD_ONLY) ? TIMEOUT_MODE_REWARD_ONLY : mode;
+}
+
 uint32_t Scheduler::TimeoutInterval() const {
   return timeoutInterval;
+}
+
+uint8_t Scheduler::TimeoutMode() const {
+  return timeoutMode;
 }
 
 uint32_t Scheduler::SessionOffset() const {

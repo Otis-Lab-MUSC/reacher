@@ -25,6 +25,7 @@ _VALUE_RANGES = {
     "duration":  (1, 600000),      # ms — up to 10 minutes
     "delay":     (0, 600000),      # ms — per-device onset delay from trigger (CUE/PUMP/LASER)
     "timeout":   (0, 600000),      # ms — 0 disables timeout
+    "timeout_mode": (0, 1),        # 0 = every active press starts the timeout, 1 = reward-triggering press only
     "ratio":     (1, 255),         # uint8_t on firmware side
     "step":      (1, 255),
     "interval":  (0, 600000),      # ms
