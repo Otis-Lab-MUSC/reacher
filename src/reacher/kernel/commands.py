@@ -139,6 +139,10 @@ class CommandCode(IntEnum):
     LEVER_RH_SET_TIMEOUT = 1074
     LEVER_RH_SET_RATIO = 1075
     LEVER_RH_SET_PIN = 1076
+    # 0 = every active press starts the timeout (legacy), 1 = reward-triggering
+    # press only. Scheduler-wide: 1077 and 1377 write the same flag, exactly as
+    # 1074/1374 both write the one timeout interval.
+    LEVER_RH_SET_TIMEOUT_MODE = 1077
     LEVER_RH_SET_INACTIVE = 1080
     LEVER_RH_SET_ACTIVE = 1081
 
@@ -148,6 +152,8 @@ class CommandCode(IntEnum):
     LEVER_LH_SET_TIMEOUT = 1374
     LEVER_LH_SET_RATIO = 1375
     LEVER_LH_SET_PIN = 1376
+    # See LEVER_RH_SET_TIMEOUT_MODE — same scheduler-wide flag, not per-lever.
+    LEVER_LH_SET_TIMEOUT_MODE = 1377
     LEVER_LH_SET_INACTIVE = 1380
     LEVER_LH_SET_ACTIVE = 1381
 
@@ -706,6 +712,15 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         payload_key="ratio", payload_type="int",
         paradigms=with_lite("fr", "pr"),
     ),
+    1077: CommandSpec(
+        CommandCode.LEVER_RH_SET_TIMEOUT_MODE, "LEVER_RH_SET_TIMEOUT_MODE",
+        "Set when the lever timeout starts: 0 = every active press (legacy default), "
+        "1 = reward-triggering press only. Scheduler-wide, not per-lever — 1077 and "
+        "1377 write the same flag and last write wins, exactly as 1074/1374 do for "
+        "the timeout interval",
+        payload_key="timeout_mode", payload_type="int",
+        paradigms=with_lite("fr", "pr", "vi"),
+    ),
     1080: CommandSpec(
         CommandCode.LEVER_RH_SET_INACTIVE, "LEVER_RH_SET_INACTIVE",
         "Set right-hand lever to inactive",
@@ -740,6 +755,15 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         "Set left-hand lever ratio",
         payload_key="ratio", payload_type="int",
         paradigms=with_lite("fr", "pr"),
+    ),
+    1377: CommandSpec(
+        CommandCode.LEVER_LH_SET_TIMEOUT_MODE, "LEVER_LH_SET_TIMEOUT_MODE",
+        "Set when the lever timeout starts: 0 = every active press (legacy default), "
+        "1 = reward-triggering press only. Scheduler-wide, not per-lever — 1077 and "
+        "1377 write the same flag and last write wins, exactly as 1074/1374 do for "
+        "the timeout interval",
+        payload_key="timeout_mode", payload_type="int",
+        paradigms=with_lite("fr", "pr", "vi"),
     ),
     1380: CommandSpec(
         CommandCode.LEVER_LH_SET_INACTIVE, "LEVER_LH_SET_INACTIVE",

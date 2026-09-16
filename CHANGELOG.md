@@ -9,12 +9,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Configurable lever timeout mode: `LEVER_RH_SET_TIMEOUT_MODE (1077)` /
+  `LEVER_LH_SET_TIMEOUT_MODE (1377)`, payload key `timeout_mode`, offered for
+  `fr`/`pr`/`vi` and their `_lite` twins. `0` = the timeout starts on every ACTIVE
+  press (today's behavior, and the default), `1` = only on the press that
+  actually triggers the reward. Both codes write one scheduler-wide firmware
+  flag — last write wins — exactly as `1074`/`1374` do for the interval
+- Backend: `_VALUE_RANGES["timeout_mode"] = (0, 1)` in `routers/hardware.py`, so an
+  out-of-range mode is a 400 rather than silently coerced
+- Backend: the simulator now models press classification — a press inside an open
+  timeout window emits `class: "TIMEOUT"` and does not advance the ratio, as
+  firmware does — and echoes `timeout_mode` in a level-`000` CONTROLLER config
+  line at session start, which reaches `firmware_information`
 - Backend: `pump_target.py` — persists the reward-chain `SET_ACTIVE_PUMP` (221) selection
   per serial port and replays it on connect, mirroring `pin_overrides.py`. Firmware's
   `activePumpTarget` lives only in Arduino RAM and resets to the primary pump on every
   boot, so without this a researcher who selected the secondary pump reverted to the
   primary one on the next connect. New `GET`/`DELETE /api/serial/pump-target` endpoints
   ([#35](https://github.com/Otis-Lab-MUSC/labrynth/issues/35))
+
+### Notes
+- Worth knowing if you have FR2+ or PR/VI data already collected with a non-zero
+  timeout: in mode `0` (which is what every existing rig has been running) a
+  `TIMEOUT`-classified press is logged but never counted toward the ratio, so the
+  animal had to space **every** press by at least the timeout interval to earn
+  anything — not just the presses after a reward. In VI the same mechanism can
+  cost a reward outright, because an ACTIVE press landing just before an
+  availability window locks the lever for the whole window. FR ships
+  `timeout = 0` and is unaffected at defaults; PR and VI ship `20000`. Mode `1`
+  is the opt-in fix; nothing changes for anyone who does not set it
+- No hardware verification was possible — every behavioral claim above comes from
+  reading the firmware and from the host-side simulator, not from a rig
 
 ---
 
