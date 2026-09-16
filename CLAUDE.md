@@ -44,7 +44,7 @@ python -m build
 | `REACHER_HEX_DIR` | package data (`src/reacher/hex/`) | Override dir for pre-compiled firmware hex files |
 | `REACHER_CORS_ORIGINS` | None | Extra allowed CORS origins (comma-separated) |
 | `REACHER_API_KEY` | auto-generated | Bearer token; auto-written to `~/.reacher/api_key` if unset |
-| `REACHER_AVRDUDE_PATH` | system PATH | Path to `avrdude` binary (set during PyInstaller packaging) |
+| `REACHER_AVRDUDE_PATH` | n/a | **Build-time only** — read by labrynth's `labrynth.spec`/`labrynth-cli.spec` to pick the `avrdude` binary to bundle. Nothing in reacher reads it at runtime; the uploader resolves avrdude from `_MEIPASS/avrdude/` or `PATH`. |
 | `REACHER_LOG_DIR` | `~/REACHER/LOG/runs` | Diagnostic run-log directory |
 | `REACHER_LOG_LEVEL` | `DEBUG` | Floor for the diagnostic log (`INFO` drops serial-wire records) |
 | `REACHER_LOG_VERBOSE_DEPS` | unset | Keep third-party DEBUG chatter (httpx, zeroconf, …) out of the log |
