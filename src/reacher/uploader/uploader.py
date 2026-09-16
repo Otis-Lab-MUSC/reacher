@@ -34,6 +34,22 @@ _FIRMWARE_RAW_BASE = f"https://raw.githubusercontent.com/{_FIRMWARE_REPO}/{_FIRM
 _HEX_CACHE_DIR = os.path.expanduser("~/.reacher/hex")
 _CACHE_MAX_AGE_S = 86400  # 24 hours — re-download cached hex files older than this
 
+# Layouts a bundled avrdude.conf has occupied, relative to _MEIPASS.  The
+# packaging spec writes the first one today; the others are searched so a spec
+# change can't silently drop the bundle back onto the host's config.
+_CONF_CANDIDATES = (
+    ("avrdude", "avrdude.conf"),
+    ("avrdude", "etc", "avrdude.conf"),
+    ("etc", "avrdude.conf"),
+)
+
+# Stated in one place because it is both logged and surfaced to the UI via
+# last_error — the whole point is that the next bug report explains itself.
+_HOST_CONF_FALLBACK = (
+    "avrdude will parse the host's system-wide config (/etc/avrdude.conf on Linux); "
+    "a version-mismatched host conf fails the upload"
+)
+
 
 def _dir_has_hex(path: str) -> bool:
     """Return True if *path* contains at least one ``.hex`` file.
@@ -119,8 +135,12 @@ class FirmwareUploader:
     def __init__(self, hex_dir: Optional[str] = None, avrdude_path: Optional[str] = None) -> None:
         self.hex_dir = hex_dir or self._resolve_hex_dir()
         self.avrdude_path = avrdude_path or self._resolve_avrdude()
-        self.avrdude_conf = self._resolve_avrdude_conf()
+        # Resolved *after* avrdude_path, and from it: a bundled conf is only
+        # valid for the bundled binary (see _resolve_avrdude_conf).
+        self.avrdude_conf_provenance: Dict[str, object] = {}
+        self.avrdude_conf = self._resolve_avrdude_conf(self.avrdude_path)
         self.last_error: str = ""  # stderr from the most recent failed upload
+        self._logged_missing_conf = False  # B3 error is a once-per-instance report
 
     # ------------------------------------------------------------------
     # Path resolution
@@ -180,11 +200,16 @@ class FirmwareUploader:
         return fallback
 
     @staticmethod
+    def _bundled_avrdude(base: str) -> str:
+        """Path the bundled avrdude binary occupies inside *base* (``_MEIPASS``)."""
+        name = "avrdude.exe" if sys.platform == "win32" else "avrdude"
+        return os.path.join(base, "avrdude", name)
+
+    @staticmethod
     def _resolve_avrdude() -> str:
         base = _frozen_base()
         if base:
-            name = "avrdude.exe" if sys.platform == "win32" else "avrdude"
-            bundled = os.path.join(base, "avrdude", name)
+            bundled = FirmwareUploader._bundled_avrdude(base)
             if os.path.isfile(bundled):
                 return bundled
         # Fall back to system PATH
@@ -193,21 +218,72 @@ class FirmwareUploader:
             return found
         return "avrdude"
 
-    @staticmethod
-    def _resolve_avrdude_conf() -> Optional[str]:
-        """Return the path to avrdude.conf when running frozen, or None.
+    def _resolve_avrdude_conf(self, avrdude_path: str) -> Optional[str]:
+        """Return the bundled avrdude.conf to pass via ``-C``, or None.
 
-        In a PyInstaller bundle the config file is placed alongside the
-        avrdude binary at ``_MEIPASS/avrdude/avrdude.conf``.  System-installed
-        avrdude uses a compiled-in config path, so no override is needed in
-        development mode.
+        ``-C <file>`` **replaces** the system-wide config; it does not add to
+        it.  avrdude sets ``sysconfig`` straight from the flag and therefore
+        never calls ``str_sysconfig()`` (avrdude ``src/main.c:942-944``), so
+        passing the bundled conf is exactly what makes a frozen build
+        hermetic.  The inverse is also true and is why this is coupled to
+        *avrdude_path*: a conf from one avrdude release handed to a binary
+        from another is a hard failure ("unable to process system wide
+        configuration file", exit 1), not a warning.  A bundle whose binary
+        went missing but whose conf survived must therefore fall back to the
+        host's avrdude *and* the host's conf, never a mixed pair.
+
+        Candidate layouts are searched in order so that moving the conf in
+        the packaging spec cannot silently un-hermeticize the bundle.
+
+        Returns None when not frozen — development installs run the system
+        avrdude, which reads its own matching compiled-in config.
+
+        Records how it decided in ``self.avrdude_conf_provenance`` so
+        ``/api/firmware/diagnostics`` can explain a null.
         """
         base = _frozen_base()
-        if base:
-            bundled = os.path.join(base, "avrdude", "avrdude.conf")
-            if os.path.isfile(bundled):
-                return bundled
+        if not base:
+            self.avrdude_conf_provenance = {
+                "status": "not-frozen",
+                "detail": "development mode — system avrdude uses its own config; no -C passed",
+                "candidates": [],
+            }
+            return None
+
+        if os.path.abspath(avrdude_path) != os.path.abspath(self._bundled_avrdude(base)):
+            self.avrdude_conf_provenance = {
+                "status": "host-binary",
+                "detail": (
+                    f"frozen, but avrdude resolved to {avrdude_path!r} rather than the bundled "
+                    "binary — a bundled conf would be from a different avrdude release, so none "
+                    "is used and no -C is passed"
+                ),
+                "candidates": [],
+            }
+            return None
+
+        candidates = [os.path.join(base, *parts) for parts in _CONF_CANDIDATES]
+        checked = [{"path": c, "exists": os.path.isfile(c)} for c in candidates]
+        for candidate in checked:
+            if candidate["exists"]:
+                self.avrdude_conf_provenance = {
+                    "status": "bundled",
+                    "detail": f"bundled conf matched: {candidate['path']}",
+                    "candidates": checked,
+                }
+                return str(candidate["path"])
+
+        self.avrdude_conf_provenance = {
+            "status": "missing",
+            "detail": f"bundled avrdude binary but no bundled conf — {_HOST_CONF_FALLBACK}",
+            "candidates": checked,
+        }
         return None
+
+    @property
+    def _bundled_conf_missing(self) -> bool:
+        """True only for the packaging defect: bundled binary, no bundled conf."""
+        return self.avrdude_conf_provenance.get("status") == "missing"
 
     # ------------------------------------------------------------------
     # Public API
@@ -348,6 +424,21 @@ class FirmwareUploader:
                     "sudo apt-get install avrdude"
                 )
 
+        # A frozen bundle that ships the binary but not its conf is the
+        # packaging defect this whole path exists to make visible: the upload
+        # silently reaches for the host's config and dies on any version skew.
+        # Report it, but don't raise — a deliberate host-avrdude setup is a
+        # legitimate configuration, and the endpoint's 409/500 contract
+        # (api/routers/firmware.py) must not shift under it.
+        if self._bundled_conf_missing and not self._logged_missing_conf:
+            logger.error(
+                "Frozen bundle has avrdude at %s but no bundled avrdude.conf (searched: %s) — %s",
+                self.avrdude_path,
+                ", ".join(str(c["path"]) for c in self.avrdude_conf_provenance.get("candidates", [])),
+                _HOST_CONF_FALLBACK,
+            )
+            self._logged_missing_conf = True
+
         cmd = [self.avrdude_path]
         if self.avrdude_conf:
             cmd.extend(["-C", self.avrdude_conf])
@@ -427,6 +518,13 @@ class FirmwareUploader:
                 f"stderr: {stderr_full or '(empty)'}\n"
                 f"stdout: {stdout or '(empty)'}"
             )
+            # Carried into the HTTPException detail by firmware.py, so a
+            # "unable to process system wide configuration file" report arrives
+            # already naming its own cause.
+            if self._bundled_conf_missing:
+                self.last_error += f"\nconfig: no bundled avrdude.conf — {_HOST_CONF_FALLBACK}"
+            elif self.avrdude_conf:
+                self.last_error += f"\nconfig: {self.avrdude_conf} (bundled, passed as -C)"
             logger.error(self.last_error)
             if progress_callback:
                 progress_callback(percent, f"Failed (exit {proc.returncode})")

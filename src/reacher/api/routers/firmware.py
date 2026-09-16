@@ -198,6 +198,10 @@ async def firmware_diagnostics(board: str = Query(DEFAULT_BOARD)):
         "avrdude_path": _avrdude_path,
         "avrdude_exists": os.path.isfile(_avrdude_path) if _is_abs else bool(shutil.which(_avrdude_path)),
         "avrdude_conf": _uploader.avrdude_conf,
+        # A null avrdude_conf is correct in development mode and a packaging
+        # defect in a frozen bundle. Ship the provenance alongside it so the
+        # two are distinguishable from a single request.
+        "avrdude_conf_resolution": _uploader.avrdude_conf_provenance,
         "avrdude_dir_contents": avrdude_dir_contents,
         "last_upload_error": _uploader.last_error or None,
         "board": board,
