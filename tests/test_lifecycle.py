@@ -1,10 +1,11 @@
 """Tests for the lifecycle shutdown beacon (issue #30).
 
-The ``POST /api/lifecycle/shutdown`` beacon is intentionally auth-free
-(``navigator.sendBeacon`` cannot set an Authorization header). These tests lock in
-the mid-acquisition guard that prevents an unauthenticated beacon from terminating
-the process while a session is recording, while preserving the legitimate idle
-tab-close path.
+``POST /api/lifecycle/shutdown`` requires Bearer auth (Fix: F6) like every
+sibling router. The frontend beacon moved from ``navigator.sendBeacon``
+(headerless) to ``fetch(keepalive)`` with a synchronously-cached token to
+carry it. These tests lock in the mid-acquisition guard that prevents a
+shutdown request from terminating the process while a session is recording,
+while preserving the legitimate idle tab-close path.
 """
 
 import pytest
@@ -115,19 +116,36 @@ class TestBeaconShutdownGuard:
 
 
 class TestBeaconEndpoint:
-    """The endpoint stays auth-free and accepts the headerless beacon."""
+    """Fix: F6 — the endpoint now requires Bearer auth like every sibling
+    router (app.py:389 was missing ``dependencies=api_deps``, unauthenticated
+    POST triggered real shutdown scheduling). The frontend beacon switched
+    from ``sendBeacon`` (headerless) to ``fetch(keepalive)`` with a warm
+    cached Authorization header for exactly this reason — see F6.md."""
 
-    def test_shutdown_endpoint_no_auth_required(self):
+    def test_shutdown_endpoint_requires_auth(self):
         with patch("reacher.session_manager.REACHER"), patch("os.makedirs"):
             app = create_app()
+            with patch.object(lifecycle, "_delayed_shutdown", new_callable=AsyncMock) as mock_delayed:
+                with TestClient(app) as client:
+                    # No Authorization header — the pre-fix sendBeacon contract.
+                    resp = client.post("/api/lifecycle/shutdown")
+
+        assert resp.status_code == 401
+        mock_delayed.assert_not_called()
+
+    def test_shutdown_endpoint_accepts_bearer_auth(self):
+        with patch("reacher.session_manager.REACHER"), patch("os.makedirs"):
+            app = create_app()
+            from reacher.api.middleware.auth import API_KEY
+
             # Stub the delayed task so the test doesn't wait the real grace period;
             # AsyncMock() returns an awaitable, satisfying create_task().
             with patch.object(lifecycle, "_delayed_shutdown", new_callable=AsyncMock) as mock_delayed:
                 with TestClient(app) as client:
-                    # No Authorization header, no body — the sendBeacon contract.
-                    resp = client.post("/api/lifecycle/shutdown")
+                    resp = client.post(
+                        "/api/lifecycle/shutdown", headers={"Authorization": f"Bearer {API_KEY}"}
+                    )
 
-        # Auth-free: accepted (202), not rejected (401).
         assert resp.status_code == 202
         assert resp.json() == {"status": "shutdown_scheduled"}
         mock_delayed.assert_called_once()
