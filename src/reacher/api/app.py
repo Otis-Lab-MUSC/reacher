@@ -5,6 +5,7 @@ files, and manages the application lifespan (session cleanup on shutdown).
 """
 
 import asyncio
+import ipaddress
 import logging
 import os
 import shutil
@@ -137,6 +138,16 @@ def _resolve_static_dir():
     if os.path.isdir(candidate):
         return candidate
     return None
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    """True if *host* is a loopback address (127.0.0.0/8 or ::1)."""
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _log_health() -> dict | None:
@@ -322,9 +333,35 @@ def create_app() -> FastAPI:
 
     @app.get("/api/auth/token", tags=["auth"])
     async def get_auth_token(request: Request):
+        # Fix: F1 (2026-09-18 pressure test) — a same-origin browser GET carries
+        # no Origin header at all, so the check above never rejected a request
+        # with no Origin — including curl, scripts, and SSRF gadgets. Two extra
+        # layers close that:
+        #
+        # Layer A — require X-Reacher-App: 1. The three real frontend fetch
+        # sites set it on a same-origin request, which never preflights. A
+        # hostile cross-origin page setting the same header DOES preflight,
+        # and X-Reacher-App is deliberately absent from allow_headers below —
+        # do not add it there, or this layer becomes a no-op. This is
+        # drive-by/CSRF protection, not an auth boundary: a co-resident
+        # process can set the header too, but it could already read
+        # ~/.reacher/api_key directly, so that isn't an escalation.
+        #
+        # Layer B — require a loopback peer unless REACHER_TOKEN_REMOTE_OK=1.
+        # This is the layer that matters: under REACHER_HOST=0.0.0.0
+        # (documented LAN-pairing mode) the bug was a one-GET, unauthenticated
+        # compromise from anywhere on the network. Default-deny, opt-in,
+        # because loading the bundled UI from another machine is a real
+        # workflow this would otherwise break.
         origin = request.headers.get("origin")
         if origin is not None and origin not in _allowed_origins:
             raise HTTPException(status_code=403, detail="Forbidden")
+        if request.headers.get("x-reacher-app") != "1":
+            raise HTTPException(status_code=403, detail="Forbidden")
+        if os.getenv("REACHER_TOKEN_REMOTE_OK") != "1":
+            peer_host = request.client.host if request.client else None
+            if not _is_loopback_host(peer_host):
+                raise HTTPException(status_code=403, detail="Forbidden")
         return {"token": API_KEY}
 
     # Register routers — all /api/* routes require auth

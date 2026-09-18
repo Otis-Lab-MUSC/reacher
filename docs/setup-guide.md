@@ -440,6 +440,7 @@ These are optional. The defaults work for most setups.
 | `REACHER_PORT` | `6229` | The port the server listens on |
 | `REACHER_HOST` | `127.0.0.1` | The network interface to bind to. Defaults to loopback (localhost-only). Set to `0.0.0.0` to accept connections from other machines on the network — note that this exposes unauthenticated endpoints and makes the WebSocket token visible to server access logs. |
 | `REACHER_API_KEY` | Auto-generated | Override the API key instead of using the auto-generated one |
+| `REACHER_TOKEN_REMOTE_OK` | Not set | Allow a machine other than the server itself to fetch the live API key from `/api/auth/token`. Only needed if you're loading the bundled UI directly from another machine's browser under `REACHER_HOST=0.0.0.0`. Leave unset unless you need that. |
 | `REACHER_BROKER_URL` | Not set | URL of a REACHER broker for networks where automatic discovery doesn't work (e.g., university networks) |
 | `REACHER_CORS_ORIGINS` | Not set | Extra allowed origins for cross-origin requests (comma-separated) |
 | `REACHER_GITHUB_OWNER` | `Otis-Lab-MUSC` | GitHub org/user that owns the labrynth and reacher repos. Used to build the pre-filled "New Issue" link. |
