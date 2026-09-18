@@ -48,7 +48,18 @@ def _open_browser(url: str) -> None:
     when the ``--incognito`` flag is passed).  Tries known browsers with their
     private-mode flags in order; falls back to ``webbrowser.open`` if none are
     on PATH.
+
+    Fix: F-browser — ``REACHER_NO_BROWSER`` short-circuits both branches
+    below, checked before either.  Every caller of this function goes through
+    it (the lifespan's first-launch open and ``main()``'s already-running
+    surface-the-UI open alike), so a single gate here covers both call sites
+    without each needing its own check.  This is for dev/headless/agent use
+    (the CLI TUI, the pytest suite, this repo's own test runs) — the end-user
+    GUI default of auto-opening the bundled UI is unchanged.
     """
+    if os.getenv("REACHER_NO_BROWSER"):
+        logger.info("REACHER_NO_BROWSER set — not opening a browser for %s", url)
+        return
     if not os.getenv("REACHER_INCOGNITO"):
         with clean_environ():
             webbrowser.open(url)
@@ -410,6 +421,10 @@ def main():
     if _is_already_running():
         print(f"REACHER is already running on port {PORT}.")
         print(f"Visit http://localhost:{PORT} in your browser.")
+        # Deliberately still opens for the GUI case (static dir resolved): a
+        # user re-launching the app icon while it's already running expects
+        # the UI to surface, same as any other single-instance desktop app.
+        # REACHER_NO_BROWSER (checked inside _open_browser) still gates this.
         if _resolve_static_dir():
             _open_browser(f"http://localhost:{PORT}")
         return

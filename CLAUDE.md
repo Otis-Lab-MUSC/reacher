@@ -41,6 +41,7 @@ python -m build
 | `REACHER_PORT` | `6229` | HTTP/WebSocket port |
 | `REACHER_HOST` | `127.0.0.1` | Bind address. Defaults to loopback. Set to `0.0.0.0` to accept LAN connections (exposes unauthenticated endpoints and makes the WS token network-visible). |
 | `REACHER_STATIC_DIR` | `web/dist/` | React frontend directory |
+| `REACHER_NO_BROWSER` | unset | Suppress `_open_browser()` entirely (Fix: F-browser), overriding `REACHER_INCOGNITO` too. For dev/headless/agent use — the CLI TUI sets this on the backend it spawns, and the test suite sets it autouse. The end-user GUI default (auto-open on first launch, and on re-launch while already running) is unaffected. |
 | `REACHER_HEX_DIR` | package data (`src/reacher/hex/`) | Override dir for pre-compiled firmware hex files |
 | `REACHER_CORS_ORIGINS` | None | Extra allowed CORS origins (comma-separated) |
 | `REACHER_API_KEY` | auto-generated | Bearer token; auto-written to `~/.reacher/api_key` if unset |

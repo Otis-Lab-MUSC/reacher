@@ -444,6 +444,7 @@ These are optional. The defaults work for most setups.
 | `REACHER_BROKER_URL` | Not set | URL of a REACHER broker for networks where automatic discovery doesn't work (e.g., university networks) |
 | `REACHER_CORS_ORIGINS` | Not set | Extra allowed origins for cross-origin requests (comma-separated) |
 | `REACHER_GITHUB_OWNER` | `Otis-Lab-MUSC` | GitHub org/user that owns the labrynth and reacher repos. Used to build the pre-filled "New Issue" link. |
+| `REACHER_NO_BROWSER` | Not set | Stop the backend from opening a browser window on startup. For running the backend headless (scripts, CI, a terminal-only setup) — the normal desktop app experience doesn't need this. |
 
 To set an environment variable:
 
