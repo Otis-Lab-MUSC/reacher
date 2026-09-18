@@ -51,6 +51,38 @@ class TestRedaction:
 
         assert redact.redact({"b": Bad()}) is not None
 
+    # -- Fix: F5 — scrub_message() and its wiring into redact()'s string branch ---
+
+    def test_scrub_message_redacts_key_value_pairs(self):
+        out = redact.scrub_message("connect failed url=ws://host/ws/s?token=SECRET123: refused")
+        assert "SECRET123" not in out
+        assert "token=[redacted]" in out
+
+    def test_scrub_message_redacts_bearer_tokens(self):
+        out = redact.scrub_message("saw header Authorization: Bearer SECRET123 in transit")
+        assert "SECRET123" not in out
+        assert "Bearer [redacted]" in out
+
+    def test_scrub_message_leaves_ordinary_text_alone(self):
+        text = "a=b, c=d — nothing secret here"
+        assert redact.scrub_message(text) == text
+
+    def test_redact_scrubs_credential_shaped_string_values_under_any_key(self):
+        """redact() is key-based — `url` is not a secret-shaped key, so a
+        credential interpolated *into* a url string previously passed through
+        untouched.  Latent today (no current caller does this — see F5.md),
+        but one field away from live, hence closed as a backstop."""
+        out = redact.redact({"url": "ws://host/ws/s?token=SECRET123"})
+        assert "SECRET123" not in out["url"]
+        assert out["url"] == "ws://host/ws/s?token=[redacted]"
+
+    def test_redact_does_not_scrub_strings_with_no_credential_shape(self):
+        """The cheap containment pre-check (no '=' and no 'earer') must not
+        cost every logged string two regex passes, and must not alter values
+        that were never candidates."""
+        out = redact.redact({"dest": "/home/lab/data", "subject": "M12"})
+        assert out == {"dest": "/home/lab/data", "subject": "M12"}
+
 
 class TestSchema:
     def test_level_mapping(self):
@@ -289,6 +321,40 @@ class TestStdlibBridge:
             logging.getLogger().removeHandler(handler)
         assert len(_drain(sink)) == 1
 
+    def test_credential_in_message_string_is_scrubbed(self, tmp_path):
+        """Fix: F5 backstop — a value interpolated into the message (not
+        passed via extra=) has no key for redact() to match; scrub_message()
+        covers it."""
+        sink = LogSink(root=str(tmp_path)).start()
+        handler = bridge.install(sink, level=logging.DEBUG)
+        try:
+            logging.getLogger("x").error("connect failed url=ws://h/ws/s?token=SHOULD_NOT_APPEAR: refused")
+        finally:
+            logging.getLogger().removeHandler(handler)
+        assert "SHOULD_NOT_APPEAR" not in open(sink.path, encoding="utf-8").read()
+
+    def test_credential_in_exception_text_is_scrubbed_exactly_once(self, tmp_path):
+        """Regression: bridge.py once scrubbed data['exc'] directly *and*
+        again via redact() (after redact()'s string branch gained scrubbing,
+        Fix: F5 item 1) — the second pass wasn't idempotent against the
+        first's output and corrupted the text (a trailing ']' from
+        '[redacted]' isn't matched by the value-capture group, which excludes
+        ']', so a second pass left 'token=[redacted]]'). Exactly one scrub
+        pass must run over data['exc']."""
+        sink = LogSink(root=str(tmp_path)).start()
+        handler = bridge.install(sink, level=logging.DEBUG)
+        try:
+            try:
+                raise ValueError("bad uri: ws://h/ws/s?token=SHOULD_NOT_APPEAR isn't valid")
+            except ValueError:
+                logging.getLogger("x").error("relay failed", exc_info=True)
+        finally:
+            logging.getLogger().removeHandler(handler)
+        record = _drain(sink)[0]
+        assert "SHOULD_NOT_APPEAR" not in record["data"]["exc"]
+        assert "[redacted]]" not in record["data"]["exc"]
+        assert "token=[redacted]" in record["data"]["exc"]
+
     def test_bad_format_args_do_not_raise(self, tmp_path):
         """A broken format string must not take down the caller.  Exercised
         against the handler directly: routing through the root logger would
@@ -342,6 +408,22 @@ class TestConfigureLogging:
             diagnostics.reset_for_tests()
         tx = [r for r in records if r["evt"] == "serial.tx"][0]
         assert tx["session_id"] == "s1" and tx["data"]["line"] == '{"cmd":101}'
+
+    def test_log_helper_redacts_secrets_like_the_stdlib_bridge(self, tmp_path):
+        """Fix: F5 item 2 — diagnostics.log() bypasses bridge.py entirely, so
+        it never applied redact() to its data= kwargs (structural asymmetry
+        with logger.* calls, which always go through bridge.py). No current
+        caller leaks a credential this way (see F5.md), but the two
+        structured-logging entry points must not diverge in what they
+        protect."""
+        sink = diagnostics.configure_logging(root=str(tmp_path), prune=False)
+        try:
+            diagnostics.log("x.y", tier=TIER_APP, api_key="SHOULD_NOT_APPEAR")
+            records = _drain(sink)
+        finally:
+            diagnostics.reset_for_tests()
+        hit = [r for r in records if r["evt"] == "x.y"][0]
+        assert hit["data"]["api_key"] == redact.REDACTED
 
     def test_uvicorn_config_propagates_to_root(self):
         """Frozen builds used to pass log_config=None, silencing uvicorn."""
@@ -424,6 +506,44 @@ class TestRequestLogging:
     def test_health_exposes_sink_counters(self, api):
         stats = api.get("/health").json()["logging"]
         assert set(stats) >= {"run_id", "dropped", "write_failures"}
+
+
+class TestRequestLoggingErrorScrubbing:
+    """Fix: F5 neighbor audit — middleware/logging.py's `error=` field calls
+    diagnostics.log() directly, which bypasses bridge.py's scrub_message()
+    entirely.  str(exc) is message-shaped text, not a keyed field, so
+    redact()'s key-based match (even after F5 item 2) cannot see inside it
+    either — this needed its own explicit scrub call at the source."""
+
+    def test_error_field_scrubs_credential_in_exception_text(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("REACHER_LOG_DIR", str(tmp_path / "runs"))
+        diagnostics.reset_for_tests()
+        diagnostics.configure_logging(root=str(tmp_path / "runs"), prune=False)
+
+        from starlette.applications import Starlette
+        from starlette.routing import Route
+
+        from reacher.api.middleware.logging import RequestLoggingMiddleware
+
+        async def boom(request):
+            raise RuntimeError("upstream url=ws://h/ws/s?token=SHOULD_NOT_APPEAR failed")
+
+        app = Starlette(routes=[Route("/boom", boom)])
+        app.add_middleware(RequestLoggingMiddleware)
+
+        from fastapi.testclient import TestClient as FastAPITestClient
+
+        client = FastAPITestClient(app, raise_server_exceptions=False)
+        client.get("/boom")
+
+        sink = diagnostics.get_sink()
+        records = _records_of(sink)
+        diagnostics.reset_for_tests()
+
+        hits = [r for r in records if r["evt"] == "http.request" and r["data"].get("error")]
+        assert hits
+        assert "SHOULD_NOT_APPEAR" not in hits[-1]["data"]["error"]
+        assert "token=[redacted]" in hits[-1]["data"]["error"]
 
 
 class TestSessionLifecycleLogging:

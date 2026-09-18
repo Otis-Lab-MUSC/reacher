@@ -92,7 +92,14 @@ def redact(value: Any, _depth: int = 0) -> Any:
         return value if -1e308 < value < 1e308 else str(value)
 
     if isinstance(value, str):
-        return value if len(value) <= MAX_STR else value[:MAX_STR] + f"…[+{len(value) - MAX_STR}]"
+        text = value
+        # Cheap containment check before the regex passes in scrub_message —
+        # field values are logged verbatim by design and this is a hot path,
+        # so every string should not pay for two regex scans on the offchance
+        # it holds a credential (Fix: F5, redact() string-value gap).
+        if "=" in text or "earer" in text:
+            text = scrub_message(text)
+        return text if len(text) <= MAX_STR else text[:MAX_STR] + f"…[+{len(text) - MAX_STR}]"
 
     if isinstance(value, dict):
         out = {}
@@ -120,6 +127,35 @@ def redact(value: Any, _depth: int = 0) -> Any:
         return str(value)[:MAX_STR]
     except Exception:
         return "[unrepresentable]"
+
+
+#: Patterns for `scrub_message`.  Deliberately tight — key=value pairs and
+#: Bearer tokens only, not a blanket string filter.  The project's decision
+#: (see module docstring) is that field *values* stay verbatim; this only
+#: catches a credential that got interpolated into a *message string*, where
+#: `redact()`'s key-based matching has nothing to match against.
+_MSG_SCRUB_PATTERNS = (
+    (
+        re.compile(r"(?i)\b(token|api[_-]?key|access[_-]?key|secret|password)=([^&\s\"'\]]+)"),
+        r"\1=[redacted]",
+    ),
+    (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"), "Bearer [redacted]"),
+)
+
+
+def scrub_message(text: str) -> str:
+    """Scrub credential-shaped substrings out of a free-text log message.
+
+    A value interpolated into a message string (``f"... url=... {exc}"``) has
+    no key for `redact()` to match — this is the backstop for that case, e.g.
+    a `websockets.InvalidURI` whose ``str()``/traceback embeds the full
+    connect URI, query string included (Fix: F5).
+    """
+    if not text:
+        return text
+    for pattern, repl in _MSG_SCRUB_PATTERNS:
+        text = pattern.sub(repl, text)
+    return text
 
 
 def redact_env(env: dict) -> dict:

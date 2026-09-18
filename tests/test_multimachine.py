@@ -13,6 +13,7 @@ every routed request carries the credentials/URL of its own machine and nothing
 bleeds between machines.
 """
 
+import json
 import time
 
 import pytest
@@ -288,3 +289,103 @@ class TestProxyIsolation:
         assert body["token"] == API_KEY
         assert body["token"] != MACHINE_A["api_key"]
         assert "devA" in body["ws_url"]
+
+
+# --------------------------------------------------------------------------- #
+# Proxy: WS relay upstream-connect-failure logging (Fix: F5)
+#
+# proxy.py's ws_relay logs the upstream connect failure with exc_info=True.
+# A malformed remote URL makes websockets raise InvalidURI, whose str() and
+# traceback both embed the *full* connect URI — query string, and therefore
+# the machine's api_key, included. Layer A (proxy.py) must never put the
+# credentialed URL in the message; Layer B (redact.py/bridge.py) must scrub
+# any credential that still reaches str(exc)/the traceback.
+# --------------------------------------------------------------------------- #
+
+
+SENTINEL_KEY = "SENTINELF5KEY0xCAFEBABE"
+MACHINE_MALFORMED = {
+    "url": "ftp://badhost.invalid:1234",  # bad scheme -> websockets.InvalidURI
+    "api_key": SENTINEL_KEY,
+    "hostname": "badhost.invalid",
+    "name": "malformed",
+}
+
+
+def _drain_ndjson():
+    from reacher import diagnostics
+
+    sink = diagnostics.get_sink()
+    sink.flush_now()
+
+    with open(sink.path, encoding="utf-8") as fh:
+        return [json.loads(line) for line in fh if line.strip()]
+
+
+@pytest.fixture
+def logging_client():
+    """Like `client`, but without patching os.makedirs — these tests read
+    the real diagnostic sink (isolated to tmp_path by the autouse fixture in
+    conftest.py), and a blanket os.makedirs patch silently no-ops the sink's
+    own run-directory creation along with everything else."""
+    with patch("reacher.session_manager.REACHER") as MockReacher:
+        MockReacher.return_value = Mock()
+        app = create_app()
+        with TestClient(app) as c:
+            yield c
+
+
+class TestProxyRelayLoggingDoesNotLeakCredentials:
+    def test_connect_failure_message_never_carries_the_raw_credential(self, logging_client):
+        """Layer A: a generic connect failure (e.g. connection refused) must
+        not put machine['api_key'] in the log message via url=%s."""
+        with patch("reacher.api.routers.proxy.machines.get", return_value=MACHINE_A), \
+             patch("reacher.api.routers.proxy.websockets.connect", side_effect=OSError("refused")):
+            try:
+                with logging_client.websocket_connect(f"/api/proxy/devA/ws/s1?token={API_KEY}"):
+                    pass
+            except Exception:
+                pass  # server closes before accept on connect failure — expected
+
+        records = _drain_ndjson()
+        hits = [r for r in records if r["src"] == "reacher.api.routers.proxy" and r["lvl"] == "error"]
+        assert hits, "expected a WS relay connect-failure record"
+        assert MACHINE_A["api_key"] not in hits[-1]["msg"]
+
+    def test_invalid_uri_backstop_scrubs_both_message_and_exception_text(self, logging_client):
+        """Layer B: websockets.InvalidURI embeds the full credentialed URI in
+        both str(exc) and the traceback — Layer A alone cannot catch this,
+        because proxy.py never puts the raw exception text together itself."""
+        import websockets.exceptions as wsexc
+
+        credentialed_uri = f"ftp://badhost.invalid:1234/ws/s1?token={SENTINEL_KEY}"
+        exc = wsexc.InvalidURI(credentialed_uri, "scheme isn't ws or wss")
+
+        with patch("reacher.api.routers.proxy.machines.get", return_value=MACHINE_MALFORMED), \
+             patch("reacher.api.routers.proxy.websockets.connect", side_effect=exc):
+            try:
+                with logging_client.websocket_connect(f"/api/proxy/devM/ws/s1?token={API_KEY}"):
+                    pass
+            except Exception:
+                pass
+
+        records = _drain_ndjson()
+        hits = [r for r in records if r["src"] == "reacher.api.routers.proxy" and r["lvl"] == "error"]
+        assert hits, "expected a WS relay connect-failure record"
+        rec = hits[-1]
+
+        # No raw sentinel anywhere in the record.
+        raw = json.dumps(rec)
+        assert SENTINEL_KEY not in raw
+
+        # Still useful for debugging: exception class, reason, and the
+        # sanitized target are all present.
+        assert "InvalidURI" in rec["data"]["exc"]
+        assert "scheme isn't ws or wss" in rec["msg"]
+        assert "badhost.invalid" in rec["msg"]
+
+        # The scrub must not double-apply and corrupt the text (regression:
+        # bridge.py used to scrub data["exc"] directly *and* via redact(),
+        # producing "token=[redacted]]" — a stray extra bracket).
+        assert "[redacted]]" not in rec["data"]["exc"]
+        assert "[redacted]]" not in rec["msg"]
