@@ -11,6 +11,20 @@ from reacher import diagnostics
 
 
 @pytest.fixture(autouse=True)
+def _no_browser(monkeypatch):
+    """Never let a TestClient's lifespan pop a real browser window.
+
+    ``_resolve_static_dir()`` falls back to ``<cwd>/web/dist`` when
+    ``REACHER_STATIC_DIR`` is unset.  Running this suite with the labrynth
+    repo root as cwd (e.g. via its venv, `cd labrynth && pytest ../reacher`)
+    resolves that fallback to labrynth's built frontend, so every
+    ``TestClient(app)`` instantiated across the suite would otherwise open a
+    real browser window on this host (Fix: F-browser).
+    """
+    monkeypatch.setenv("REACHER_NO_BROWSER", "1")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_diagnostic_logs(tmp_path, monkeypatch):
     """Point diagnostic logging at a per-test temp dir and tear it down after.
 

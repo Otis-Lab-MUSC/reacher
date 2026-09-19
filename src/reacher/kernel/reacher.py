@@ -1442,11 +1442,22 @@ class REACHER:
         - Initiates the experiment by sending "START-PROGRAM" to the microcontroller.
         - Records the start time for limit checking.
         """
+        # Fail before destroying anything: a start that can't reach the
+        # firmware anyway must not wipe buffered behavior data first.
+        if not self.ser.is_open:
+            raise Exception("Serial port is not open.")
         self._reset_session_buffers()
         if self.program_flag.is_set():
             self.program_flag.clear()
         self.program_running = True
-        self.send_serial_command({"cmd": 101})
+        try:
+            self.send_serial_command({"cmd": 101})
+        except Exception:
+            # Backstop for a port that closes between the check above and
+            # here — send_serial_command raises before writing anything in
+            # that case too, so the firmware never saw a start command.
+            self.program_running = False
+            raise
         self.program_start_time = time.time()
         self._write_event_log({"type": "SESSION_START", "timestamp": self.program_start_time})
         self.logger.info(f"Program started at {self.get_time()}")

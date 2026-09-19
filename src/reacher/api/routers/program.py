@@ -63,6 +63,21 @@ async def start_program(session_id: str, request: Request):
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    # A second /start while already running or paused would silently wipe
+    # the buffered behavior data (start_program() resets buffers) with a
+    # bare 200 and no state transition. "disconnected" is the same failure
+    # mode by another door: it's exactly where a serial drop mid-run leaves
+    # a session holding unexported behavior data, and a /start there can
+    # never reach the firmware anyway (no open port) — so it would wipe the
+    # buffer and then 500, instead of failing before touching anything.
+    # "armed" is exempt: the manual override below disarms and starts it
+    # deliberately.
+    if info.state in ("running", "paused", "disconnected"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot start the program in '{info.state}' state",
+        )
+
     try:
         # Manual override from the armed state ("Start Now"). Disarm first:
         # leaving the firmware watching the pin means a later stray edge
