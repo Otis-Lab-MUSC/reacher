@@ -72,6 +72,9 @@ def log(
     """
     if _sink is None:
         return
+
+    from .redact import redact
+
     _sink.emit(
         LogRecord(
             evt=evt,
@@ -79,7 +82,7 @@ def log(
             lvl=lvl,
             msg=msg,
             src=src,
-            data=data,
+            data=redact(data) if data else {},
             session_id=session_id,
         )
     )

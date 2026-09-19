@@ -69,7 +69,9 @@ async def ws_relay(ws: WebSocket, device_id: str, session_id: str):
         return
 
     upstream_base = machine["url"].replace("http://", "ws://").replace("https://", "wss://")
-    upstream_url = f"{upstream_base}/ws/{session_id}?token={machine['api_key']}"
+    # Logged on failure below — must never carry the credential, unlike upstream_url.
+    upstream_target = f"{upstream_base}/ws/{session_id}"
+    upstream_url = f"{upstream_target}?token={machine['api_key']}"
 
     # Connect upstream BEFORE accepting the browser — a failure here surfaces as
     # a real WS error to the browser (code 1011) so reconnectAttempt accumulates
@@ -81,9 +83,13 @@ async def ws_relay(ws: WebSocket, device_id: str, session_id: str):
         # tear down the upstream under load (Fix #15, secondary hardening).
         upstream = await websockets.connect(upstream_url, open_timeout=10, ping_interval=None)
     except Exception as exc:
+        # Log the sanitized target, never upstream_url (carries machine['api_key']
+        # as a query param).  `exc` itself may still embed the full credentialed
+        # URL (e.g. websockets.InvalidURI on a malformed upstream url) — that is
+        # scrubbed as a backstop in diagnostics/bridge.py (Fix: F5).
         logger.error(
             "WS relay upstream connect failed for %s/%s url=%s: %s",
-            device_id[:8], session_id, upstream_url, exc, exc_info=True,
+            device_id[:8], session_id, upstream_target, exc, exc_info=True,
         )
         await ws.close(code=1011, reason=f"upstream {type(exc).__name__}")
         return

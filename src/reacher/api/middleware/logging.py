@@ -20,7 +20,7 @@ from typing import Any, Callable
 
 from ... import diagnostics
 from ...diagnostics import context
-from ...diagnostics.redact import redact
+from ...diagnostics.redact import redact, scrub_message
 from ...diagnostics.schema import TIER_API
 
 #: Header the frontend uses to hand its correlation ID to the backend.
@@ -84,9 +84,15 @@ class RequestLoggingMiddleware:
             try:
                 await self.app(scope, receive_logging, send_logging)
             except Exception as exc:
+                # str(exc) is message-shaped text, not a keyed field — it reaches
+                # diagnostics.log() directly (bypasses the stdlib bridge, so
+                # bridge.py's scrub_message() is not on this path) and redact()
+                # only matches by key, so a credentialed URL embedded in an
+                # exception (e.g. websockets.InvalidURI) would otherwise pass
+                # through unscrubbed (Fix: F5 neighbor audit).
                 self._record(
                     method, path, scope, 500, started, body_chunks,
-                    error=f"{type(exc).__name__}: {exc}",
+                    error=scrub_message(f"{type(exc).__name__}: {exc}"),
                 )
                 raise
             self._record(method, path, scope, status["code"], started, body_chunks)

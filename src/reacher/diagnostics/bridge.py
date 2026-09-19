@@ -55,8 +55,10 @@ class SinkHandler(logging.Handler):
             self.handleError(record)
 
     def _convert(self, record: logging.LogRecord) -> LogRecord:
+        from .redact import scrub_message
+
         try:
-            msg = record.getMessage()
+            msg = scrub_message(record.getMessage())
         except Exception as exc:
             msg = f"<unformattable log message: {type(exc).__name__}: {exc}>"
 
@@ -67,6 +69,14 @@ class SinkHandler(logging.Handler):
 
         if record.exc_info:
             try:
+                # A credentialed URL that reached str(exc) (e.g. websockets'
+                # InvalidURI) is repeated in full by the traceback.  Scrubbed
+                # below via redact(data) — not here directly — because "exc"
+                # is a plain dict value and redact()'s string branch already
+                # runs scrub_message() on it (Fix: F5); scrubbing it twice is
+                # not idempotent (a matched value ending in "]" loses its
+                # closing bracket to the first pass's exclusion, and the
+                # second pass's replacement re-adds one, e.g. "[redacted]]").
                 data["exc"] = self.format_exception(record.exc_info)
             except Exception:
                 pass
