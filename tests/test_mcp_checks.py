@@ -150,6 +150,32 @@ def test_c14_honours_a_recorded_exemption(live):
     assert _result(_drift(live, mutate), "C14")["status"] == Status.PASS.value
 
 
+def test_c14_rejects_a_wrong_value_accepted_entry_naming_a_paradigm_with_no_handler(live):
+    """A `wrong_value_accepted` gap claims the handler exists and runs — it must
+    never be honored as an exemption for a paradigm where no handler is found,
+    or a future mis-declared entry would silently hide a real missing-handler
+    defect. This is a synthetic bad entry (schema.py's real registry is
+    untouched); it should never legitimately arise, but the check must still
+    catch it if it does.
+    """
+    def mutate(c):
+        c.schema["python"]["known_firmware_gaps"]["SESSION_START"] = {
+            "failure_mode": "wrong_value_accepted",
+            "paradigms": ["pavlovian"],
+            "reason": "test fixture: bogus wrong_value_accepted claim",
+        }
+        for spec in c.schema["python"]["commands"]:
+            if spec["name"] == "SESSION_START":
+                spec["paradigms"] = ["pavlovian"]
+        for sketch in c.schema["firmware"]["sketches"]:
+            if sketch["name"] == "pavlovian":
+                sketch["cmd_refs"] = [r for r in sketch["cmd_refs"] if r != "SESSION_START"]
+        c.schema["firmware"]["common_dispatcher_cmd_refs"] = [
+            r for r in c.schema["firmware"]["common_dispatcher_cmd_refs"] if r != "SESSION_START"
+        ]
+    _assert_fails_with_evidence(_drift(live, mutate), "C14", mentions=["SESSION_START", "pavlovian"])
+
+
 def test_l8_detects_a_device_name_firmware_never_emits(live):
     """The exact shape of the LICK_CIRCUIT duplicate-row bug."""
     ctx = _drift(live, lambda c: c.schema["python"]["command_state_map_devices"].append("LICK_CIRCUIT"))

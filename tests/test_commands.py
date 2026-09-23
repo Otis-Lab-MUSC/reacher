@@ -1,5 +1,7 @@
 """Tests for the command registry module."""
 
+import queue
+
 import pytest
 from reacher.kernel.commands import (
     COMMAND_REGISTRY,
@@ -10,6 +12,7 @@ from reacher.kernel.commands import (
     build_command_payload,
     get_commands_for_paradigm,
 )
+from reacher.kernel.simulator import FirmwareSimulator
 
 
 class TestCommandCode:
@@ -108,6 +111,18 @@ class TestGetCommandsForParadigm:
             cmds = get_commands_for_paradigm(paradigm)
             assert 1075 in cmds, f"LEVER_RH_SET_RATIO must be available for {paradigm}"
             assert 1375 in cmds, f"LEVER_LH_SET_RATIO must be available for {paradigm}"
+
+    def test_ratio_commands_excluded_from_non_operant_paradigms(self):
+        """201, 1075 and 1375 are three names for the same scheduler.SetRatio()
+        write (Scheduler.cpp:377-383) — none of VI/omission/pavlovian run
+        Scheduler in ratio mode, so all three codes must be rejected, not just
+        the two lever-scoped aliases already covered by
+        test_lever_ratio_excluded_from_non_operant_paradigms above."""
+        for paradigm in ("vi", "omission", "pavlovian"):
+            cmds = get_commands_for_paradigm(paradigm)
+            assert 201 not in cmds, f"SET_RATIO must not be available for {paradigm}"
+            assert 1075 not in cmds, f"LEVER_RH_SET_RATIO must not be available for {paradigm}"
+            assert 1375 not in cmds, f"LEVER_LH_SET_RATIO must not be available for {paradigm}"
 
     def test_lever_timeout_excluded_from_pavlovian(self):
         cmds = get_commands_for_paradigm("pavlovian")
@@ -317,3 +332,32 @@ class TestTimeoutModeCommands:
     def test_build_payload(self):
         assert build_command_payload(1077, 1) == {"cmd": 1077, "timeout_mode": 1}
         assert build_command_payload(1377, 0) == {"cmd": 1377, "timeout_mode": 0}
+
+
+class TestRatioSimulatorConvergence:
+    """201 (SET_RATIO), 1075 (LEVER_RH_SET_RATIO) and 1375 (LEVER_LH_SET_RATIO)
+    are three names for one write. Firmware has exactly one ratio register —
+    ``Scheduler::triggers[0].threshold`` — and all three commands call the
+    same ``scheduler.SetRatio()`` onto it (fr.ino:322-355;
+    Scheduler.cpp:377-383). There is no per-lever ratio on the board, so the
+    simulator's single ``self.ratio`` field (simulator.py:107, 230-231,
+    280-281, 285-286) is correct parity, not a gap. If a future change splits
+    it into independent per-lever fields to make this test pass, that change
+    is the regression — it would model hardware that does not exist.
+    """
+
+    def test_201_1075_1375_converge_on_one_ratio_last_write_wins(self):
+        sim = FirmwareSimulator(queue.Queue())
+
+        sim.handle_command({"cmd": 201, "ratio": 7})
+        assert sim.ratio == 7
+
+        sim.handle_command({"cmd": 1075, "ratio": 5})
+        assert sim.ratio == 5
+
+        sim.handle_command({"cmd": 1375, "ratio": 3})
+        assert sim.ratio == 3
+
+        # Exactly one ratio state — not three independent per-lever ones.
+        assert not hasattr(sim, "lever_rh_ratio")
+        assert not hasattr(sim, "lever_lh_ratio")

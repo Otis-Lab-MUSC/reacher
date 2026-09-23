@@ -67,7 +67,7 @@ async def reset_session(session_id: str, request: Request):
     try:
         info.instance.reset()
         # Re-open serial since reset() closes it
-        info.instance.set_COM_port(info.port)
+        info.instance.set_COM_port(info.port, info.paradigm)
         info.instance.open_serial()
     except Exception:
         logger.error("Reset failed for session %s", session_id, exc_info=True)

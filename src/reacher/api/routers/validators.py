@@ -89,14 +89,23 @@ def _check_paradigm(req: ValidateConfigRequest) -> list[ValidationWarning]:
     if p == "fr":
         if (_ps(req, "ratio") or 0) < 1:
             warnings.append(_e("paradigmSettings.ratio", "FR ratio must be ≥ 1"))
+        # Upper bound mirrors the command-gate range check (hardware.py _VALUE_RANGES["ratio"] = (1, 255));
+        # without it an out-of-range ratio passes config-review and only fails later at session start.
+        if (_ps(req, "ratio") or 0) > 255:
+            warnings.append(_e("paradigmSettings.ratio", "FR ratio must be ≤ 255"))
         if not _any_lever_armed(req):
             warnings.append(_e("hardwareUi.lever", "FR requires at least one lever armed"))
 
     elif p == "pr":
         if (_ps(req, "ratio") or 0) < 1:
             warnings.append(_e("paradigmSettings.ratio", "PR ratio must be ≥ 1"))
+        if (_ps(req, "ratio") or 0) > 255:
+            warnings.append(_e("paradigmSettings.ratio", "PR ratio must be ≤ 255"))
         if (_ps(req, "step") or 0) < 1:
             warnings.append(_e("paradigmSettings.step", "PR step must be ≥ 1 — step=0 silently degrades PR to FR"))
+        # Same range as ratio on the firmware side (hardware.py _VALUE_RANGES["step"] = (1, 255)).
+        if (_ps(req, "step") or 0) > 255:
+            warnings.append(_e("paradigmSettings.step", "PR step must be ≤ 255"))
         if not _any_lever_armed(req):
             warnings.append(_e("hardwareUi.lever", "PR requires at least one lever armed"))
 

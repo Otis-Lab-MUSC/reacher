@@ -286,10 +286,15 @@ _PARAM_LOOP_RE = re.compile(r"Object\.entries\(mapping\.params\)")
 
 #: Files carrying a dispatch loop over ``PRESET_COMMAND_MAP[device].params``.
 #: Every one of them must consult the param gate, or the table is decoration.
+#:
+#: ``program/ProgramPanel.tsx`` used to be here and carried 2 of the 5 loops.
+#: It was deleted from labrynth as dead code — no import, no route — and its
+#: loops went with it. Do not re-add the path without the file: these are
+#: opened unguarded, so a stale entry fails the suite with a FileNotFoundError
+#: rather than a useful message.
 _DISPATCH_SITES = (
     ("web", "src", "components", "monitor", "SessionStartModal.tsx"),
     ("web", "src", "components", "configuration", "ConfigurationPanel.tsx"),
-    ("web", "src", "components", "program", "ProgramPanel.tsx"),
 )
 
 
@@ -405,7 +410,14 @@ class TestSessionStartDispatchCannotSendAnUndeclaredCode:
     def test_the_gate_is_applied_at_every_dispatch_loop(self):
         """A gate table no dispatch site consults would pass the check above while
         the 400 still happened. Each loop over ``mapping.params`` must call
-        ``canDispatchParam`` — five loops across three files at the time of writing.
+        ``canDispatchParam`` — three loops across two files at the time of writing
+        (SessionStartModal 1, ConfigurationPanel 2).
+
+        This was five loops across three files until ProgramPanel.tsx — which held
+        the other two — was deleted from labrynth as dead code. The floor below
+        tracks the real count for exactly one reason: it catches the regex silently
+        matching nothing. Set it to what the tree actually has, never to whatever
+        makes the suite pass, or it stops detecting parser drift.
         """
         total_loops = 0
         for parts in _DISPATCH_SITES:
@@ -419,7 +431,7 @@ class TestSessionStartDispatchCannotSendAnUndeclaredCode:
                 "code the backend does not declare for the session's paradigm"
             )
             total_loops += loops
-        assert total_loops >= 5, f"only {total_loops} dispatch loops found — parser drift"
+        assert total_loops >= 3, f"only {total_loops} dispatch loops found — parser drift"
 
     def test_golden_negative_the_parsers_can_fail(self, tmp_path):
         """A check that has never failed is indistinguishable from one that cannot."""

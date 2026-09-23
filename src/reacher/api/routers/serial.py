@@ -36,7 +36,10 @@ async def connect_serial(session_id: str, request: Request):
 
     instance = info.instance
     try:
-        instance.set_COM_port(info.port)
+        # info.paradigm is used only by the SIMULATOR branch, so the simulated
+        # board identifies as the sketch this session is for instead of always
+        # fr. A real port ignores it and IDENTIFY below stays authoritative.
+        instance.set_COM_port(info.port, info.paradigm)
         instance.open_serial()
     except ValueError as e:
         # Fix: PY-002 — Surface validation errors without leaking internals

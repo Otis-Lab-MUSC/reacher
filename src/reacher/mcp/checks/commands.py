@@ -124,6 +124,17 @@ def c14_declaration_handler_parity(ctx: CheckContext) -> Result:
     handles the command. With nine sketches and no central dispatcher, a command
     declared for a paradigm whose sketch ignores it is accepted by the UI and
     silently dropped by firmware.
+
+    KNOWN_FIRMWARE_GAPS entries carry a "failure_mode" discriminator (see
+    schema.py) that this check must honor, not just tolerate:
+    - "code_rejected" (the default/legacy shape): firmware has no handler, so
+      an entry naming a paradigm with no handler is exactly what's expected —
+      exempt it.
+    - "wrong_value_accepted": the handler DOES exist and runs (it just silently
+      honors the wrong value); `paradigms` lists sketches that HANDLE it. This
+      branch is only reached when no handler was found, which contradicts that
+      claim — such an entry can never legitimately exempt a missing-handler
+      pair, so it must fall through to a violation rather than being excused.
     """
     check = _check(ctx, "C14")
     py = ctx.schema["python"]
@@ -141,7 +152,11 @@ def c14_declaration_handler_parity(ctx: CheckContext) -> Result:
                 continue
             if spec["name"] in common or spec["name"] in sketches[paradigm]:
                 continue
-            if entry is not None and (entry["paradigms"] is None or paradigm in entry["paradigms"]):
+            if (
+                entry is not None
+                and entry.get("failure_mode") != "wrong_value_accepted"
+                and (entry["paradigms"] is None or paradigm in entry["paradigms"])
+            ):
                 continue
             violations.append({"command": spec["name"], "code": spec["code"], "paradigm": paradigm})
     if not violations:

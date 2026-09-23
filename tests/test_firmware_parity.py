@@ -117,6 +117,12 @@ def _is_exempt(command_name: str, paradigm: str) -> bool:
         entry = registry.get(command_name)
         if entry is None:
             continue
+        # A "wrong_value_accepted" gap names the sketches that DO handle the
+        # command, so it must never excuse a missing handler — otherwise
+        # recording an aliasing defect would silently switch off C14 for that
+        # command everywhere.
+        if entry.get("failure_mode") == "wrong_value_accepted":
+            continue
         allowed = entry["paradigms"]
         if allowed is None or paradigm in allowed:
             return True
@@ -139,14 +145,30 @@ def test_c14_exemptions_are_all_still_needed(sketches):
     assert not stale, f"exemptions naming commands that no longer exist: {sorted(stale)}"
 
     now_handled = []
+    vanished = []
     for command, entry in schema.KNOWN_FIRMWARE_GAPS.items():
+        aliasing = entry.get("failure_mode") == "wrong_value_accepted"
         for paradigm in entry["paradigms"] or []:
             sketch = sketches.get(paradigm)
-            if sketch and command in set(sketch["cmd_refs"]):
+            if sketch is None:
+                continue
+            handled = command in set(sketch["cmd_refs"])
+            if aliasing:
+                # Inverted: these name the sketches that handle the command.
+                # Losing the handler does not fix the aliasing, it just moves
+                # the entry to the other failure_mode — either way it is stale.
+                if not handled:
+                    vanished.append(f"{command} on {paradigm}")
+            elif handled:
                 now_handled.append(f"{command} on {paradigm}")
     assert not now_handled, (
         "firmware now handles commands still listed in KNOWN_FIRMWARE_GAPS — remove "
         f"them so downstream UI gates stop disabling working controls: {sorted(now_handled)}"
+    )
+    assert not vanished, (
+        "a 'wrong_value_accepted' gap names sketches that handle the command, but "
+        "these no longer do — the entry now describes the wrong failure mode: "
+        f"{sorted(vanished)}"
     )
 
 
@@ -158,6 +180,14 @@ def test_gap_registries_are_well_formed():
     ):
         for command, entry in registry.items():
             assert entry.get("reason"), f"{name}[{command}] has no justification"
+            if name == "KNOWN_FIRMWARE_GAPS":
+                # The staleness rule is derived from this, in opposite
+                # directions per mode — an unrecognized value would be checked
+                # against the wrong one.
+                assert entry.get("failure_mode") in ("code_rejected", "wrong_value_accepted"), (
+                    f"KNOWN_FIRMWARE_GAPS[{command}].failure_mode must be "
+                    f"'code_rejected' or 'wrong_value_accepted', got {entry.get('failure_mode')!r}"
+                )
             paradigms = entry["paradigms"]
             assert paradigms is None or (paradigms and isinstance(paradigms, list)), (
                 f"{name}[{command}].paradigms must be None (all) or a non-empty list"

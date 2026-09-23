@@ -95,15 +95,27 @@ class TimeoutWindow:
 class FirmwareSimulator:
     """Generates firmware-protocol-compliant JSON output for a simulated session."""
 
-    def __init__(self, tx_queue: queue.Queue):
+    def __init__(self, tx_queue: queue.Queue, paradigm: Optional[str] = None):
+        """
+        Args:
+            tx_queue: queue the generated firmware lines are written to.
+            paradigm: which sketch to impersonate. A real board's paradigm is
+                fixed by the hex flashed onto it, and ``connect`` reads it back
+                from IDENTIFY; the simulator has no hex, so the session that
+                created it has to say. ``None`` keeps the historical ``fr``
+                default, which is what the bare ``FirmwareSimulator(q)`` calls
+                throughout the test-suite rely on.
+        """
         self._tx = tx_queue
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
-        # Configuration state (updated by incoming commands)
-        self.paradigm = "fr"
-        self.schedule = "FIXED_RATIO"
+        # Configuration state (updated by incoming commands).
+        # An unknown name falls back to "fr" rather than raising: this is a test
+        # double, and a bad paradigm should not be able to break a connect.
+        self.paradigm = paradigm if paradigm in PARADIGM_TO_SCHEDULE else "fr"
+        self.schedule = PARADIGM_TO_SCHEDULE[self.paradigm]
         self.ratio = 5
         self.pr_step = 2
         self.vi_interval = 30000  # ms
@@ -879,13 +891,14 @@ class SimulatedSerial:
     bridging the FirmwareSimulator output thread to REACHER's serial reader.
     """
 
-    def __init__(self, baudrate: int = 115200, timeout: float = 1):
+    def __init__(self, baudrate: int = 115200, timeout: float = 1, paradigm: Optional[str] = None):
         self.port: Optional[str] = "SIMULATOR"
         self.baudrate = baudrate
         self.timeout = timeout
         self.is_open = False
+        self.paradigm = paradigm  # what this "board" is flashed with; None = fr
         self._rx_queue: queue.Queue = queue.Queue()
-        self._simulator = FirmwareSimulator(self._rx_queue)
+        self._simulator = FirmwareSimulator(self._rx_queue, paradigm=paradigm)
 
     def open(self):
         self.is_open = True

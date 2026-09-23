@@ -238,7 +238,13 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     # --- Session Setup ---
     201: CommandSpec(
         CommandCode.SET_RATIO, "SET_RATIO",
-        "Set the fixed/progressive ratio",
+        "Set the fixed/progressive ratio: active presses required per reward. "
+        "Scheduler-wide — one value per board, counted across every reinforced "
+        "lever, since the press-count trigger carries sourceFilter = NONE. "
+        "201, 1075 and 1375 all resolve to the same scheduler.SetRatio() and "
+        "the same triggers[0].threshold; last write wins and each write also "
+        "resets the accumulated press count. This is the honestly-scoped "
+        "spelling of the three — prefer it",
         payload_key="ratio", payload_type="int",
         paradigms=with_lite("fr", "pr"),
     ),
@@ -708,7 +714,13 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     ),
     1075: CommandSpec(
         CommandCode.LEVER_RH_SET_RATIO, "LEVER_RH_SET_RATIO",
-        "Set right-hand lever ratio",
+        "Set the reinforcement ratio. Despite the name this is NOT per-lever: "
+        "1075, 1375 and 201 all call the same scheduler.SetRatio() and write "
+        "the one triggers[0].threshold, exactly as 1074/1374 both write the one "
+        "timeout interval and 1077/1377 the one timeout mode. Firmware ACKs the "
+        "requested value under a per-lever device name without reading back "
+        "scheduler state, so a wrong value is accepted rather than rejected — "
+        "see schema.KNOWN_FIRMWARE_GAPS['LEVER_RH_SET_RATIO']. Send 201 instead",
         payload_key="ratio", payload_type="int",
         paradigms=with_lite("fr", "pr"),
     ),
@@ -752,7 +764,13 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     ),
     1375: CommandSpec(
         CommandCode.LEVER_LH_SET_RATIO, "LEVER_LH_SET_RATIO",
-        "Set left-hand lever ratio",
+        "Set the reinforcement ratio. Despite the name this is NOT per-lever: "
+        "1375, 1075 and 201 all call the same scheduler.SetRatio() and write "
+        "the one triggers[0].threshold, exactly as 1074/1374 both write the one "
+        "timeout interval and 1077/1377 the one timeout mode. Firmware ACKs the "
+        "requested value under a per-lever device name without reading back "
+        "scheduler state, so a wrong value is accepted rather than rejected — "
+        "see schema.KNOWN_FIRMWARE_GAPS['LEVER_LH_SET_RATIO']. Send 201 instead",
         payload_key="ratio", payload_type="int",
         paradigms=with_lite("fr", "pr"),
     ),

@@ -136,7 +136,11 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
     # Wait for Arduino to reboot, then reconnect
     await asyncio.sleep(2)
     try:
-        instance.set_COM_port(info.port)
+        # body.paradigm, not info.paradigm: the board has just been flashed with
+        # *that* hex, and info.paradigm is still the pre-upload value — this runs
+        # before the sm.set_paradigm() below. Simulator-only, as ever; a real
+        # board is now physically running the new hex and says so at IDENTIFY.
+        instance.set_COM_port(info.port, body.paradigm)
         instance.open_serial()
         # Fix: [PERSON_NAME] — Wait for IDENTIFY response (firmware readiness gate)
         # Boot process: 1.5–2s bootloader → firmware starts → responds to IDENTIFY

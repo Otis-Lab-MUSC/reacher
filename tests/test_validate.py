@@ -96,6 +96,14 @@ class TestFRRules:
         req = _req(paradigm="fr", paradigmSettings={}, hardwareUi=_lever_pump_ok())
         assert _has(run_validation(req), "paradigmSettings.ratio", "error")
 
+    def test_rule_1b_ratio_gt_255(self):
+        req = _req(paradigm="fr", paradigmSettings={"ratio": 256}, hardwareUi=_lever_pump_ok())
+        assert _has(run_validation(req), "paradigmSettings.ratio", "error")
+
+    def test_rule_1b_ratio_255_is_fine(self):
+        req = _req(paradigm="fr", paradigmSettings={"ratio": 255}, hardwareUi=_lever_pump_ok())
+        assert not _has(run_validation(req), "paradigmSettings.ratio", "error")
+
     def test_rule_2_no_lever(self):
         req = _req(
             paradigm="fr",
@@ -122,6 +130,14 @@ class TestPRRules:
         req = _req(paradigm="pr", paradigmSettings={"ratio": 0, "step": 1}, hardwareUi=_lever_pump_ok())
         assert _has(run_validation(req), "paradigmSettings.ratio", "error")
 
+    def test_rule_4b_ratio_gt_255(self):
+        req = _req(paradigm="pr", paradigmSettings={"ratio": 256, "step": 1}, hardwareUi=_lever_pump_ok())
+        assert _has(run_validation(req), "paradigmSettings.ratio", "error")
+
+    def test_rule_4b_ratio_255_is_fine(self):
+        req = _req(paradigm="pr", paradigmSettings={"ratio": 255, "step": 1}, hardwareUi=_lever_pump_ok())
+        assert not _has(run_validation(req), "paradigmSettings.ratio", "error")
+
     def test_rule_5_step_zero(self):
         req = _req(paradigm="pr", paradigmSettings={"ratio": 1, "step": 0}, hardwareUi=_lever_pump_ok())
         assert _has(run_validation(req), "paradigmSettings.step", "error")
@@ -129,6 +145,14 @@ class TestPRRules:
     def test_rule_5_step_none(self):
         req = _req(paradigm="pr", paradigmSettings={"ratio": 1}, hardwareUi=_lever_pump_ok())
         assert _has(run_validation(req), "paradigmSettings.step", "error")
+
+    def test_rule_5b_step_gt_255(self):
+        req = _req(paradigm="pr", paradigmSettings={"ratio": 1, "step": 256}, hardwareUi=_lever_pump_ok())
+        assert _has(run_validation(req), "paradigmSettings.step", "error")
+
+    def test_rule_5b_step_255_is_fine(self):
+        req = _req(paradigm="pr", paradigmSettings={"ratio": 1, "step": 255}, hardwareUi=_lever_pump_ok())
+        assert not _has(run_validation(req), "paradigmSettings.step", "error")
 
     def test_rule_6_no_lever(self):
         req = _req(
