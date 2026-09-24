@@ -103,7 +103,12 @@ async def send_command(session_id: str, body: CommandRequest, request: Request):
         violation = pin_overrides.validate_pin(body.code, body.value, info.board)
         if violation is not None:
             raise HTTPException(status_code=422, detail=violation)
-    elif body.value is not None and spec.payload_key is not None:
+    elif spec.payload_key is not None:
+        # A payload command without its value would pass the range gate below
+        # and reach the board as a bare {"cmd": N}, where the missing key reads
+        # as 0 — while the host records the parameter as None.
+        if body.value is None:
+            raise HTTPException(status_code=400, detail=f"{spec.name} requires a 'value'")
         # Validate value against hardware-safe ranges (non-pin commands).
         bounds = _VALUE_RANGES.get(spec.payload_key)
         if bounds is not None:

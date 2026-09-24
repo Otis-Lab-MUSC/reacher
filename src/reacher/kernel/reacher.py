@@ -98,11 +98,22 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     693: ("LASER", "trial_filter", "cs_both"),
     694: ("LASER", "phase", "reward"),
     695: ("LASER", "phase", "cue"),
+    # --- Reinforcement ratio (scheduler-wide, not per-lever) ---
+    # 201, 1075 and 1375 are three names for one write. Every sketch that
+    # handles them calls the same `scheduler.SetRatio()`, which sets
+    # `triggers[0].threshold` on the sketch's single Scheduler instance
+    # (firmware Scheduler.cpp:377-383) — the per-lever cases differ only in the
+    # string they pass to logParamChange. Modelling them as two independent
+    # LEVER_RH/LEVER_LH fields recorded a per-lever ratio no layer below
+    # implements, and left 201 — the code the session-start path actually
+    # sends — unmodelled entirely. One scheduler-scoped field, exactly as
+    # 1074/1374 share one timeout interval and 1077/1377 share one timeout mode.
+    201: ("CONTROLLER", "ratio", _USE_VALUE),
+    1075: ("CONTROLLER", "ratio", _USE_VALUE),
+    1375: ("CONTROLLER", "ratio", _USE_VALUE),
     # --- Lever parameters ---
     1074: ("LEVER_RH", "timeout", _USE_VALUE),
-    1075: ("LEVER_RH", "ratio", _USE_VALUE),
     1374: ("LEVER_LH", "timeout", _USE_VALUE),
-    1375: ("LEVER_LH", "ratio", _USE_VALUE),
     # --- Pin reassignment (suffix x76) ---
     376: ("CUE", "pin", _USE_VALUE),
     386: ("CUE2", "pin", _USE_VALUE),
@@ -166,6 +177,10 @@ class REACHER:
 
         # Serial variables
         self._is_simulated: bool = False
+        # Which sketch the simulated board impersonates. Meaningful only when
+        # _is_simulated; a real board's paradigm comes from its flashed hex and
+        # is read back from IDENTIFY, never from here.
+        self._simulated_paradigm: Optional[str] = None
         self.ser: serial.Serial = serial.Serial(baudrate=115200, timeout=1)
         self.queue: queue.Queue = queue.Queue(maxsize=5000)
         # Fix: F-003 — Configurable serial reconnection parameters
@@ -265,7 +280,9 @@ class REACHER:
             "desc": None
         }
         self.hardware_settings: List = []
-        self.reacher_log_path = os.path.expanduser(fr'~/REACHER/LOG/{self.get_time()}')
+        # Distinct from REACHER_LOG_DIR, which roots the diagnostics sink (LOG/runs).
+        _session_log_root = os.environ.get("REACHER_SESSION_LOG_DIR") or os.path.expanduser("~/REACHER/LOG")
+        self.reacher_log_path = os.path.join(_session_log_root, self.get_time())
         os.makedirs(self.reacher_log_path, exist_ok=True)
         self.controller_log: str = os.path.join(self.reacher_log_path, "controller_log.json")
         self.interface_log: str = os.path.join(self.reacher_log_path, "interface_log.log")
@@ -356,7 +373,10 @@ class REACHER:
 
         if self._is_simulated:
             from .simulator import SimulatedSerial
-            self.ser = SimulatedSerial(baudrate=115200, timeout=1)
+            # Carry the paradigm across the rebuild — a reset that dropped it
+            # would silently revert the board to fr mid-session, which is the
+            # bug this parameter exists to prevent (P1-BUG-1).
+            self.ser = SimulatedSerial(baudrate=115200, timeout=1, paradigm=self._simulated_paradigm)
             self.ser.port = "SIMULATOR"
         else:
             self.ser = serial.Serial(baudrate=115200, timeout=1)
@@ -395,7 +415,7 @@ class REACHER:
 
         return available_ports
     
-    def set_COM_port(self, port: str) -> None:
+    def set_COM_port(self, port: str, paradigm: Optional[str] = None) -> None:
         """Set the COM port for serial communication.
 
         **Description:**
@@ -404,6 +424,14 @@ class REACHER:
 
         **Args:**
         - `port (str)`: The name of the COM port to use.
+        - `paradigm (str | None)`: **Simulator only.** Which sketch the
+          simulated board should impersonate, normally the session's paradigm.
+          A real board is ignored here on purpose — its paradigm is whatever
+          hex is flashed on it, and `connect` reads that back from IDENTIFY
+          (`api/routers/serial.py`). Without this the simulator always
+          identified as `fr.ino`, so connecting *overwrote* the session's
+          paradigm with "fr" and every non-FR command then 400'd at the
+          hardware router's paradigm gate (P1-BUG-1).
 
         **Raises:**
         - `ValueError`: If the port is not available.
@@ -413,12 +441,14 @@ class REACHER:
 
         if port == "SIMULATOR":
             from .simulator import SimulatedSerial
-            self.ser = SimulatedSerial(baudrate=115200, timeout=1)
+            self._simulated_paradigm = paradigm
+            self.ser = SimulatedSerial(baudrate=115200, timeout=1, paradigm=paradigm)
             self.ser.port = "SIMULATOR"
             self._is_simulated = True
         elif port in [p.device for p in list_ports.comports() if p.vid and p.pid]:
             self.ser.port = port
             self._is_simulated = False
+            self._simulated_paradigm = None
         else:
             # Fix: SER-003 — Raise on invalid port instead of silently ignoring
             raise ValueError(f"Port {port!r} is not available")
@@ -789,10 +819,25 @@ class REACHER:
                 parts.append(0)
         return tuple(parts)
 
+    @staticmethod
+    def _normalise_param_change(event: dict) -> Optional[dict]:
+        """Fold a firmware ``logParamChange`` record into the host row shape.
+
+        ``{"device": D, "param": P, "value": V}`` becomes ``{"device": D, P: V}``,
+        which is what ``_update_hardware_setting`` writes for a host-side send.
+        IDENTIFY also carries a ``device`` but has a ``sketch``, so it is not one.
+        """
+        if "param" not in event or "value" not in event or "sketch" in event:
+            return None
+        return {**{k: v for k, v in event.items() if k not in ("param", "value")}, event["param"]: event["value"]}
+
     def update_firmware_information(self, event: dict) -> None:
+        param_row = self._normalise_param_change(event)
         if event["device"] == "CONTROLLER":
             with self.thread_lock:  # Fix: F-009 — guard cross-thread dict access
                 self.firmware_information.update(event)
+                if param_row is not None:
+                    self._merge_hardware_row(param_row)
             self.logger.info("--> Updated arduino configuration")
             # Fix: LAZ-001 — Signal firmware readiness (IDENTIFY ack received)
             # Unblock any waiting connect/post-upload flow so state transitions to "connected"
@@ -857,14 +902,28 @@ class REACHER:
         else:
             device = event.get("device")
             with self.thread_lock:  # Fix: F-009 — guard cross-thread list access
-                for i, entry in enumerate(self.hardware_settings):
-                    if entry.get("device") == device:
-                        self.hardware_settings[i] = event
-                        break
+                if param_row is not None:
+                    self._merge_hardware_row(param_row)
                 else:
-                    self.hardware_settings.append(event)
+                    for i, entry in enumerate(self.hardware_settings):
+                        if entry.get("device") == device:
+                            self.hardware_settings[i] = event
+                            break
+                    else:
+                        self.hardware_settings.append(event)
             self.logger.info("--> Updated hardware defaults list")
             self._emit("config", event)
+
+    def _merge_hardware_row(self, row: dict) -> None:
+        """Merge *row* into its device's ``hardware_settings`` entry, appending if absent.
+
+        Caller holds ``thread_lock``.
+        """
+        for entry in self.hardware_settings:
+            if entry.get("device") == row.get("device"):
+                entry.update(row)
+                return
+        self.hardware_settings.append(dict(row))
 
     def _update_hardware_setting(self, device: str, updates: dict) -> None:
         """Update a device entry in hardware_settings in-place and emit a config event."""

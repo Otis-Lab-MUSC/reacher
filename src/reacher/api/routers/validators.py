@@ -70,6 +70,25 @@ def _any_pump_armed(req: ValidateConfigRequest) -> bool:
     return bool(_hw(req, "primaryPump", "armed") or _hw(req, "secondaryPump", "armed"))
 
 
+def _is_whole(value: Any) -> bool:
+    """True for an int-valued number. ``bool`` is excluded: ``True`` is an ``int`` in Python."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, float) and value.is_integer()
+
+
+# Scheduler parameters that reach the board as an integer command payload
+# (201 / 205 / 203 / 204), keyed by the paradigm that sends them.
+_INTEGER_PARADIGM_FIELDS = {
+    "fr": ("ratio",),
+    "pr": ("ratio", "step"),
+    "vi": ("interval",),
+    "omission": ("interval",),
+}
+
+
 def _has_time_component(limit_type: str) -> bool:
     return limit_type in ("Time", "Both")
 
@@ -86,17 +105,37 @@ def _check_paradigm(req: ValidateConfigRequest) -> list[ValidationWarning]:
     p = req.paradigm
     warnings: list[ValidationWarning] = []
 
+    # The command endpoint types these as int, so 2.5 passes the range checks
+    # below and only fails at session start with an opaque 422. A non-numeric
+    # value would raise in those comparisons, which validate_config swallows
+    # into "valid" — so bail out of this group before the range checks run.
+    for field in _INTEGER_PARADIGM_FIELDS.get(p, ()):
+        value = _ps(req, field)
+        if value is not None and not _is_whole(value):
+            warnings.append(_e(f"paradigmSettings.{field}", f"{field} must be a whole number, got {value!r}"))
+    if warnings:
+        return warnings
+
     if p == "fr":
         if (_ps(req, "ratio") or 0) < 1:
             warnings.append(_e("paradigmSettings.ratio", "FR ratio must be ≥ 1"))
+        # Upper bound mirrors the command-gate range check (hardware.py _VALUE_RANGES["ratio"] = (1, 255));
+        # without it an out-of-range ratio passes config-review and only fails later at session start.
+        if (_ps(req, "ratio") or 0) > 255:
+            warnings.append(_e("paradigmSettings.ratio", "FR ratio must be ≤ 255"))
         if not _any_lever_armed(req):
             warnings.append(_e("hardwareUi.lever", "FR requires at least one lever armed"))
 
     elif p == "pr":
         if (_ps(req, "ratio") or 0) < 1:
             warnings.append(_e("paradigmSettings.ratio", "PR ratio must be ≥ 1"))
+        if (_ps(req, "ratio") or 0) > 255:
+            warnings.append(_e("paradigmSettings.ratio", "PR ratio must be ≤ 255"))
         if (_ps(req, "step") or 0) < 1:
             warnings.append(_e("paradigmSettings.step", "PR step must be ≥ 1 — step=0 silently degrades PR to FR"))
+        # Same range as ratio on the firmware side (hardware.py _VALUE_RANGES["step"] = (1, 255)).
+        if (_ps(req, "step") or 0) > 255:
+            warnings.append(_e("paradigmSettings.step", "PR step must be ≤ 255"))
         if not _any_lever_armed(req):
             warnings.append(_e("hardwareUi.lever", "PR requires at least one lever armed"))
 

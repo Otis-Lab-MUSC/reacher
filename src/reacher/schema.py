@@ -173,8 +173,80 @@ INTENTIONALLY_UNHANDLED: dict[str, dict[str, Any]] = {
     },
 }
 
+# 1075 and 1375 share one defect and one remedy, so they share one entry object.
+# Note the shape: unlike every other gap, `paradigms` lists the sketches that DO
+# handle the command — see the "failure_mode" contract on KNOWN_FIRMWARE_GAPS.
+_RATIO_ALIAS_GAP: dict[str, Any] = {
+    "failure_mode": "wrong_value_accepted",
+    "paradigms": ["fr", "pr", "fr_lite", "pr_lite"],
+    "reason": (
+        "1075 and 1375 are not per-lever. Both cases call the same "
+        "scheduler.SetRatio(), which writes triggers[0].threshold on the "
+        "sketch's single Scheduler instance (Scheduler.cpp:377-383) — and so "
+        "does 201. The three cases are byte-identical apart from the string "
+        "passed to logParamChange (fr.ino:322/342/353). Setting RH=5 then LH=3 "
+        "leaves the board running ratio 3 for both levers, and the next 201 at "
+        "session start overwrites whatever a lever card last wrote. Firmware "
+        "then confirms the lie: logParamChange echoes the *requested* value "
+        "under the per-lever device name without reading scheduler state, so "
+        "host, log and operator all receive an ACK for a per-lever ratio the "
+        "board never stored. Ratio is not even lever-scoped conceptually — "
+        "configureFixedRatio sets sourceFilter = NONE (fr/Config.h:52), so with "
+        "both levers reinforced the single counter pools presses from both."
+    ),
+    "ui_guidance": (
+        "Do not offer a ratio control per lever. Offer one scheduler-wide "
+        "ratio and say so on the control, the way the shared timeout mode is "
+        "already documented. Derive that from this entry, never hand-write it. "
+        "Unlike the other gaps there is nothing to disable-and-explain here: a "
+        "per-lever ratio input cannot be made honest, because the second value "
+        "silently destroys the first."
+    ),
+    "persistence_note": (
+        "Per-lever ratio was never sent at session start — `ratio` is absent "
+        "from the frontend's PRESET_COMMAND_MAP — so saved presets do not carry "
+        "it and no stored preset needs migrating. The scalar "
+        "paradigmSettings.ratio (dispatched as 201) is the persisted one."
+    ),
+    "remedy": (
+        "Host-side only, and already applied: kernel _COMMAND_STATE_MAP maps "
+        "201/1075/1375 to one CONTROLLER 'ratio' field rather than two per-lever "
+        "fields. A genuine per-lever ratio needs firmware — two PRESS_COUNT "
+        "triggers with sourceFilter LEVER_RH/LEVER_LH (Trigger.h:58,69 already "
+        "supports it) plus a lever-addressed SetRatio. Blocked on capacity, not "
+        "expressiveness: MAX_TRIGGERS = MAX_CHAINS = 2 and trigger 1 / chain 1 "
+        "are already claimed by LASER_TRIGGER_{RH,LH}_ONLY."
+    ),
+    "before_removing": (
+        "This entry does not go stale the way a 'code_rejected' gap does — the "
+        "handler exists and is supposed to. It is stale only once firmware has a "
+        "lever-addressed ratio, i.e. when SetRatio takes a lever argument or the "
+        "per-lever cases stop resolving to the same trigger. Confirm that in "
+        "Scheduler.cpp before deleting it; the presence of a 1075 handler proves "
+        "nothing."
+    ),
+}
+
+
+# Each entry declares a "failure_mode", because the two kinds fail — and go
+# stale — in opposite directions:
+#
+#   "code_rejected"        firmware has no handler; the command reaches the
+#                          default case and emits a level-006. `paradigms` lists
+#                          the sketches that DROP it, and the entry is stale once
+#                          one of them grows a handler.
+#   "wrong_value_accepted" firmware handles the command and silently does
+#                          something other than what its name says. `paradigms`
+#                          lists the sketches that HANDLE it, and the entry is
+#                          stale only when the semantics are fixed — which no
+#                          handler-presence check can detect. Such an entry must
+#                          not exempt anything from the C14 declaration/handler
+#                          parity check: the handler is really there.
+#
+# tests/test_firmware_parity.py enforces both directions.
 KNOWN_FIRMWARE_GAPS: dict[str, dict[str, Any]] = {
     "LASER_TRIGGER_LH_ONLY": {
+        "failure_mode": "code_rejected",
         "paradigms": ["vi", "vi_lite", "omission", "omission_lite"],
         "reason": (
             "vi and omission handle only LASER_TRIGGER_RH_ONLY and have no "
@@ -208,6 +280,8 @@ KNOWN_FIRMWARE_GAPS: dict[str, dict[str, Any]] = {
             "reading alone, and the lite twins sit at 91-94% of UNO flash."
         ),
     },
+    "LEVER_RH_SET_RATIO": _RATIO_ALIAS_GAP,
+    "LEVER_LH_SET_RATIO": _RATIO_ALIAS_GAP,
 }
 
 
