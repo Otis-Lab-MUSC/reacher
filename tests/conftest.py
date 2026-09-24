@@ -33,6 +33,8 @@ def _isolate_diagnostic_logs(tmp_path, monkeypatch):
     real home directory without ever mentioning logging.
     """
     monkeypatch.setenv("REACHER_LOG_DIR", str(tmp_path / "runs"))
+    # The kernel's per-session dir (event_log.jsonl etc.) is rooted separately.
+    monkeypatch.setenv("REACHER_SESSION_LOG_DIR", str(tmp_path / "sessions"))
     diagnostics.reset_for_tests()
     yield
     diagnostics.reset_for_tests()

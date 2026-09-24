@@ -186,6 +186,66 @@ class TestVIRules:
 
 
 # ---------------------------------------------------------------------------
+# Integer scheduler parameters
+# ---------------------------------------------------------------------------
+
+class TestIntegerParadigmSettings:
+    """The command endpoint types ratio/step/interval as int, so a fractional
+    value must be flagged here rather than 422 opaquely at session start."""
+
+    @pytest.mark.parametrize("paradigm,settings,field", [
+        ("fr", {"ratio": 2.5}, "ratio"),
+        ("pr", {"ratio": 2.5, "step": 1}, "ratio"),
+        ("pr", {"ratio": 1, "step": 1.5}, "step"),
+        ("vi", {"interval": 100.5}, "interval"),
+        ("omission", {"interval": 10.5}, "interval"),
+    ])
+    def test_fractional_value_is_an_error(self, paradigm, settings, field):
+        req = _req(paradigm=paradigm, paradigmSettings=settings, hardwareUi=_lever_pump_ok())
+        result = run_validation(req)
+        assert result.valid is False
+        assert _has(result, f"paradigmSettings.{field}", "error")
+
+    @pytest.mark.parametrize("bad", [True, False, "5", [1], {"a": 1}])
+    def test_bool_and_non_numeric_values_are_errors_not_a_swallowed_crash(self, bad):
+        # A non-numeric value used to raise TypeError in the range comparison, which
+        # the endpoint swallowed into "valid" with no warnings.
+        req = _req(paradigm="fr", paradigmSettings={"ratio": bad}, hardwareUi=_lever_pump_ok())
+        result = run_validation(req)
+        assert result.valid is False
+        assert _has(result, "paradigmSettings.ratio", "error")
+
+    @pytest.mark.parametrize("paradigm,settings", [
+        ("fr", {"ratio": 2}),
+        ("fr", {"ratio": 2.0}),
+        ("pr", {"ratio": 3, "step": 2}),
+        ("vi", {"interval": 30000}),
+        ("omission", {"interval": 30000}),
+    ])
+    def test_whole_numbers_still_pass(self, paradigm, settings):
+        req = _req(paradigm=paradigm, paradigmSettings=settings, hardwareUi=_lever_pump_ok())
+        result = run_validation(req)
+        assert not any(w.field.startswith("paradigmSettings.") for w in result.warnings)
+
+    def test_missing_value_keeps_its_existing_message(self):
+        req = _req(paradigm="fr", paradigmSettings={}, hardwareUi=_lever_pump_ok())
+        result = run_validation(req)
+        assert _has(result, "paradigmSettings.ratio", "error")
+        assert not any("whole number" in w.message for w in result.warnings)
+
+    def test_endpoint_reports_fractional_ratio(self, client):
+        resp = client.post(
+            "/api/validate/config",
+            json={"paradigm": "fr", "paradigmSettings": {"ratio": 2.5}, "hardwareUi": _lever_pump_ok()},
+            headers=AUTH,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["valid"] is False
+        assert body["warnings"][0]["field"] == "paradigmSettings.ratio"
+
+
+# ---------------------------------------------------------------------------
 # Rule 11: Omission required fields (levers optional)
 # ---------------------------------------------------------------------------
 

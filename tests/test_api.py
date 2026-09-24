@@ -161,6 +161,51 @@ class TestHardwareEndpoints:
         resp = client.post(f"/api/hardware/{sid}/command", json={"code": 99999}, headers=AUTH_HEADER)
         assert resp.status_code == 429
 
+    def test_payload_commands_require_a_value(self, client, monkeypatch):
+        """Every payload-carrying command 400s value-less; payload-free ones still send.
+
+        A bare {"cmd": 201} passed the range gate (which only ran when a value was
+        present), was sent to the board — where the missing key reads as 0 — and
+        left the host recording ratio=None.
+        """
+        from reacher.api.routers import hardware
+        from reacher.kernel.commands import COMMAND_REGISTRY
+        from reacher import pin_overrides
+
+        monkeypatch.setattr(hardware, "_RATE_LIMIT", 10_000)
+        sid = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER).json()["session_id"]
+        instance = client.app.state.session_manager.get_session(sid).instance
+
+        needs_value = [
+            s for c, s in COMMAND_REGISTRY.items()
+            if s.payload_key is not None and not s.deprecated and c not in pin_overrides.PIN_CONSTRAINTS
+        ]
+        assert 201 in [int(s.code) for s in needs_value]  # the enumeration is not vacuous
+        for spec in needs_value:
+            for body in ({"code": int(spec.code)}, {"code": int(spec.code), "value": None}):
+                resp = client.post(f"/api/hardware/{sid}/command", json=body, headers=AUTH_HEADER)
+                assert resp.status_code == 400, f"{spec.name} accepted value-less: {resp.text}"
+                assert resp.json()["detail"] == f"{spec.name} requires a 'value'"
+        instance.send_command.assert_not_called()
+
+        for code, spec in COMMAND_REGISTRY.items():
+            if spec.payload_key is None and not spec.deprecated:
+                resp = client.post(f"/api/hardware/{sid}/command", json={"code": code}, headers=AUTH_HEADER)
+                assert resp.status_code == 200, f"payload-free {spec.name} was rejected: {resp.text}"
+
+    def test_payload_command_with_value_still_sent_and_range_checked(self, client):
+        sid = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER).json()["session_id"]
+        instance = client.app.state.session_manager.get_session(sid).instance
+        ok = client.post(f"/api/hardware/{sid}/command", json={"code": 201, "value": 7}, headers=AUTH_HEADER)
+        assert ok.status_code == 200
+        instance.send_command.assert_called_once_with(201, 7)
+        # 0 is a real value, not "missing": it must reach the range gate, not the requires-a-value gate.
+        zero = client.post(f"/api/hardware/{sid}/command", json={"code": 201, "value": 0}, headers=AUTH_HEADER)
+        assert zero.status_code == 400
+        assert zero.json()["detail"] == "ratio must be between 1 and 255"
+        ok0 = client.post(f"/api/hardware/{sid}/command", json={"code": 203, "value": 0}, headers=AUTH_HEADER)
+        assert ok0.status_code == 200
+
 
 class TestFirmwareUploadEndpoint:
     """POST /api/firmware/upload/{id} — status codes must discriminate a
@@ -217,6 +262,56 @@ class TestFirmwareUploadEndpoint:
                 headers=AUTH_HEADER,
             )
         assert resp.status_code == 500
+
+    @pytest.mark.parametrize("paradigm", ["nonsense", "FR", "", "../../etc/passwd", "fr.hex"])
+    def test_unknown_paradigm_rejected_before_any_side_effect(self, client, paradigm):
+        """body.paradigm was untyped: it became the session's paradigm (every
+        paradigm-gated command then 400s), was pushed into the kernel, and named
+        the cached hex file. It must 400 like POST /api/sessions, touching nothing."""
+        from reacher.kernel.commands import PARADIGMS
+
+        sid = self._session(client)
+        instance = client.app.state.session_manager.get_session(sid).instance
+        instance.ser.is_open = True
+        with patch(
+            "reacher.api.routers.firmware._uploader.upload", new=AsyncMock(return_value=True)
+        ) as upload, patch(
+            "reacher.api.routers.firmware.FirmwareUploader.cache_hex"
+        ) as cache_hex:
+            resp = client.post(
+                f"/api/firmware/upload/{sid}",
+                json={"paradigm": paradigm, "board": "mega", "hex_data": "OjAwMDAwMDAxRkY="},
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == f"Invalid paradigm. Must be one of: {', '.join(PARADIGMS)}"
+        upload.assert_not_called()
+        cache_hex.assert_not_called()
+        instance.close_serial.assert_not_called()
+        instance.set_COM_port.assert_not_called()
+        info = client.app.state.session_manager.get_session(sid)
+        assert info.state == "idle"
+        assert info.paradigm == "fr"
+
+    def test_upload_validates_against_the_same_paradigm_set_as_session_create(self):
+        from reacher.kernel.commands import PARADIGMS as SESSION_PARADIGMS
+        from reacher.api.routers.firmware import PARADIGMS as UPLOAD_PARADIGMS
+
+        assert tuple(UPLOAD_PARADIGMS) == tuple(SESSION_PARADIGMS)
+
+    @pytest.mark.parametrize("paradigm", ["fr", "pr_lite", "pavlovian"])
+    def test_known_paradigm_still_uploads(self, client, paradigm):
+        sid = self._session(client)
+        with patch(
+            "reacher.api.routers.firmware._uploader.upload", new=AsyncMock(return_value=True)
+        ), patch("reacher.api.routers.firmware.asyncio.sleep", new=AsyncMock(return_value=None)):
+            resp = client.post(
+                f"/api/firmware/upload/{sid}",
+                json={"paradigm": paradigm},
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["paradigm"] == paradigm
 
 
 class TestPinAssignments:

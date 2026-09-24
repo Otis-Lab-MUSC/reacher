@@ -280,7 +280,9 @@ class REACHER:
             "desc": None
         }
         self.hardware_settings: List = []
-        self.reacher_log_path = os.path.expanduser(fr'~/REACHER/LOG/{self.get_time()}')
+        # Distinct from REACHER_LOG_DIR, which roots the diagnostics sink (LOG/runs).
+        _session_log_root = os.environ.get("REACHER_SESSION_LOG_DIR") or os.path.expanduser("~/REACHER/LOG")
+        self.reacher_log_path = os.path.join(_session_log_root, self.get_time())
         os.makedirs(self.reacher_log_path, exist_ok=True)
         self.controller_log: str = os.path.join(self.reacher_log_path, "controller_log.json")
         self.interface_log: str = os.path.join(self.reacher_log_path, "interface_log.log")
@@ -817,10 +819,25 @@ class REACHER:
                 parts.append(0)
         return tuple(parts)
 
+    @staticmethod
+    def _normalise_param_change(event: dict) -> Optional[dict]:
+        """Fold a firmware ``logParamChange`` record into the host row shape.
+
+        ``{"device": D, "param": P, "value": V}`` becomes ``{"device": D, P: V}``,
+        which is what ``_update_hardware_setting`` writes for a host-side send.
+        IDENTIFY also carries a ``device`` but has a ``sketch``, so it is not one.
+        """
+        if "param" not in event or "value" not in event or "sketch" in event:
+            return None
+        return {**{k: v for k, v in event.items() if k not in ("param", "value")}, event["param"]: event["value"]}
+
     def update_firmware_information(self, event: dict) -> None:
+        param_row = self._normalise_param_change(event)
         if event["device"] == "CONTROLLER":
             with self.thread_lock:  # Fix: F-009 — guard cross-thread dict access
                 self.firmware_information.update(event)
+                if param_row is not None:
+                    self._merge_hardware_row(param_row)
             self.logger.info("--> Updated arduino configuration")
             # Fix: LAZ-001 — Signal firmware readiness (IDENTIFY ack received)
             # Unblock any waiting connect/post-upload flow so state transitions to "connected"
@@ -885,14 +902,28 @@ class REACHER:
         else:
             device = event.get("device")
             with self.thread_lock:  # Fix: F-009 — guard cross-thread list access
-                for i, entry in enumerate(self.hardware_settings):
-                    if entry.get("device") == device:
-                        self.hardware_settings[i] = event
-                        break
+                if param_row is not None:
+                    self._merge_hardware_row(param_row)
                 else:
-                    self.hardware_settings.append(event)
+                    for i, entry in enumerate(self.hardware_settings):
+                        if entry.get("device") == device:
+                            self.hardware_settings[i] = event
+                            break
+                    else:
+                        self.hardware_settings.append(event)
             self.logger.info("--> Updated hardware defaults list")
             self._emit("config", event)
+
+    def _merge_hardware_row(self, row: dict) -> None:
+        """Merge *row* into its device's ``hardware_settings`` entry, appending if absent.
+
+        Caller holds ``thread_lock``.
+        """
+        for entry in self.hardware_settings:
+            if entry.get("device") == row.get("device"):
+                entry.update(row)
+                return
+        self.hardware_settings.append(dict(row))
 
     def _update_hardware_setting(self, device: str, updates: dict) -> None:
         """Update a device entry in hardware_settings in-place and emit a config event."""

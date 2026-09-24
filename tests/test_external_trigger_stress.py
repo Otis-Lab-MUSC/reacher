@@ -289,9 +289,19 @@ class TestEndToEndThroughSimulator:
         after = time.time()
         assert before <= sim_reacher.program_start_time <= after + 0.05
 
-        with open(sim_reacher._event_log_path) as f:
-            entries = [json.loads(line) for line in f if line.strip()]
-        start_entries = [e for e in entries if e.get("source") == "external"]
+        # program_start_time is assigned one line before the log write, and the
+        # file is created lazily on that write, so the anchor alone is not a
+        # signal that the line has landed.
+        def _start_entries():
+            try:
+                with open(sim_reacher._event_log_path) as f:
+                    entries = [json.loads(line) for line in f if line.strip()]
+            except FileNotFoundError:
+                return []
+            return [e for e in entries if e.get("source") == "external"]
+
+        assert _wait_until(lambda: len(_start_entries()) >= 1)
+        start_entries = _start_entries()
         assert len(start_entries) == 1
         lag = start_entries[0]["receipt_lag_s"]
         assert 0.0 <= lag < 1.0, f"receipt lag {lag} looks unreasonable for an in-process queue hop"

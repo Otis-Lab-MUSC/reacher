@@ -48,6 +48,7 @@ python -m build
 | `REACHER_TOKEN_REMOTE_OK` | unset | `GET /api/auth/token` only serves the key to a loopback peer by default (Fix: F1). Set to `1` to allow a non-loopback peer to mint the key from this endpoint — needed when loading the bundled UI directly from another machine under `REACHER_HOST=0.0.0.0`. Default-deny; the endpoint still requires the `X-Reacher-App: 1` header regardless. |
 | `REACHER_AVRDUDE_PATH` | n/a | **Build-time only** — read by labrynth's `labrynth.spec`/`labrynth-cli.spec` to pick the `avrdude` binary to bundle. Nothing in reacher reads it at runtime; the uploader resolves avrdude from `_MEIPASS/avrdude/` or `PATH`. |
 | `REACHER_LOG_DIR` | `~/REACHER/LOG/runs` | Diagnostic run-log directory |
+| `REACHER_SESSION_LOG_DIR` | `~/REACHER/LOG` | Root for per-session kernel dirs (`event_log.jsonl`, `controller_log.json`); tests point it at `tmp_path` |
 | `REACHER_LOG_LEVEL` | `DEBUG` | Floor for the diagnostic log (`INFO` drops serial-wire records) |
 | `REACHER_LOG_VERBOSE_DEPS` | unset | Keep third-party DEBUG chatter (httpx, zeroconf, …) out of the log |
 | `REACHER_GITHUB_OWNER` | `Otis-Lab-MUSC` | GitHub org/user that owns the target issue repos. Used to build the pre-filled "New Issue" link. |
@@ -249,7 +250,7 @@ Tests use `pytest` with `asyncio_mode=auto` (configured in `pyproject.toml`). Th
 - `tests/test_device_names.py` — L8: kernel and simulator device names against the firmware namespaces, and that every `code_dict` level is classified
 - `tests/test_frontend_parity.py` — C3–C9 against the labrynth checkout; **skips loudly** when absent
 - `tests/test_mcp_*.py` — workspace discovery, the checkout-beats-wheel guarantee, the check engine's golden-negatives, and the tool surface
-- `tests/conftest.py` — autouse fixture pointing `REACHER_LOG_DIR` at `tmp_path`; **required**, or tests write to the real `~/REACHER/`
+- `tests/conftest.py` — autouse fixture pointing `REACHER_LOG_DIR` and `REACHER_SESSION_LOG_DIR` at `tmp_path`; **required**, or tests write to the real `~/REACHER/`
 
 **Golden-negatives are mandatory for a new check.** Every consistency rule ships
 with a test driving deliberately drifted input, because a check that has never

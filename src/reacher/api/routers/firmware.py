@@ -50,6 +50,12 @@ class UploadRequest(BaseModel):
 async def upload_firmware(session_id: str, body: UploadRequest, request: Request):
     sm = request.app.state.session_manager
 
+    # Same gate as POST /api/sessions. body.paradigm becomes the session's
+    # paradigm, the simulator's sketch and the cached hex's filename, so it
+    # must be rejected before anything is touched.
+    if body.paradigm not in PARADIGMS:
+        raise HTTPException(status_code=400, detail=f"Invalid paradigm. Must be one of: {', '.join(PARADIGMS)}")
+
     # Validate board early
     if body.board.lower() not in SUPPORTED_BOARDS:
         raise HTTPException(
