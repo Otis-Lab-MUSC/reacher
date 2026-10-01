@@ -152,6 +152,9 @@ async def connect_serial(session_id: str, request: Request):
                 {
                     "level": "warn",
                     "message": f"Replayed reward-chain pump target on connect: pump2={saved_pump_target}",
+                    # Structured so the UI can render it rather than only log it.
+                    "kind": "pump_target_replay",
+                    "pump2": saved_pump_target,
                 },
             )
     except Exception:
@@ -165,6 +168,9 @@ async def connect_serial(session_id: str, request: Request):
         "replayed_pins": replayed_pins,
         "skipped_pins": skipped_pins,
         "replayed_pump_target": replayed_pump_target,
+        # What the reward chain targets now. Without a replay the board is at
+        # its boot default (primary); same spelling as the firmware's ack.
+        "pump_target": "PUMP2" if replayed_pump_target else "PUMP",
     }
 
 

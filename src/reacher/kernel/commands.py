@@ -708,7 +708,12 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     ),
     1074: CommandSpec(
         CommandCode.LEVER_RH_SET_TIMEOUT, "LEVER_RH_SET_TIMEOUT",
-        "Set right-hand lever timeout (ms)",
+        "Set the post-reward lever timeout (ms). Despite the name this is NOT "
+        "per-lever: 1074 and 1374 both write the one scheduler timeout interval "
+        "(TIMEOUT_INTERVAL via Scheduler::SetTimeoutInterval, which also rewrites "
+        "the chain's SET_TIMEOUT step), so last write wins — sending 1074 then "
+        "1374 leaves 1374's value live for both levers. Send exactly one of "
+        "1074/1374",
         payload_key="timeout", payload_type="int",
         paradigms=with_lite("fr", "pr", "vi", "omission"),
     ),
@@ -728,8 +733,9 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.LEVER_RH_SET_TIMEOUT_MODE, "LEVER_RH_SET_TIMEOUT_MODE",
         "Set when the lever timeout starts: 0 = every active press (legacy default), "
         "1 = reward-triggering press only. Scheduler-wide, not per-lever — 1077 and "
-        "1377 write the same flag and last write wins, exactly as 1074/1374 do for "
-        "the timeout interval",
+        "1377 write the same flag (Scheduler::SetTimeoutMode) and last write wins, "
+        "exactly as 1074/1374 do for the timeout interval. Send exactly one of "
+        "1077/1377",
         payload_key="timeout_mode", payload_type="int",
         paradigms=with_lite("fr", "pr", "vi"),
     ),
@@ -758,7 +764,12 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     ),
     1374: CommandSpec(
         CommandCode.LEVER_LH_SET_TIMEOUT, "LEVER_LH_SET_TIMEOUT",
-        "Set left-hand lever timeout (ms)",
+        "Set the post-reward lever timeout (ms). Despite the name this is NOT "
+        "per-lever: 1374 and 1074 both write the one scheduler timeout interval "
+        "(TIMEOUT_INTERVAL via Scheduler::SetTimeoutInterval, which also rewrites "
+        "the chain's SET_TIMEOUT step), so last write wins — sending 1074 then "
+        "1374 leaves 1374's value live for both levers. Send exactly one of "
+        "1074/1374",
         payload_key="timeout", payload_type="int",
         paradigms=with_lite("fr", "pr", "vi", "omission"),
     ),
@@ -778,8 +789,9 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.LEVER_LH_SET_TIMEOUT_MODE, "LEVER_LH_SET_TIMEOUT_MODE",
         "Set when the lever timeout starts: 0 = every active press (legacy default), "
         "1 = reward-triggering press only. Scheduler-wide, not per-lever — 1077 and "
-        "1377 write the same flag and last write wins, exactly as 1074/1374 do for "
-        "the timeout interval",
+        "1377 write the same flag (Scheduler::SetTimeoutMode) and last write wins, "
+        "exactly as 1074/1374 do for the timeout interval. Send exactly one of "
+        "1077/1377",
         payload_key="timeout_mode", payload_type="int",
         paradigms=with_lite("fr", "pr", "vi"),
     ),
