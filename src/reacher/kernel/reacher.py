@@ -111,9 +111,18 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     201: ("CONTROLLER", "ratio", _USE_VALUE),
     1075: ("CONTROLLER", "ratio", _USE_VALUE),
     1375: ("CONTROLLER", "ratio", _USE_VALUE),
-    # --- Lever parameters ---
-    1074: ("LEVER_RH", "timeout", _USE_VALUE),
-    1374: ("LEVER_LH", "timeout", _USE_VALUE),
+    # --- Lever timeout (scheduler-wide, not per-lever) ---
+    # 1074/1374 both write the one TIMEOUT_INTERVAL / Scheduler::SetTimeoutInterval
+    # (fr.ino:315-317, 335-337) and 1077/1377 the one Scheduler::SetTimeoutMode
+    # flag, so the last write wins on the board. Modelling them as LEVER_RH and
+    # LEVER_LH fields recorded two values the board cannot hold — a GUI that sent
+    # RH then LH showed RH = N while the board ran LH's value. One
+    # scheduler-scoped field each, exactly as 201/1075/1375 share CONTROLLER.ratio.
+    # 1077/1377 were previously unmodelled on the host entirely.
+    1074: ("CONTROLLER", "timeout", _USE_VALUE),
+    1374: ("CONTROLLER", "timeout", _USE_VALUE),
+    1077: ("CONTROLLER", "timeout_mode", _USE_VALUE),
+    1377: ("CONTROLLER", "timeout_mode", _USE_VALUE),
     # --- Pin reassignment (suffix x76) ---
     376: ("CUE", "pin", _USE_VALUE),
     386: ("CUE2", "pin", _USE_VALUE),

@@ -136,7 +136,10 @@ async def send_command(session_id: str, body: CommandRequest, request: Request):
         except Exception:
             logger.exception("Failed to persist pump target for session %s", session_id)
 
-    return {"status": "sent", "command": spec.name, "code": body.code}
+    response = {"status": "sent", "command": spec.name, "code": body.code}
+    if body.code == int(CommandCode.SET_ACTIVE_PUMP):
+        response["pump_target"] = "PUMP2" if body.value else "PUMP"
+    return response
 
 
 @router.get("/{session_id}/commands")
@@ -177,9 +180,13 @@ async def get_config(session_id: str, request: Request):
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    saved_pump2 = pump_target.get(info.port)
     return {
         "firmware_info": info.instance.get_firmware_information(),
         "hardware_settings": info.instance.get_hardware_settings(),
+        # Last 221 sent for this port (None = never sent). Unlike the PUMP2
+        # row's mirrored "active", this survives the firmware's Start dump.
+        "pump_target": None if saved_pump2 is None else ("PUMP2" if saved_pump2 else "PUMP"),
     }
 
 
