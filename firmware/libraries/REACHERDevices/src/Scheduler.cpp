@@ -122,11 +122,31 @@ void Scheduler::OnInputEvent(DeviceType source, uint32_t timestamp) {
     // FR/PR LASER_RH_ONLY mode, trigger 1 fires chain 1 on *every* active press,
     // and chain 1 has no SET_TIMEOUT step, so it correctly is not a reward.
     bool rewardFired = false;
+    bool intervalFired = false;
+    bool intervalSchedule = false;
     for (uint8_t i = 0; i < MAX_TRIGGERS; i++) {
+      if (triggers[i].enabled && triggers[i].type == TriggerType::AVAILABILITY_WINDOW) {
+        intervalSchedule = true;
+      }
       if (triggers[i].OnInputEvent(source, timestamp)) {
         if (ChainAppliesTimeout(triggers[i].chainIndex)) rewardFired = true;
+        if (triggers[i].type == TriggerType::AVAILABILITY_WINDOW) intervalFired = true;
         FireChain(triggers[i].chainIndex, timestamp);
       }
+    }
+
+    // Interval schedules (VI): only the press that collects the availability
+    // window is ACTIVE. Every other press on the reinforced lever — before the
+    // window opens, or after the reward is taken — is logged INACTIVE, and
+    // must not arm the timeout (that would lock out the rewarding press).
+    if (intervalSchedule && !intervalFired) {
+      cls = PressClass::INACTIVE;
+      if (source == DeviceType::LEVER_RH) {
+        lastPressClassRH = cls;
+      } else {
+        lastPressClassLH = cls;
+      }
+      return;
     }
 
     // Mode 0 (default) = legacy: every ACTIVE press arms the timeout window.
