@@ -684,11 +684,10 @@ class FirmwareSimulator:
                     break
                 self._clock += int(delay * 1000)
                 elapsed += delay
-                press_ts = self._clock
-                if self._emit_lever_press("ACTIVE") == "ACTIVE":
-                    # Never rewarded (the window has not opened yet), so mode 0
-                    # locks the lever out here and mode 1 leaves it open.
-                    self._timeout.note_active_press(self._active_orientation(), press_ts, False)
+                # Mirrors Scheduler::OnInputEvent: on an interval schedule only
+                # the window-collecting press is ACTIVE; this one is INACTIVE
+                # and arms no timeout.
+                self._emit_lever_press("INACTIVE", on_active_lever=True)
                 self._emit_microscope_frame()
 
             if not self._running or self._stop_event.is_set():
@@ -701,9 +700,7 @@ class FirmwareSimulator:
             self._clock += int(delay * 1000)
             press_ts = self._clock
             if self._emit_lever_press("ACTIVE") != "ACTIVE":
-                # An earlier ACTIVE press locked the lever, so the press that
-                # should have collected this availability window classifies
-                # TIMEOUT and the reward is lost outright. Mode 1 avoids this.
+                # Still inside the previous reward's timeout window.
                 continue
             self._timeout.note_active_press(self._active_orientation(), press_ts, True)
             self._emit_reinforcement_chain()
@@ -808,7 +805,7 @@ class FirmwareSimulator:
 
     # --- Event emitters ---
 
-    def _emit_lever_press(self, press_class: str):
+    def _emit_lever_press(self, press_class: str, on_active_lever: bool = False):
         """Emit one press and return the class actually logged (None if disarmed).
 
         A press requested as ACTIVE is re-classified TIMEOUT when the lever's
@@ -819,6 +816,9 @@ class FirmwareSimulator:
             orientation = "RH" if self.lever_rh_active else "LH"
             if self._timeout_applies():
                 press_class = self._timeout.classify(orientation, self._clock)
+        elif on_active_lever:
+            # VI: a non-collecting press on the reinforced lever is INACTIVE
+            orientation = self._active_orientation()
         else:
             # Inactive press comes from the non-reinforced lever
             orientation = "LH" if self.lever_rh_active else "RH"
