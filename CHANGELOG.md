@@ -28,7 +28,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   primary one on the next connect. New `GET`/`DELETE /api/serial/pump-target` endpoints
   ([#35](https://github.com/Otis-Lab-MUSC/labrynth/issues/35))
 
+### Fixed
+- **Variable Interval delivered no rewards at all.** `vi`/`vi_lite` zeroed the
+  Trigger's live availability window (`windowStart`/`windowEnd`/`firedInWindow`)
+  from `configureVariableInterval()` in `Config.h`. Because `vi.ino`'s
+  `StartSession()` runs `ReconfigureChain()` *after* `scheduler.StartSession()`
+  seeds the window, the config helper won — and `Trigger::OnTick()` gates its
+  re-arm on `windowEnd > 0`, so a zeroed `windowEnd` was unrecoverable. The VI
+  trigger went permanently dead and no VI session ever fired a reward chain.
+  `SET_VI_INTERVAL (204)` hit the same path mid-session. Present in every
+  release from v3.0.1 (regressed in the session-start filter-shadow reset) to
+  v3.4.0-beta.3
+
 ### Notes
+- **Re-run any VI data collected on v3.0.1 through v3.4.0-beta.3.** Those
+  sessions recorded lever presses normally but delivered zero reinforcement, so
+  they are extinction data regardless of what the protocol specified. The press
+  counters looked plausible at default settings (`timeout_mode=0`,
+  `timeout=20000`), which is how it went unnoticed: the lever timeout still
+  throttled presses into a believable ACTIVE/TIMEOUT split. With
+  `timeout_mode=1` or a zero timeout the giveaway was visible — the timeout
+  never armed, so *every* press logged `ACTIVE_PRESS`
 - Worth knowing if you have FR2+ or PR/VI data already collected with a non-zero
   timeout: in mode `0` (which is what every existing rig has been running) a
   `TIMEOUT`-classified press is logged but never counted toward the ratio, so the

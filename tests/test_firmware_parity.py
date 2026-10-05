@@ -353,3 +353,79 @@ def test_helper_reports_the_command_field(sketches):
     body = helper.split("void logUnknownCommand(int command)")[1]
     assert '\\"command\\":' in body, "logUnknownCommand must emit a 'command' field"
     assert "Serial.print(command)" in body, "logUnknownCommand must emit the code itself"
+
+
+# --- C16: Config.h must not clobber availability-window runtime state -----
+
+# A paradigm's Config.h describes a *schedule*; the Trigger's live window is
+# runtime state owned by Scheduler::StartSession() (which seeds it) and
+# Trigger::Reset() (which clears it at EndSession).
+#
+# Writing it from Config.h killed VI outright for every release from v3.0.1 to
+# v3.4.0-beta.3. The mechanism is worth stating, because it is why these three
+# fields are special rather than merely untidy:
+#
+#   * vi.ino's StartSession() calls scheduler.StartSession() and *then*
+#     ReconfigureChain() -> configureVariableInterval(), so the config helper
+#     ran last and won.
+#   * Trigger::OnTick() gates its window re-arm on `windowEnd > 0`, so a zeroed
+#     windowEnd is unrecoverable — nothing else in the firmware ever writes it.
+#     The trigger went permanently dead and no VI session delivered a reward.
+#   * SET_VI_INTERVAL (204) also calls ReconfigureChain(), so the same write
+#     killed a running window mid-session.
+#
+# Contrast ABSENCE_TIMER, whose `absenceStart` omission/Config.h does zero:
+# Trigger::OnInputEvent writes absenceStart on every press, so that one
+# self-heals on the animal's first press. The window trio has no such path,
+# which is why this test guards it specifically.
+#
+# A behavioral test cannot catch this from Python — the only VI coverage runs
+# against FirmwareSimulator, whose _run_vi is a scripted generator that never
+# instantiates the firmware Trigger state machine. It models the schedule we
+# intended, not the one we shipped, so it stayed green throughout. Guarding the
+# source is what actually closes the hole.
+
+_WINDOW_RUNTIME_FIELDS = ("windowStart", "windowEnd", "firedInWindow")
+
+
+def test_no_config_h_writes_availability_window_runtime_state(sketches):
+    """C16: schedule configuration may not touch the live availability window."""
+    offenders = []
+    for name in sketches:
+        config = FIRMWARE / name / "Config.h"
+        if not config.is_file():
+            continue
+        for lineno, line in enumerate(config.read_text().splitlines(), 1):
+            code = line.split("//", 1)[0]
+            for field in _WINDOW_RUNTIME_FIELDS:
+                if re.search(rf"\b{field}\s*=", code):
+                    offenders.append(f"{name}/Config.h:{lineno}: {code.strip()}")
+    assert not offenders, (
+        "Config.h assigns AVAILABILITY_WINDOW runtime state:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nThose fields belong to Scheduler::StartSession() and "
+        "Trigger::Reset(). Because vi.ino reconfigures *after* StartSession and "
+        "Trigger::OnTick gates its re-arm on `windowEnd > 0`, zeroing them here "
+        "permanently disables the VI trigger — no reward ever fires."
+    )
+
+
+def test_scheduler_start_session_still_seeds_the_window():
+    """C16 converse: the guard above is only safe while StartSession seeds it.
+
+    If this seeding were ever dropped, removing the Config.h writes would leave
+    the window uninitialised instead of merely unclobbered, and the test above
+    would pass while VI stayed broken.
+    """
+    scheduler = (
+        FIRMWARE / "libraries" / "REACHERDevices" / "src" / "Scheduler.cpp"
+    ).read_text()
+    body = scheduler.split("void Scheduler::StartSession(uint32_t now)")[1].split("\n}")[0]
+    assert "AVAILABILITY_WINDOW" in body, (
+        "Scheduler::StartSession must initialise AVAILABILITY_WINDOW triggers"
+    )
+    for field in _WINDOW_RUNTIME_FIELDS:
+        assert re.search(rf"\b{field}\s*=", body), (
+            f"Scheduler::StartSession no longer seeds {field}; the VI window "
+            "would start uninitialised"
+        )

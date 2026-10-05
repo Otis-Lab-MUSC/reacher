@@ -49,9 +49,14 @@ inline void configureVariableInterval(Scheduler& sched, Cue& cue, Cue& cue2, Pum
     t->chainIndex = 0;
     t->enabled = true;
     t->intervalMin = totalInterval;
-    t->windowStart = 0;
-    t->windowEnd = 0;
-    t->firedInWindow = false;
+    // Deliberately does NOT touch windowStart/windowEnd/firedInWindow. Those are
+    // runtime state owned by Scheduler::StartSession() (which seeds the window)
+    // and Trigger::Reset() (which clears it at EndSession). Zeroing them here
+    // killed VI outright: vi.ino's StartSession() calls ReconfigureChain()
+    // *after* scheduler.StartSession(), and Trigger::OnTick() gates its window
+    // re-arm on `windowEnd > 0`, so a zeroed windowEnd is permanent — the
+    // trigger never fired again and no VI session delivered a reward. The same
+    // applied mid-session, where SET_VI_INTERVAL (204) also reconfigures.
     t->sourceFilter = DeviceType::NONE;
     t->probability = 100;
   }
