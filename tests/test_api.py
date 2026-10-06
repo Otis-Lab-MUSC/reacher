@@ -603,6 +603,7 @@ class TestFileEndpoints:
             assert "notes.txt" in names
             assert "frame_timestamps.csv" in names
             assert "event_log.jsonl" in names
+            assert "behavior_events.xlsx" in names
 
             meta = json.loads(zf.read("metadata.json"))
             assert meta["session_name"] == "my_session"
