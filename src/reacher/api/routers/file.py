@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from ...child_env import clean_child_env
+from ...export_xlsx import build_behavior_workbook, rows_from_csv
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -251,6 +252,35 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
             per_segment_event_counts = [len(behavior)]
             segment_count = 1
             total_event_count = len(behavior)
+
+        # behavior_events.xlsx — Events + Summary sheets, alongside the CSV(s). Omitted rather
+        # than failing an export the user is waiting on.
+        try:
+            segment_rows = []
+            for seg_path in segment_exports if segment_exports else []:
+                if os.path.isfile(seg_path):
+                    with open(seg_path, newline="") as f:
+                        segment_rows.append(rows_from_csv(f.read()))
+                else:
+                    segment_rows.append([])
+            segment_rows.append(rows_from_csv(_build_behavior_csv(behavior, frame_timestamps)))
+            facts = [
+                ("Session", body.session_name or filename),
+                ("Paradigm", info.paradigm),
+                ("Firmware", f"{firmware_info.get('sketch', 'unknown.ino')} {firmware_info.get('version', 'unknown')}"),
+                ("Exported", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())),
+                ("Program start", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(body.program_start_time / 1000))
+                 if body.program_start_time is not None else None),
+                ("Segments", segment_count),
+                ("Infusions", infusion_count),
+                ("Lever presses", press_count),
+                ("Trials", trial_count),
+                ("Microscope frames", frame_count),
+                ("SLM events", len(slm_timestamps)),
+            ]
+            zf.writestr("behavior_events.xlsx", build_behavior_workbook(segment_rows, facts))
+        except Exception:
+            logger.warning("Failed to include behavior_events.xlsx for session %s", session_id, exc_info=True)
 
         # frame_timestamps.csv — only when microscope data was captured
         if frame_timestamps:

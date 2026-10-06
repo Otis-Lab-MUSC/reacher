@@ -268,6 +268,9 @@ class REACHER:
         self._cumulative_trial_count: int = 0
         self._segment_exports: List[str] = []
         self._segment_event_counts: List[int] = []
+        # Cumulative recorded-event tally keyed "DEVICE.EVENT". Unlike behavior_data it is
+        # NOT cleared by split_segment(), so the summary counts every segment.
+        self._event_type_counts: Dict[str, int] = {}
 
         # Program variables
         self.program_start_time: Optional[float] = None
@@ -352,6 +355,7 @@ class REACHER:
         self.time_check_flag.clear()  # Stop the time check thread
 
         self.behavior_data = []
+        self._event_type_counts = {}
         self.frame_data = []
         self.slm_data = []
         self._infusion_count = 0
@@ -1008,6 +1012,8 @@ class REACHER:
                 or entry_dict.get('device') == 'CONTROLLER':
             with self.thread_lock:
                 self.behavior_data.append(entry_dict)
+                _type_key = f"{entry_dict.get('device')}.{entry_dict.get('event')}"
+                self._event_type_counts[_type_key] = self._event_type_counts.get(_type_key, 0) + 1
                 if entry_dict.get('device') in ('PUMP', 'PUMP_1') and entry_dict.get('event') == 'INFUSION':
                     self._infusion_count += 1
                 elif entry_dict.get('device') in ('LEVER_RH', 'LEVER_LH') \
@@ -1335,6 +1341,7 @@ class REACHER:
             changes = [dict(entry) for entry in self._session_changes]
             firmware_information = dict(self.firmware_information)
             hardware_settings = [dict(entry) for entry in self.hardware_settings]
+            event_type_counts = dict(self._event_type_counts)
 
         initial_firmware = None
         initial_devices: Dict[str, Dict] = {}
@@ -1358,6 +1365,12 @@ class REACHER:
                 "none. Treat it as accurate to serial-read latency, not to the "
                 "on-device clock that level-007 behavioral events use."
             ),
+            # Count of every recorded behavior event, by type — the same events that land
+            # in behavior_events*.csv, across all segments of the run.
+            "event_counts": {
+                "total": sum(event_type_counts.values()),
+                "by_type": dict(sorted(event_type_counts.items())),
+            },
             "initial_configuration": {
                 "firmware": initial_firmware,
                 "devices": initial_devices,
@@ -1489,6 +1502,7 @@ class REACHER:
         the queue thread, in the same call that begins the session.
         """
         self.behavior_data = []
+        self._event_type_counts = {}
         self.frame_data = []
         self.slm_data = []
         self._infusion_count = 0
@@ -1777,6 +1791,7 @@ class REACHER:
 
         with self.thread_lock:
             self.behavior_data = []
+            self._event_type_counts = {}
             self.frame_data = []
             self.slm_data = []
             self._infusion_count = 0
