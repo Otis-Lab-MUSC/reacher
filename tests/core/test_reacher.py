@@ -1379,6 +1379,39 @@ class TestKernelCounters:
         assert instance.get_total_press_count() == 26
         assert instance.get_total_trial_count() == 10
 
+    def test_session_summary_counts_every_event_type(self, counter):
+        """session_summary.json carries a flat per-type tally so users need not re-count the CSV."""
+        counter.update_behavioral_events(self._infusion("PUMP_1"))
+        counter.update_behavioral_events(self._infusion("PUMP_1"))
+        counter.update_behavioral_events(self._press("LEVER_RH"))
+        counter.update_behavioral_events(self._press("LEVER_RH", "INACTIVE"))
+
+        counts = counter.get_session_summary()["event_counts"]
+        assert counts["total"] == 4
+        assert counts["by_type"] == {
+            "LEVER_RH.ACTIVE_PRESS": 1,
+            "LEVER_RH.INACTIVE_PRESS": 1,
+            "PUMP_1.INFUSION": 2,
+        }
+        assert counts["total"] == sum(counts["by_type"].values())
+
+    def test_event_counts_span_segments_and_clear_on_reset(self, counter, tmp_path):
+        """Splits empty behavior_data, so the tally must live outside it or the summary under-counts."""
+        counter._export_segment = lambda behavior, suffix="": str(tmp_path / f"seg{suffix}.csv")
+        counter._emit = lambda *a, **k: None
+
+        counter.update_behavioral_events(self._press("LEVER_RH"))
+        counter.update_behavioral_events(self._press("LEVER_RH"))
+        counter.split_segment()
+        counter.update_behavioral_events(self._press("LEVER_RH"))
+
+        counts = counter.get_session_summary()["event_counts"]
+        assert counts["by_type"] == {"LEVER_RH.ACTIVE_PRESS": 3}
+        assert counts["total"] == 3
+
+        counter._reset_session_buffers()
+        assert counter.get_session_summary()["event_counts"] == {"total": 0, "by_type": {}}
+
 
 class TestFirmwareErrorReporting:
     """Level-006 errors, the only signal that a command was dropped.
