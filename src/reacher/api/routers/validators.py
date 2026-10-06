@@ -275,6 +275,11 @@ def _cue_lever_overlap(
         return []
     timeout = _hw(req, lever_key, "timeout") or 0
     if timeout == 0:
+        # An unset timeout is the normal state for VI: a timeout period has no meaning
+        # in a variable-interval schedule, so warning about it is noise. A timeout that
+        # *is* set but shorter than the cue still falls through to the check below.
+        if req.paradigm == "vi":
+            return []
         return [_w(
             f"hardwareUi.{lever_key}.timeout",
             f"{lever_label} timeout is 0 — back-to-back presses will trigger overlapping "

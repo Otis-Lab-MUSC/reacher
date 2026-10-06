@@ -471,6 +471,36 @@ class TestTemporalRules:
         )
         assert _has(run_validation(req), "hardwareUi.lhLever.timeout", "warning")
 
+    # The cue-overlap rules live in _check_temporal, which only runs for time-limited sessions.
+    _TIME_LIMIT = {"limitType": "Time", "timeLimit": 3600}
+
+    @staticmethod
+    def _cue_on_rh_lever(timeout) -> dict:
+        lever = {"armed": True, "ratio": 1}
+        if timeout is not None:
+            lever["timeout"] = timeout
+        return {
+            "rhLever": lever,
+            "primaryPump": {"armed": True, "duration": 100},
+            "primaryCue": {
+                "armed": True, "frequency": 8000, "duration": 500,
+                "contingency": {"leverFilter": "rh", "delay": 0},
+            },
+        }
+
+    def test_unset_timeout_overlap_warns_for_fr(self):
+        req = _req(paradigm="fr", paradigmSettings={"ratio": 1}, hardwareUi=self._cue_on_rh_lever(None), limitSettings=self._TIME_LIMIT)
+        assert _has(run_validation(req), "hardwareUi.rhLever.timeout", "warning")
+
+    @pytest.mark.parametrize("timeout", [None, 0])
+    def test_unset_timeout_not_flagged_for_vi(self, timeout):
+        req = _req(paradigm="vi", paradigmSettings={"interval": 1000}, hardwareUi=self._cue_on_rh_lever(timeout), limitSettings=self._TIME_LIMIT)
+        assert not _has(run_validation(req), "hardwareUi.rhLever.timeout", "warning")
+
+    def test_short_nonzero_timeout_still_flagged_for_vi(self):
+        req = _req(paradigm="vi", paradigmSettings={"interval": 1000}, hardwareUi=self._cue_on_rh_lever(100), limitSettings=self._TIME_LIMIT)
+        assert _has(run_validation(req), "hardwareUi.rhLever.timeout", "warning")
+
     def test_temporal_skipped_for_non_time_limit(self):
         req = _req(
             hardwareUi={"rhLever": {"armed": True, "timeout": 99_999_999}},
