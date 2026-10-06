@@ -497,8 +497,15 @@ class TestTemporalRules:
         req = _req(paradigm="vi", paradigmSettings={"interval": 1000}, hardwareUi=self._cue_on_rh_lever(timeout), limitSettings=self._TIME_LIMIT)
         assert not _has(run_validation(req), "hardwareUi.rhLever.timeout", "warning")
 
-    def test_short_nonzero_timeout_still_flagged_for_vi(self):
-        req = _req(paradigm="vi", paradigmSettings={"interval": 1000}, hardwareUi=self._cue_on_rh_lever(100), limitSettings=self._TIME_LIMIT)
+    @pytest.mark.parametrize("timeout", [100, 3_700_000])
+    def test_no_timeout_rule_fires_for_vi(self, timeout):
+        # VI has no timeout period: a stale value carried by an old preset must not warn
+        # (short -> cue-overlap rule, huge -> rule 35).
+        req = _req(paradigm="vi", paradigmSettings={"interval": 1000}, hardwareUi=self._cue_on_rh_lever(timeout), limitSettings=self._TIME_LIMIT)
+        assert not _has(run_validation(req), "hardwareUi.rhLever.timeout", "warning")
+
+    def test_short_nonzero_timeout_still_flagged_for_fr(self):
+        req = _req(paradigm="fr", paradigmSettings={"ratio": 1}, hardwareUi=self._cue_on_rh_lever(100), limitSettings=self._TIME_LIMIT)
         assert _has(run_validation(req), "hardwareUi.rhLever.timeout", "warning")
 
     def test_temporal_skipped_for_non_time_limit(self):

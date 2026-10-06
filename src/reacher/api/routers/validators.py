@@ -275,11 +275,6 @@ def _cue_lever_overlap(
         return []
     timeout = _hw(req, lever_key, "timeout") or 0
     if timeout == 0:
-        # An unset timeout is the normal state for VI: a timeout period has no meaning
-        # in a variable-interval schedule, so warning about it is noise. A timeout that
-        # *is* set but shorter than the cue still falls through to the check below.
-        if req.paradigm == "vi":
-            return []
         return [_w(
             f"hardwareUi.{lever_key}.timeout",
             f"{lever_label} timeout is 0 — back-to-back presses will trigger overlapping "
@@ -307,6 +302,11 @@ def _check_temporal(req: ValidateConfigRequest) -> list[ValidationWarning]:
         return warnings
 
     time_limit_ms = time_limit * 1000
+
+    # VI has no timeout period (labrynth removes the setting and pins the firmware's to 0),
+    # so every lever-timeout rule below is moot, whatever stale value a preset carries.
+    if req.paradigm == "vi":
+        return warnings
 
     # Rule 35: RH lever timeout exceeds session time limit
     if _hw(req, "rhLever", "armed") and (_hw(req, "rhLever", "timeout") or 0) > time_limit_ms:
