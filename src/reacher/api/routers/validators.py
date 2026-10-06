@@ -42,6 +42,13 @@ def _hw(req: ValidateConfigRequest, device: str, field: str, default: Any = None
     return ((req.hardwareUi or {}).get(device) or {}).get(field, default)
 
 
+def _paradigm(req: ValidateConfigRequest) -> Optional[str]:
+    """Base paradigm name. Boards without two-photon hardware report a "_lite" build
+    ("vi_lite"), which runs the same schedule — every schedule-shaped check must see "vi"."""
+    p = req.paradigm
+    return p[: -len("_lite")] if p and p.endswith("_lite") else p
+
+
 def _ps(req: ValidateConfigRequest, field: str, default: Any = None) -> Any:
     return (req.paradigmSettings or {}).get(field, default)
 
@@ -102,7 +109,7 @@ def _has_infusion_component(limit_type: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def _check_paradigm(req: ValidateConfigRequest) -> list[ValidationWarning]:
-    p = req.paradigm
+    p = _paradigm(req)
     warnings: list[ValidationWarning] = []
 
     # The command endpoint types these as int, so 2.5 passes the range checks
@@ -213,7 +220,7 @@ def _check_hardware(req: ValidateConfigRequest) -> list[ValidationWarning]:
         if (_hw(req, "laser", "duration") or 0) == 0:
             warnings.append(_e("laser.duration", "Laser duration is zero — no optogenetic stimulus will be delivered"))
         mode = _hw(req, "laser", "mode") or ""
-        if mode in ("cs_plus", "cs_minus", "cs_both") and req.paradigm != "pavlovian":
+        if mode in ("cs_plus", "cs_minus", "cs_both") and _paradigm(req) != "pavlovian":
             warnings.append(_e("laser.mode", "CS-filter laser modes (cs_plus, cs_minus, cs_both) are Pavlovian-only; use contingent or independent for operant paradigms"))
 
     # Rule 29: microscope armed without frame rate
@@ -244,7 +251,7 @@ def _check_limits(req: ValidateConfigRequest) -> list[ValidationWarning]:
         warnings.append(_e("limitSettings.infusionLimit", "Infusion limit is zero — session would end immediately on start"))
 
     # Rule 32
-    if limit_type == "Trials" and req.paradigm in ("fr", "pr", "vi", "omission"):
+    if limit_type == "Trials" and _paradigm(req) in ("fr", "pr", "vi", "omission"):
         warnings.append(_w("limitSettings.limitType", "Trial-based limits are designed for Pavlovian paradigms; use Time or Infusion limits for operant paradigms"))
 
     # Rule 33
@@ -305,7 +312,7 @@ def _check_temporal(req: ValidateConfigRequest) -> list[ValidationWarning]:
 
     # VI has no timeout period (labrynth removes the setting and pins the firmware's to 0),
     # so every lever-timeout rule below is moot, whatever stale value a preset carries.
-    if req.paradigm == "vi":
+    if _paradigm(req) == "vi":
         return warnings
 
     # Rule 35: RH lever timeout exceeds session time limit
@@ -412,7 +419,7 @@ def run_validation(req: ValidateConfigRequest) -> ValidateConfigResponse:
         + _check_hardware(req)
         + _check_limits(req)
         + _check_temporal(req)
-        + (_check_pavlovian(req) if req.paradigm == "pavlovian" else [])
+        + (_check_pavlovian(req) if _paradigm(req) == "pavlovian" else [])
     )
     valid = not any(w.severity == "error" for w in all_warnings)
     return ValidateConfigResponse(valid=valid, warnings=all_warnings, suggestions="")
