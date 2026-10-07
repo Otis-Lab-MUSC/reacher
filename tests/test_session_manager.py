@@ -34,6 +34,51 @@ class TestCreateSession:
         assert sid1 != sid2
 
 
+class TestSimulatorInstances:
+    """Each session on the generic SIMULATOR port gets its own SIMn instance."""
+
+    def test_each_simulator_session_gets_its_own_port(self, sm):
+        sids = [sm.create_session("SIMULATOR", "fr") for _ in range(3)]
+        assert [sm.get_session(s).port for s in sids] == ["SIM1", "SIM2", "SIM3"]
+
+    def test_freed_instance_is_reused_lowest_first(self, sm):
+        a, b, c = (sm.create_session("SIMULATOR") for _ in range(3))
+        sm.destroy_session(b)
+        d = sm.create_session("SIMULATOR")
+        assert sm.get_session(d).port == "SIM2"
+        assert sm.get_session(c).port == "SIM3"
+
+    def test_explicit_simn_is_still_exclusive(self, sm):
+        sm.create_session("SIM2")
+        with pytest.raises(ValueError, match="already bound"):
+            sm.create_session("SIM2")
+
+    def test_generic_simulator_skips_an_explicitly_taken_instance(self, sm):
+        sm.create_session("SIM1")
+        sid = sm.create_session("SIMULATOR")
+        assert sm.get_session(sid).port == "SIM2"
+
+    def test_real_ports_unaffected(self, sm):
+        sid = sm.create_session("/dev/ttyUSB0")
+        assert sm.get_session(sid).port == "/dev/ttyUSB0"
+
+
+class TestSessionLogDirs:
+    def test_sessions_created_in_the_same_second_get_distinct_log_dirs(self, tmp_path, monkeypatch):
+        from reacher.kernel.reacher import REACHER
+
+        monkeypatch.setenv("REACHER_SESSION_LOG_DIR", str(tmp_path))
+        monkeypatch.setattr(REACHER, "get_time", staticmethod(lambda: "2026-01-01_00-00-00"), raising=False)
+        a, b, c = REACHER(session_id="a"), REACHER(session_id="b"), REACHER(session_id="c")
+        try:
+            paths = {a.reacher_log_path, b.reacher_log_path, c.reacher_log_path}
+            assert len(paths) == 3
+            assert all(p.startswith(str(tmp_path / "2026-01-01_00-00-00")) for p in paths)
+        finally:
+            for r in (a, b, c):
+                r.stop_threads() if hasattr(r, "stop_threads") else None
+
+
 class TestGetSession:
     def test_get_existing(self, sm):
         sid = sm.create_session("/dev/ttyUSB0")

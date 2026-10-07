@@ -16,7 +16,7 @@ import urllib.request
 import warnings
 from typing import Callable, Dict, List, Optional
 
-from .boards import BOARD_PROFILES, DEFAULT_BOARD, SIMULATOR_PORT, get_board_profile
+from .boards import BOARD_PROFILES, DEFAULT_BOARD, get_board_profile, is_simulator_port
 
 logger = logging.getLogger(__name__)
 
@@ -457,7 +457,7 @@ class FirmwareUploader:
         except OSError as exc:
             logger.warning("Could not read hex file metadata: %s", exc)
 
-        if port == SIMULATOR_PORT:
+        if is_simulator_port(port):
             return await self._simulate_upload(paradigm, board, hex_path, progress_callback)
 
         # Pre-flight: verify avrdude is reachable before spawning subprocess

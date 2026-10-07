@@ -11,6 +11,7 @@ import logging
 from typing import Callable, Dict, List, Optional, Union
 from serial.tools import list_ports
 
+from ..uploader.boards import SIMULATOR_PORT, is_simulator_port
 from .commands import build_command_payload, CommandCode, SCHEDULE_TO_PARADIGM
 # Leaf submodules rather than the `diagnostics` package, so importing the kernel
 # never re-enters a partially initialised `reacher/__init__`.
@@ -169,6 +170,9 @@ class REACHER:
 
         # Serial variables
         self._is_simulated: bool = False
+        # Name of the simulated port (SIMULATOR, or SIMn when the session manager
+        # gave this session its own instance); kept across reset/reconnect.
+        self._simulated_port: str = SIMULATOR_PORT
         # Which sketch the simulated board impersonates. Meaningful only when
         # _is_simulated; a real board's paradigm comes from its flashed hex and
         # is read back from IDENTIFY, never from here.
@@ -277,8 +281,20 @@ class REACHER:
         self.hardware_settings: List = []
         # Distinct from REACHER_LOG_DIR, which roots the diagnostics sink (LOG/runs).
         _session_log_root = os.environ.get("REACHER_SESSION_LOG_DIR") or os.path.expanduser("~/REACHER/LOG")
-        self.reacher_log_path = os.path.join(_session_log_root, self.get_time())
-        os.makedirs(self.reacher_log_path, exist_ok=True)
+        # The directory name is a one-second timestamp, so two sessions created in
+        # the same second (multi-session runs, e.g. SIM1 + SIM2) would otherwise
+        # share one directory and interleave their event/controller/interface
+        # logs. exist_ok=False makes the claim atomic; later arrivals get _2, _3...
+        _base = os.path.join(_session_log_root, self.get_time())
+        self.reacher_log_path = _base
+        _n = 1
+        while True:
+            try:
+                os.makedirs(self.reacher_log_path, exist_ok=False)
+                break
+            except FileExistsError:
+                _n += 1
+                self.reacher_log_path = f"{_base}_{_n}"
         self.controller_log: str = os.path.join(self.reacher_log_path, "controller_log.json")
         self.interface_log: str = os.path.join(self.reacher_log_path, "interface_log.log")
         self.logger = logging.getLogger(f"reacher.{session_id or 'default'}")
@@ -371,7 +387,7 @@ class REACHER:
             # would silently revert the board to fr mid-session, which is the
             # bug this parameter exists to prevent (P1-BUG-1).
             self.ser = SimulatedSerial(baudrate=115200, timeout=1, paradigm=self._simulated_paradigm)
-            self.ser.port = "SIMULATOR"
+            self.ser.port = self._simulated_port
         else:
             self.ser = serial.Serial(baudrate=115200, timeout=1)
         self.queue = queue.Queue(maxsize=5000)  # Fix: F-006 — Match __init__ maxsize
@@ -433,11 +449,12 @@ class REACHER:
 
         self.logger.info("Setting COM port")
 
-        if port == "SIMULATOR":
+        if is_simulator_port(port):
             from .simulator import SimulatedSerial
             self._simulated_paradigm = paradigm
+            self._simulated_port = port
             self.ser = SimulatedSerial(baudrate=115200, timeout=1, paradigm=paradigm)
-            self.ser.port = "SIMULATOR"
+            self.ser.port = port
             self._is_simulated = True
         elif port in [p.device for p in list_ports.comports() if p.vid and p.pid]:
             self.ser.port = port

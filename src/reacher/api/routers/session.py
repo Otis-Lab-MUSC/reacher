@@ -33,7 +33,9 @@ async def create_session(body: CreateSessionRequest, request: Request):
         session_id = sm.create_session(body.port, body.paradigm)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
-    return {"session_id": session_id}
+    # "port" is what the session is actually bound to: a request for the generic
+    # SIMULATOR port comes back as its own SIMn instance.
+    return {"session_id": session_id, "port": sm.get_session(session_id).port}
 
 
 @router.get("/{session_id}")

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
 from .kernel.reacher import REACHER
+from .uploader.boards import SIMULATOR_PORT
 
 from .diagnostics.schema import TIER_KERNEL as _TIER_KERNEL
 from .diagnostics.setup import log as _diag_log
@@ -58,10 +59,20 @@ class SessionManager:
 
         Returns the generated ``session_id``.
 
+        Picking the generic ``SIMULATOR`` port binds the session to the lowest
+        free numbered instance (``SIM1``, ``SIM2``, ...), so several simulated
+        rigs can run side by side in one application. ``SIMn`` may also be
+        requested explicitly (e.g. session recovery); it is still exclusive.
+
         Raises:
             ValueError: if the port is already in use by another session.
         """
         with self._lock:
+            if port == SIMULATOR_PORT:
+                n = 1
+                while f"SIM{n}" in self._port_lock:
+                    n += 1
+                port = f"SIM{n}"
             if port in self._port_lock:
                 existing = self._port_lock[port]
                 raise ValueError(

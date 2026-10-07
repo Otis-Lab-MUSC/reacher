@@ -278,3 +278,47 @@ class TestPostUploadReconnectUsesTheFlashedHex:
             )
         finally:
             _destroy(api_client, sid)
+
+
+class TestMultipleSimulatorSessions:
+    """One application, several simulated rigs: SIMULATOR -> SIM1, SIM2, ..."""
+
+    def test_second_session_on_simulator_is_not_rejected(self, api_client):
+        a = api_client.post("/api/sessions", json={"port": "SIMULATOR", "paradigm": "fr"}, headers=AUTH_HEADER)
+        b = api_client.post("/api/sessions", json={"port": "SIMULATOR", "paradigm": "vi"}, headers=AUTH_HEADER)
+        assert a.status_code == 201 and b.status_code == 201
+        assert (a.json()["port"], b.json()["port"]) == ("SIM1", "SIM2")
+        for r in (a, b):
+            _destroy(api_client, r.json()["session_id"])
+
+    def test_sessions_connect_independently_and_keep_their_paradigm(self, api_client):
+        sids = {p: _connect_session(api_client, p) for p in ("fr", "vi", "pr")}
+        try:
+            for p, sid in sids.items():
+                body = api_client.get(f"/api/sessions/{sid}", headers=AUTH_HEADER).json()
+                assert body["paradigm"] == p
+                assert body["state"] == "connected"
+                assert body["port"].startswith("SIM")
+            assert len({api_client.get(f"/api/sessions/{s}", headers=AUTH_HEADER).json()["port"] for s in sids.values()}) == 3
+        finally:
+            for sid in sids.values():
+                _destroy(api_client, sid)
+
+    def test_disconnect_frees_the_instance_for_reuse(self, api_client):
+        a = _connect_session(api_client, "fr")
+        _destroy(api_client, a)
+        b = api_client.post("/api/sessions", json={"port": "SIMULATOR", "paradigm": "fr"}, headers=AUTH_HEADER).json()
+        assert b["port"] == "SIM1"
+        _destroy(api_client, b["session_id"])
+
+    def test_numbered_instance_survives_reset_and_reconnect(self, api_client):
+        _connect_session(api_client, "fr")  # occupy SIM1
+        sid = _connect_session(api_client, "vi")  # SIM2
+        try:
+            api_client.post(f"/api/sessions/{sid}/reset", headers=AUTH_HEADER)
+            api_client.post(f"/api/serial/{sid}/connect", headers=AUTH_HEADER)
+            body = api_client.get(f"/api/sessions/{sid}", headers=AUTH_HEADER).json()
+            assert body["port"] == "SIM2" and body["paradigm"] == "vi"
+        finally:
+            for s in [x["session_id"] for x in api_client.get("/api/sessions", headers=AUTH_HEADER).json()["sessions"]]:
+                _destroy(api_client, s)

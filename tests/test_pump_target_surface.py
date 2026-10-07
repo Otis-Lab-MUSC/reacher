@@ -16,7 +16,7 @@ from reacher.api.middleware.auth import API_KEY
 from reacher.api.routers import websocket as ws
 
 AUTH_HEADER = {"Authorization": f"Bearer {API_KEY}", "X-Reacher-App": "1"}
-PORT = "SIMULATOR"
+PORT = "SIM1"  # a session on the generic SIMULATOR port binds to SIM1 when it is the first
 
 
 @pytest.fixture
