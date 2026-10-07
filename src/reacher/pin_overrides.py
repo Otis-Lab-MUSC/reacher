@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .kernel.commands import CommandCode
+from .uploader.boards import is_simulator_port
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,10 @@ _DIR = os.path.expanduser("~/.reacher")
 _FILE = os.path.join(_DIR, "pin_overrides.json")
 _lock = threading.Lock()
 _cache: dict[str, dict] = {}
+# Simulator slots (SIMULATOR, SIM1, SIM2, ...) are not rigs: a slot number is handed
+# to whichever session is created next. Their overrides live here for the life of the
+# session (SessionManager.destroy_session clears them) and never touch the disk.
+_volatile: dict[str, dict] = {}
 
 
 # --- Pin validation metadata ---------------------------------------------
@@ -188,7 +193,8 @@ def load() -> None:
         _cache = {
             port: _migrate_entry(mapping)
             for port, mapping in data.items()
-            if isinstance(mapping, dict)
+            # Drops entries older builds saved for simulator ports; the next flush prunes them.
+            if isinstance(mapping, dict) and not is_simulator_port(port)
         }
         logger.info("Loaded pin overrides for %d port(s) from %s", len(_cache), _FILE)
     except Exception:
@@ -206,7 +212,7 @@ def get(port: str, current_board: Optional[str] = None) -> dict[str, int]:
     applied regardless of saved board.
     """
     with _lock:
-        entry = _cache.get(port)
+        entry = (_volatile if is_simulator_port(port) else _cache).get(port)
         if entry is None:
             return {}
         saved_board = entry.get("board")
@@ -238,11 +244,13 @@ def save(port: str, assignments: dict[str, int], board: Optional[str] = None) ->
     intent — same effect, clearer name).
     """
     with _lock:
+        store = _volatile if is_simulator_port(port) else _cache
         if assignments:
-            _cache[port] = {"board": board, "pins": {k: int(v) for k, v in assignments.items()}}
+            store[port] = {"board": board, "pins": {k: int(v) for k, v in assignments.items()}}
         else:
-            _cache.pop(port, None)
-        _flush()
+            store.pop(port, None)
+        if store is _cache:
+            _flush()
 
 
 def clear(port: str) -> None:

@@ -21,12 +21,19 @@ PORT = "SIM1"  # a session on the generic SIMULATOR port binds to SIM1 when it i
 
 @pytest.fixture
 def stale_pump2(tmp_path, monkeypatch):
-    """Persisted pump2=true for the simulator port, in an isolated store."""
+    """A held pump2=true for the simulator slot, in an isolated store.
+
+    Simulator slots never persist to disk (see test_sim_persistence.py), so this is
+    the in-session value a disconnect/reconnect of the same session replays. The
+    replay and surfacing code under test is the same one a real port runs after a
+    restart from pump_target.json.
+    """
     monkeypatch.setattr(pump_target, "_DIR", str(tmp_path))
     monkeypatch.setattr(pump_target, "_FILE", str(tmp_path / "pump_target.json"))
     monkeypatch.setattr(pump_target, "_cache", {})
+    monkeypatch.setattr(pump_target, "_volatile", {})
     pump_target.save(PORT, True)
-    # TestClient's lifespan calls pump_target.load(); it reads the file just written.
+    # TestClient's lifespan calls pump_target.load(), which resets only the on-disk cache.
 
 
 @pytest.fixture

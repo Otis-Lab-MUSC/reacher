@@ -68,6 +68,31 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    # A reflash reboots the board: mid-run it would kill the run without a
+    # stop or an export and leave one log dir holding two paradigms. A second
+    # upload while one is in flight would race the first for the port. No
+    # await sits between this check and set_state("uploading") below, so two
+    # concurrent requests cannot both pass it.
+    if info.state in ("running", "paused", "uploading"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot upload firmware while the session is {info.state}",
+        )
+
+    def _session_gone() -> bool:
+        """True once the session was deleted (or is being deleted) mid-upload."""
+        try:
+            current = sm.get_session(session_id)
+        except KeyError:
+            return True
+        return current.instance is not instance or current.state == "destroying"
+
+    def _gone_response() -> HTTPException:
+        # The port is already released to the next session, so this instance
+        # must not reopen it (that left orphan reader threads behind).
+        _logger.warning("Session %s was closed during its firmware upload; not reconnecting", session_id)
+        return HTTPException(status_code=409, detail="Session was closed during the firmware upload")
+
     # Close serial if open so avrdude can access the port
     instance = info.instance
     if instance.ser.is_open:
@@ -120,6 +145,9 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
         sm.set_state(session_id, "idle")
         raise HTTPException(status_code=500, detail="Firmware upload failed")
 
+    if _session_gone():
+        raise _gone_response()
+
     if not success:
         sm.set_state(session_id, "idle")
         detail = _uploader.last_error or "Firmware upload failed"
@@ -129,6 +157,8 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
     # same steps above (FirmwareUploader._simulate_upload), and the reconnect below
     # is what boots the simulated board into the new sketch.
     await asyncio.sleep(2)
+    if _session_gone():
+        raise _gone_response()
     try:
         # body.paradigm, not info.paradigm: the board has just been flashed with
         # *that* hex, and info.paradigm is still the pre-upload value — this runs
@@ -146,8 +176,17 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
         sm.set_state(session_id, "idle")
         raise HTTPException(status_code=500, detail="Post-upload reconnect failed")
 
-    sm.set_paradigm(session_id, body.paradigm)
-    sm.set_board(session_id, body.board)
+    try:
+        sm.set_paradigm(session_id, body.paradigm)
+        sm.set_board(session_id, body.board)
+    except KeyError:
+        # Deleted while reconnecting (destroy_session runs on a worker thread, so it can
+        # finish between the check above and open_serial). Close what we just reopened.
+        try:
+            instance.close_serial()
+        except Exception:
+            _logger.debug("close after mid-upload delete failed for %s", session_id, exc_info=True)
+        raise _gone_response()
 
     # Fix: [PERSON_NAME] — Wait for IDENTIFY response before transitioning to "connected"
     # This ensures bootloader has exited and firmware is ready to process commands.

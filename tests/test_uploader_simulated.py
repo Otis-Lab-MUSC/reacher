@@ -300,3 +300,96 @@ class TestUploadOverHttp:
         assert resp.status_code == 400
         assert _state(client, sid) == "connected"
         client.delete(f"/api/sessions/{sid}", headers=AUTH)
+
+
+class TestUploadStateGuard:
+    """A reflash mid-run used to answer 200, switch the paradigm and leave the run
+    "running" with no event stream, no stop and no export (pressure test #1)."""
+
+    @pytest.mark.parametrize("state", ["running", "paused", "uploading"])
+    def test_upload_is_refused_without_touching_the_session(self, client, state):
+        sid = _sim_session(client, "fr")
+        sm = client.app.state.session_manager
+        inst = sm.get_session(sid).instance
+        sm.set_state(sid, state)
+        with patch("reacher.api.routers.firmware._uploader.upload", new=AsyncMock(return_value=True)) as up:
+            resp = client.post(f"/api/firmware/upload/{sid}", json={"paradigm": "pr", "board": "mega"}, headers=AUTH)
+        assert resp.status_code == 409, resp.text
+        assert state in resp.json()["detail"]
+        up.assert_not_called()
+        info = sm.get_session(sid)
+        assert (info.state, info.paradigm) == (state, "fr")
+        assert inst.ser.is_open  # the port was not closed for a flash
+        sm.set_state(sid, "connected")
+        client.delete(f"/api/sessions/{sid}", headers=AUTH)
+
+    def test_a_real_start_then_upload_is_refused(self, client):
+        sid = _sim_session(client, "fr")
+        assert client.post(f"/api/program/{sid}/start", headers=AUTH).status_code == 200
+        resp = client.post(f"/api/firmware/upload/{sid}", json={"paradigm": "pr", "board": "mega"}, headers=AUTH)
+        assert resp.status_code == 409
+        info = client.get(f"/api/sessions/{sid}", headers=AUTH).json()
+        assert (info["state"], info["paradigm"]) == ("running", "fr")
+        assert client.post(f"/api/program/{sid}/stop", headers=AUTH).status_code == 200
+        client.delete(f"/api/sessions/{sid}", headers=AUTH)
+
+    @pytest.mark.parametrize("state", ["connected", "stopped", "idle"])
+    def test_pre_start_states_still_upload(self, client, state):
+        sid = _sim_session(client, "fr")
+        client.app.state.session_manager.set_state(sid, state)
+        resp = client.post(f"/api/firmware/upload/{sid}", json={"paradigm": "pr", "board": "mega"}, headers=AUTH)
+        assert resp.status_code == 200, resp.text
+        assert _state(client, sid) == "connected"
+        client.delete(f"/api/sessions/{sid}", headers=AUTH)
+
+
+class TestDeleteDuringUpload:
+    """DELETE mid-upload used to answer the upload with a 500 *after* re-opening the
+    destroyed instance, leaving its reader threads running while its SIMn slot went
+    to the next session (pressure test #2)."""
+
+    def _upload_that_deletes(self, client, sid):
+        sm = client.app.state.session_manager
+
+        async def flash(*_a, **_k):
+            sm.destroy_session(sid)  # what the DELETE route runs, mid-flash
+            return True
+
+        return patch("reacher.api.routers.firmware._uploader.upload", new=flash)
+
+    def test_upload_answers_409_and_never_reopens_the_port(self, client):
+        sid = _sim_session(client, "fr")
+        sm = client.app.state.session_manager
+        inst = sm.get_session(sid).instance
+        with self._upload_that_deletes(client, sid):
+            resp = client.post(f"/api/firmware/upload/{sid}", json={"paradigm": "pr", "board": "mega"}, headers=AUTH)
+        assert resp.status_code == 409, resp.text
+        assert "closed during the firmware upload" in resp.json()["detail"]
+        assert not inst.ser.is_open
+        assert client.get("/api/sessions", headers=AUTH).json()["sessions"] == []
+
+    def test_the_freed_slot_goes_to_a_clean_session(self, client):
+        sid = _sim_session(client, "fr")
+        with self._upload_that_deletes(client, sid):
+            client.post(f"/api/firmware/upload/{sid}", json={"paradigm": "pr", "board": "mega"}, headers=AUTH)
+        new = client.post("/api/sessions", json={"port": "SIMULATOR", "paradigm": "fr"}, headers=AUTH).json()
+        assert new["port"] == "SIM1"
+        assert [s["session_id"] for s in client.get("/api/sessions", headers=AUTH).json()["sessions"]] == [new["session_id"]]
+        client.delete(f"/api/sessions/{new['session_id']}", headers=AUTH)
+
+    def test_delete_during_the_reboot_wait_is_also_caught(self, client, monkeypatch):
+        sid = _sim_session(client, "fr")
+        sm = client.app.state.session_manager
+        inst = sm.get_session(sid).instance
+        from reacher.api.routers import firmware as fw
+
+        real_sleep = asyncio.sleep
+
+        async def sleep_then_delete(_seconds):
+            sm.destroy_session(sid)
+            await real_sleep(0)
+
+        monkeypatch.setattr(fw.asyncio, "sleep", sleep_then_delete)
+        resp = client.post(f"/api/firmware/upload/{sid}", json={"paradigm": "pr", "board": "mega"}, headers=AUTH)
+        assert resp.status_code == 409, resp.text
+        assert not inst.ser.is_open

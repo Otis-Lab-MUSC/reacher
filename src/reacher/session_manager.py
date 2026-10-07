@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
 from .kernel.reacher import REACHER
-from .uploader.boards import SIMULATOR_PORT
+from . import pin_overrides, pump_target
+from .uploader.boards import SIMULATOR_PORT, is_simulator_port
 
 from .diagnostics.schema import TIER_KERNEL as _TIER_KERNEL
 from .diagnostics.setup import log as _diag_log
@@ -145,6 +146,16 @@ class SessionManager:
                     info.instance.ser.close()
             except Exception:
                 logger.debug("Failed to force-close serial for %s", session_id, exc_info=True)
+
+        # A simulator slot's pump target / pin overrides belong to this session
+        # only. Clear them while the slot is still held, so the next session
+        # handed this SIMn can never replay them.
+        if is_simulator_port(info.port):
+            try:
+                pump_target.clear(info.port)
+                pin_overrides.clear(info.port)
+            except Exception:
+                logger.warning("Failed to clear simulator settings for %s", info.port, exc_info=True)
 
         # Now safe to remove
         with self._lock:

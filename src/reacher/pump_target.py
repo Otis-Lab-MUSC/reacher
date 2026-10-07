@@ -22,12 +22,18 @@ import os
 import threading
 from typing import Optional
 
+from .uploader.boards import is_simulator_port
+
 logger = logging.getLogger(__name__)
 
 _DIR = os.path.expanduser("~/.reacher")
 _FILE = os.path.join(_DIR, "pump_target.json")
 _lock = threading.Lock()
 _cache: dict[str, bool] = {}
+# Simulator slots (SIMULATOR, SIM1, SIM2, ...) are not rigs: a slot number is handed
+# to whichever session is created next. Their value lives here for the life of the
+# session (SessionManager.destroy_session clears it) and never touches the disk.
+_volatile: dict[str, bool] = {}
 
 
 def load() -> None:
@@ -39,7 +45,8 @@ def load() -> None:
     try:
         with open(_FILE) as f:
             data = json.load(f)
-        _cache = {port: bool(value) for port, value in data.items()}
+        # Drops entries older builds saved for simulator ports; the next flush prunes them.
+        _cache = {port: bool(value) for port, value in data.items() if not is_simulator_port(port)}
         logger.info("Loaded pump target overrides for %d port(s) from %s", len(_cache), _FILE)
     except Exception:
         logger.exception("Failed to load pump_target.json — starting with empty overrides")
@@ -49,6 +56,8 @@ def load() -> None:
 def get(port: str) -> Optional[bool]:
     """Return the last-saved pump2-active flag for *port*, or None if never set."""
     with _lock:
+        if is_simulator_port(port):
+            return _volatile.get(port)
         return _cache.get(port)
 
 
@@ -61,6 +70,9 @@ def get_all() -> dict[str, bool]:
 def save(port: str, pump2_active: bool) -> None:
     """Persist the reward-chain pump-target selection for *port* and flush to disk."""
     with _lock:
+        if is_simulator_port(port):
+            _volatile[port] = bool(pump2_active)
+            return
         _cache[port] = bool(pump2_active)
         _flush()
 
@@ -68,6 +80,9 @@ def save(port: str, pump2_active: bool) -> None:
 def clear(port: str) -> None:
     """Remove the persisted pump target for *port* and flush."""
     with _lock:
+        if is_simulator_port(port):
+            _volatile.pop(port, None)
+            return
         _cache.pop(port, None)
         _flush()
 

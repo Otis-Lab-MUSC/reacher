@@ -55,7 +55,9 @@ _SIM_INSTANCE_RE = re.compile(r"^SIM[1-9][0-9]*$")
 
 def is_simulator_port(port: Optional[str]) -> bool:
     """True for the generic ``SIMULATOR`` entry and any numbered ``SIMn`` instance."""
-    return port == SIMULATOR_PORT or bool(port and _SIM_INSTANCE_RE.match(port))
+    # fullmatch: ``$`` alone also matches before a trailing newline, so "SIM1\n" passed
+    # as a second, unlocked "SIM1" (the port lock is keyed on the exact string).
+    return port == SIMULATOR_PORT or bool(port and _SIM_INSTANCE_RE.fullmatch(port))
 
 DEFAULT_BOARD = "mega"
 SUPPORTED_BOARDS: Tuple[str, ...] = tuple(BOARD_PROFILES.keys())
