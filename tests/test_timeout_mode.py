@@ -131,18 +131,6 @@ class TestRouterContract:
         )
         assert resp.status_code == 400, resp.text
 
-    @pytest.mark.parametrize("code", [RH, LH])
-    def test_frozen_while_armed(self, client, code):
-        """An armed session is frozen: a TTL edge landing mid-edit would start
-        on a half-applied config (hardware.py's armed gate)."""
-        sid = _session(client, state="armed")
-        resp = client.post(
-            f"/api/hardware/{sid}/command",
-            json={"code": code, "value": 1},
-            headers=AUTH_HEADER,
-        )
-        assert resp.status_code == 409, resp.text
-
 
 # ---------------------------------------------------------------------------
 # Payload + simulator command handling
@@ -191,7 +179,9 @@ class TestSimulatorCommandHandling:
     @pytest.mark.parametrize("paradigm,schedule", [("omission", "OMISSION"), ("pavlovian", "PAVLOVIAN")])
     def test_no_config_dump_where_the_sketch_has_no_timeout(self, sim, paradigm, schedule):
         """omission/pavlovian sketches carry no timeout_mode field, so the
-        simulator must not invent one."""
+        simulator must not invent one. (Their StartSession() still prints a
+        CONTROLLER row — paradigm, active lever or trial config — just not the
+        timeout fields.)"""
         sim.handle_command({"cmd": 202, "paradigm": paradigm})
         assert sim.schedule == schedule
         _drain(sim)
@@ -203,7 +193,8 @@ class TestSimulatorCommandHandling:
             ]
         finally:
             sim.stop()
-        assert config == []
+        assert config, "the sketch's StartSession() prints a CONTROLLER paradigm row"
+        assert all("timeout" not in m and "timeout_mode" not in m for m in config), config
 
 
 class TestFirmwareInformation:
@@ -362,39 +353,29 @@ class TestBehavioralGoldenPair:
 
 
 def _fr_stream(mode, presses=20):
-    """Drive the simulator's real FR runner on a deterministic clock.
+    """Drive the simulator's real FR engine on a deterministic clock.
 
-    Randomness is pinned (5 s between presses, no stray inactive presses or
-    licks, fixed press duration) and ``_stop_event.wait`` is replaced with a
-    counter, so the emitted stream is a function of the timeout mode alone.
+    The animal is pinned (a 100 ms press on the reinforced lever every 5 s, no
+    stray inactive presses, lick circuit left disarmed) and time is stepped
+    rather than waited, so the emitted stream is a function of the timeout mode
+    alone.
     """
-    sim = FirmwareSimulator(queue.Queue())
+    sim = FirmwareSimulator(queue.Queue(), realtime=False, seed=0)
+    for cmd in (1001, 401):  # arm RH lever + pump
+        sim.handle_command({"cmd": cmd})
+    sim.handle_command({"cmd": 472, "duration": 500})
     sim.handle_command({"cmd": 1074, "timeout": 20_000})
     sim.handle_command({"cmd": 201, "ratio": 2})
     sim.handle_command({"cmd": RH, "timeout_mode": mode})
-    sim._running = True
-    sim._clock = 0
-    sim._timeout.reset()
-    sim._sync_timeout_config()
+    sim.subject.press_gap_ms = lambda pavlovian=False: 4900
+    sim.subject.press_duration_ms = lambda: 100
+    sim.subject.pick_lever = lambda reinforced, other: reinforced[0]
     _drain(sim)
-
-    remaining = [presses]
-
-    def fake_wait(delay):
-        remaining[0] -= 1
-        if remaining[0] < 0:
-            sim._running = False
-            return True
-        return False
-
-    sim._stop_event.wait = fake_wait
-    with patch("reacher.kernel.simulator.random.uniform", return_value=5.0), \
-         patch("reacher.kernel.simulator.random.random", return_value=0.9), \
-         patch("reacher.kernel.simulator.random.randint", return_value=100):
-        sim._run_fr()
+    sim.start()
+    sim.run_until(5000 * presses)
 
     msgs = _drain(sim)
-    classes = [m["class"] for m in msgs if m.get("device") == "SWITCH_LEVER"]
+    classes = [m["class"] for m in msgs if m.get("event") == "PRESS"]
     infusions = [m for m in msgs if m.get("event") == "INFUSION"]
     return classes, len(infusions)
 

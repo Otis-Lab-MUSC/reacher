@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+- **External TTL session-start trigger.** Deleted `ExternalTrigger.{h,cpp}`, `PIN_EXT_TRIGGER` (`Pins.h`), the `EXT_TRIGGER_DISARM (1200)` / `EXT_TRIGGER_ARM (1201)` / `EXT_TRIGGER_SET_PIN (1276)` commands (`Commands.h`; codes left unassigned, nothing renumbered), and the arm/consume/disarm wiring in `fr`/`pr`/`vi`/`omission`/`pavlovian`. `StartSession()` no longer takes an `external` flag and the level-`007` CONTROLLER `START` event no longer carries a `"source"` field (now identical to the `_lite` twins). The microscope trigger *output* pulse is unchanged. Shipped hex must be rebuilt (`bash firmware/compile.sh`).
+
 ### Added
 - `LEVER_RH_SET_TIMEOUT_MODE (1077)` / `LEVER_LH_SET_TIMEOUT_MODE (1377)` — select when the lever timeout window is armed. `0` = every ACTIVE press (the existing behavior, and the default), `1` = only a press that fires the reward chain. Accepted by `fr`, `fr_lite`, `pr`, `pr_lite`, `vi`, `vi_lite`; omission and pavlovian are excluded (omission forces a `0` interval, pavlovian is non-operant and has no lever timeout). Like `1074`/`1374`, the two codes are **not** independent: both write one scheduler-wide flag and the last write wins
 - `Scheduler::SetTimeoutMode()` / `TimeoutMode()` and the `TIMEOUT_MODE_EVERY_PRESS` / `TIMEOUT_MODE_REWARD_ONLY` constants (`Scheduler.h`). Runtime state only — no EEPROM; the host re-sends it on every connect, as it does for the timeout interval. Values above `1` are clamped

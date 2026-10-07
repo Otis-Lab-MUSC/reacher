@@ -236,8 +236,8 @@ class TestSimulatorDefaultsMatchFirmwareDefaults:
     """The simulator's default timeout interval used to be inert — it modelled no
     timeout at all, so a wrong default cost nothing. Now that it classifies
     presses, the default decides whether a simulated session emits TIMEOUT
-    presses, and ``fr`` ships ``DEFAULT_TIMEOUT_INTERVAL = 0`` while the
-    simulator still starts at 20000.
+    presses, and ``fr`` ships ``DEFAULT_TIMEOUT_INTERVAL = 0``. The simulator
+    now boots each paradigm from its own ``Config.h`` rather than one 20000.
     """
 
     @staticmethod
@@ -252,23 +252,18 @@ class TestSimulatorDefaultsMatchFirmwareDefaults:
         """Only fr drifts — pr/vi ship 20000, which is what the simulator uses."""
         assert self._firmware_default(paradigm) == 20000
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "KNOWN DEFECT (QA Phase 3, report team/reports/QA.md): the simulator defaults "
-            "lever_rh_timeout/lever_lh_timeout to 20000 for every paradigm, but fr/Config.h "
-            "ships DEFAULT_TIMEOUT_INTERVAL = 0. With the new press classification a default "
-            "simulated FR run emits 5 ACTIVE / 15 TIMEOUT presses and 1 reward over 20 presses "
-            "where the real board at its defaults emits 20 ACTIVE and 4 rewards. Remove this "
-            "xfail when the simulator seeds its timeout per paradigm."
-        ),
-    )
     def test_fr_default_timeout_matches_the_shipped_sketch(self):
+        """Was xfail(strict): the simulator seeded 20000 for every paradigm. It now
+        boots each paradigm from its own Config.h (fr = 0)."""
         import queue
 
-        sim = FirmwareSimulator(queue.Queue())
-        sim.schedule = "FIXED_RATIO"
-        assert sim.lever_rh_timeout == self._firmware_default("fr")
+        assert FirmwareSimulator(queue.Queue()).lever_rh_timeout == self._firmware_default("fr")
+
+    @pytest.mark.parametrize("paradigm", ["pr", "vi"])
+    def test_simulator_defaults_match_the_shipped_sketch(self, paradigm):
+        import queue
+
+        assert FirmwareSimulator(queue.Queue(), paradigm=paradigm).lever_rh_timeout == self._firmware_default(paradigm)
 
 
 # ---------------------------------------------------------------------------

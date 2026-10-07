@@ -51,6 +51,10 @@ python -m build
 | `REACHER_SESSION_LOG_DIR` | `~/REACHER/LOG` | Root for per-session kernel dirs (`event_log.jsonl`, `controller_log.json`); tests point it at `tmp_path` |
 | `REACHER_LOG_LEVEL` | `DEBUG` | Floor for the diagnostic log (`INFO` drops serial-wire records) |
 | `REACHER_LOG_VERBOSE_DEPS` | unset | Keep third-party DEBUG chatter (httpx, zeroconf, …) out of the log |
+| `REACHER_SIM_SEED` | unset | Seeds the SIMULATOR port's animal, ITI draws, VI windows and trial order so a run is reproducible. Unset = random per session. |
+| `REACHER_SIM_SPEED` | `1` | Simulated seconds per wall second on the SIMULATOR port. Host-side time limits still count wall time, so a `Time` limit of N s covers N × speed simulated seconds. |
+| `REACHER_SIM_UPLOAD_SECONDS` | `3` | Wall time of a simulated firmware flash (upload to the SIMULATOR port). `0` for tests. |
+| `REACHER_SIM_UPLOAD_FAIL` | unset | Any non-empty value makes a simulated flash fail like a non-zero avrdude exit (the value is the stderr text; `1` = generic). For exercising the UI error path. |
 | `REACHER_GITHUB_OWNER` | `Otis-Lab-MUSC` | GitHub org/user that owns the target issue repos. Used to build the pre-filled "New Issue" link. |
 
 ## Architecture
@@ -67,42 +71,17 @@ The `REACHER` class manages a single Arduino instance. It runs three daemon thre
 2. `queue_thread` — processes queued messages and dispatches to event handlers
 3. `time_check_thread` — enforces experiment time/infusion limits
 
-Commands are defined in `commands.py` as a `COMMAND_REGISTRY` (107 entries), each with a `CommandSpec` that includes paradigm filtering (FR, PR, VI, Omission, Pavlovian). `simulator.py` provides a hardware-free test stub.
+Commands are defined in `commands.py` as a `COMMAND_REGISTRY` (106 entries), each with a `CommandSpec` that includes paradigm filtering (FR, PR, VI, Omission, Pavlovian). `simulator.py` provides a hardware-free board: a Python port of the firmware's scheduling logic (`Scheduler`, `Trigger`, each sketch's `ReconfigureChain`, `PavlovianScheduler`) configured by the same serial commands as the real board and driven by a stochastic animal (`simulated_subject.py`). Schedule outcomes — ratio counting, PR progression, VI windows, the omission timer, timeouts, reward chains, Pavlovian trial structure — are computed from the configuration the session sent, never scripted; the board boots disarmed with each sketch's own defaults. Tests drive it on a stepped clock: `FirmwareSimulator(q, paradigm=..., seed=1, realtime=False)` then `run_until(ms)`.
 
 ### Session Manager (`src/reacher/session_manager.py`)
-Coordinates multiple independent `REACHER` instances. Enforces port locking (prevents two sessions from binding the same COM port). Session lifecycle: `idle → uploading → connected → running → paused → stopped`, plus `armed` between `connected` and `running` when a session is waiting on an external TTL trigger. An `armed` session is *frozen* — the hardware router rejects config and pin commands with 409 — because config is applied one serial command per request and a trigger landing mid-edit would start the session on a half-applied configuration. It also counts as live for the shutdown watchdog. Sessions are identified by 12-character hex strings.
+Coordinates multiple independent `REACHER` instances. Enforces port locking (prevents two sessions from binding the same COM port). Session lifecycle: `idle → uploading → connected → running → paused → stopped`. Sessions are identified by 12-character hex strings.
 
 ### FastAPI App (`src/reacher/api/`)
 - `app.py` — lifespan management, CORS, static file mounting, auth middleware
 - `middleware/auth.py` — Bearer-token gate over `/api/*`; `/health` is exempt (used by mDNS discovery and `reacher-monitor`); WebSocket auth uses `?token=<key>` query param
 - 12 routers under `api/routers/`: `session`, `serial`, `firmware`, `hardware`, `program`, `data`, `file`, `websocket`, `discovery`, `pairing`, `proxy`, `lifecycle`
-- `routers/program.py` — `/start`, `/stop`, `/pause`, `/limit`, `/split`, `/restart`, plus `/arm-trigger` and `/disarm-trigger` for the external TTL start. `/start` from `armed` is the "Start Now" override and disarms the firmware first, or a later stray edge would re-enter `StartSession()` mid-run
+- `routers/program.py` — `/start`, `/stop`, `/pause`, `/limit`, `/split`, `/restart`
 - `routers/proxy.py` — transparent HTTP + WebSocket proxy for paired remote machines (`/api/proxy/{device_id}/...`). The browser always talks to the local server, eliminating CORS configuration; WebSockets authenticate against the *local* API key via a short-lived ws-token.
-
-### External Trigger (TTL session start)
-An optional third-party TTL pulse starts the session instead of the UI. Firmware
-watches a Mega external-interrupt pin (`ExternalTrigger`, default 18, assignable
-to 18/19/20/21 only) and runs its normal `StartSession()` on a rising edge, so
-the two-photon frame output and all acquisition begin exactly as they would for
-a software start. The level-`007` CONTROLLER `START` event gains
-`"source":"external"`, which `update_behavioral_events` uses to run the
-host-side start bookkeeping — inside the `match`, so the `session_state`
-broadcast is enqueued *before* the behavioral event that caused it.
-
-Three things are deliberate and easy to break:
-- **Buffers reset at arm time**, not when the trigger fires — the START event is
-  appended by the same call that begins the session.
-- **The host never re-sends `SESSION_START` (101)** on an external start.
-  `microscope.Trigger()` is a 50 ms *toggle*, not a level; a second pulse stops
-  the scope scanning.
-- **`program_start_time` is back-dated** by the receipt lag stamped in
-  `read_serial()`. Exported data is unaffected (everything is firmware-relative
-  via `SetOffset`); this only corrects the wall-clock anchor `check_limit_met`
-  measures against.
-
-`PinConstraint.allowed_pins` — not `requires_interrupt` — is what keeps the
-trigger off pin 2: `MEGA_INT` contains 2 and 3, and `attachInterrupt` *replaces*
-a pin's handler, so admitting pin 2 would silently kill microscope frame logging.
 
 ### Pin Overrides (`src/reacher/pin_overrides.py`)
 Persistent per-port Arduino pin remapping at `~/.reacher/pin_overrides.json` (mode `0o600`), keyed by serial port path. Owns the single source of truth for board pin validation metadata (UNO/Mega digital/PWM/interrupt sets) and the component→`CommandCode` mapping, shared between the HTTP router and the serial-connect replay path that re-applies overrides on every reconnect.
@@ -190,7 +169,7 @@ Three invariants, each guarding a way to report success while verifying nothing:
 rewrites committed hex.
 
 ### Firmware Uploader (`src/reacher/uploader/`)
-Wraps `avrdude` to flash Arduino firmware. Handles PyInstaller frozen mode path resolution (`_MEIPASS/hex/`) and streams upload progress via callback. `boards.py` is the board-profile registry — each entry maps a `board_id` to a display name, an Arduino CLI FQBN, and the `avrdude` argument tuple. Adding a new board is a single entry in `BOARD_PROFILES`. Hex resolution prefers package data (`src/reacher/hex/`) as canonical; the GitHub fallback fetches from this repo (`Otis-Lab-MUSC/reacher`, `src/reacher/hex/`) for bare `pip install` hosts.
+Wraps `avrdude` to flash Arduino firmware. Handles PyInstaller frozen mode path resolution (`_MEIPASS/hex/`) and streams upload progress via callback. `boards.py` is the board-profile registry — each entry maps a `board_id` to a display name, an Arduino CLI FQBN, and the `avrdude` argument tuple. Adding a new board is a single entry in `BOARD_PROFILES`. Uploading to the `SIMULATOR` port runs the same code path with the programmer stood in for (`FirmwareUploader._simulate_upload`): hex resolution, hex checksum validation and progress reporting are real, avrdude is not invoked, and the reconnect that follows boots the simulated board into the new sketch. Hex resolution prefers package data (`src/reacher/hex/`) as canonical; the GitHub fallback fetches from this repo (`Otis-Lab-MUSC/reacher`, `src/reacher/hex/`) for bare `pip install` hosts.
 
 ### Firmware Source (`firmware/`)
 Arduino firmware source, folded in from the archived `Otis-Lab-MUSC/reacher-firmware`. Five sketches (`fr/ pr/ vi/ omission/ pavlovian/`) share `libraries/REACHERDevices/`, and four ship a UNO-compatible `_lite` twin (`fr_lite/ pr_lite/ vi_lite/ omission_lite/`) with two-photon (Microscope + SLM) support stripped; Pavlovian has none because it overflows UNO flash even stripped. `firmware/libraries/REACHERDevices/src/Commands.h` is the firmware-side command list mirrored by `kernel/commands.py`; **edit both together** when adding a command — `tests/test_command_parity.py` enforces parity. `firmware/compile.sh` writes hex into the committed package-data tree `src/reacher/hex/<board>/` (run `arduino-cli core install arduino:avr` once, then `bash firmware/compile.sh`; commit the refreshed hex). Firmware version strings are stamped by `scripts/bump-version.py` — never hand-edit, and recompile hex after a bump. Target board is Mega 2560; the `uno/` hex set is the four `_lite` builds (the full-paradigm uno hex files are stale legacy artifacts that no longer compile). The microscope timestamp pin (INT0) is fixed in firmware and must not be exposed as remappable. See `firmware/CLAUDE.md` and `firmware/README.md` for paradigm/hardware detail.

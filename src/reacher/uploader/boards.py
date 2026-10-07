@@ -44,6 +44,9 @@ _USB_ID_MAP: Dict[Tuple[int, int], str] = {
     (0x2A03, 0x0042): "mega",
 }
 
+# The hardware-free port every session may select (see kernel.simulator).
+SIMULATOR_PORT = "SIMULATOR"
+
 DEFAULT_BOARD = "mega"
 SUPPORTED_BOARDS: Tuple[str, ...] = tuple(BOARD_PROFILES.keys())
 
@@ -54,7 +57,7 @@ def detect_board_from_port(port_device: str) -> Optional[str]:
     Returns the board identifier (e.g. ``"uno"``) or ``None`` if the
     port is a simulator, uses a clone chip, or is unrecognized.
     """
-    if port_device == "SIMULATOR":
+    if port_device == SIMULATOR_PORT:
         return None
     for port_info in list_ports.comports():
         if port_info.device == port_device and port_info.vid and port_info.pid:

@@ -68,20 +68,6 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # An armed session is frozen, and a reflash is the most invasive change
-    # there is: new firmware can change the paradigm and its command set, which
-    # invalidates the very arm the operator is waiting on. Checked before the
-    # port is closed below, so a rejected upload leaves the armed session
-    # exactly as it was. Cancel the trigger, flash, re-arm.
-    if info.state == "armed":
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Session is armed and waiting for an external trigger; "
-                "disarm it before uploading firmware"
-            ),
-        )
-
     # Close serial if open so avrdude can access the port
     instance = info.instance
     if instance.ser.is_open:
@@ -139,7 +125,9 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
         detail = _uploader.last_error or "Firmware upload failed"
         raise HTTPException(status_code=500, detail=detail)
 
-    # Wait for Arduino to reboot, then reconnect
+    # Wait for Arduino to reboot, then reconnect. A SIMULATOR "flash" has done the
+    # same steps above (FirmwareUploader._simulate_upload), and the reconnect below
+    # is what boots the simulated board into the new sketch.
     await asyncio.sleep(2)
     try:
         # body.paradigm, not info.paradigm: the board has just been flashed with

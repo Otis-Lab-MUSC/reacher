@@ -28,7 +28,7 @@ class SessionInfo:
     paradigm: Optional[str]
     instance: REACHER
     board: Optional[str] = None
-    state: str = "idle"  # idle | uploading | connected | armed | running | paused | stopped
+    state: str = "idle"  # idle | uploading | connected | running | paused | stopped
     exported: bool = False  # True once a "stopped" session's data has been exported (see mark_exported)
 
 
@@ -73,12 +73,6 @@ class SessionManager:
             def _on_program_stopped():
                 self.set_state(session_id, "stopped")
 
-            # An external TTL trigger starts the session inside the kernel's
-            # queue thread, with no HTTP request to call set_state() the way
-            # the /start route does. This is the symmetric hook.
-            def _on_program_started():
-                self.set_state(session_id, "running")
-
             # Fix: XL-003 — Wrap event callback to intercept disconnect events
             def _event_callback_wrapper(sid: str, event_type: str, data: dict):
                 if event_type == "disconnect":
@@ -90,7 +84,6 @@ class SessionManager:
                 session_id=session_id,
                 event_callback=_event_callback_wrapper,
                 on_stop=_on_program_stopped,
-                on_start=_on_program_started,
             )
             info = SessionInfo(
                 session_id=session_id,
@@ -125,20 +118,6 @@ class SessionManager:
             if info.state == "destroying":
                 return  # Another thread is already tearing this down
             info.state = "destroying"
-
-        # Release the external trigger before anything closes the port. An
-        # armed session has program_running False and so takes the elif branch
-        # below, which would close serial and leave the board physically armed
-        # with no host record that the session ever existed — the next TTL edge
-        # would pulse the scope and start a run nothing is listening to.
-        try:
-            if not info.instance.release_external_trigger():
-                logger.warning(
-                    "Session %s destroyed while its board may still be armed",
-                    session_id,
-                )
-        except Exception:
-            logger.warning("Error releasing external trigger for %s", session_id, exc_info=True)
 
         # Clean up BEFORE removing from dict (callbacks need get_session to work)
         try:
@@ -257,16 +236,6 @@ class SessionManager:
         if info is None:
             return
         previous = info.state
-        # An unplug while armed is the one exit that otherwise leaves this
-        # flag stale True — every other teardown path already releases.
-        try:
-            if not info.instance.release_external_trigger():
-                logger.warning(
-                    "Session %s disconnected while its board may still be armed",
-                    session_id,
-                )
-        except Exception:
-            logger.warning("Error releasing external trigger for %s", session_id, exc_info=True)
         info.state = "disconnected"
         self._broadcast_state(session_id, "disconnected")
         logger.warning("Session %s disconnected: %s", session_id, reason)
