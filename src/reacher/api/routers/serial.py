@@ -182,10 +182,6 @@ async def disconnect_serial(session_id: str, request: Request):
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Order matters: closing the port first would make the disarm unsendable
-    # and leave the board watching the pin with the host reporting "idle".
-    released = info.instance.release_external_trigger()
-
     try:
         info.instance.close_serial()
     except Exception:
@@ -194,7 +190,7 @@ async def disconnect_serial(session_id: str, request: Request):
         raise HTTPException(status_code=500, detail="Failed to close serial connection")
 
     sm.set_state(session_id, "idle")
-    return {"status": "disconnected", "trigger_released": released}
+    return {"status": "disconnected"}
 
 
 @router.get("/pin-overrides")

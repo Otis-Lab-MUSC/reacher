@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+- The external TTL session-start trigger, end to end: `POST /api/program/{id}/arm-trigger`
+  and `/disarm-trigger` (now 404), the `armed` session state, the `EXT_TRIGGER_*` commands
+  (1200/1201/1276), `REACHER.arm_external_trigger`/`disarm_external_trigger`/
+  `release_external_trigger`, the simulator's `fire_external_trigger`, the `ext_trigger` pin
+  component and `PinConstraint.allowed_pins`, and the `trigger_released` field of the serial
+  disconnect response. A saved `ext_trigger` pin override is skipped on connect like any
+  unknown component. Firmware: `ExternalTrigger` removed from every sketch and the level-`007`
+  CONTROLLER `START` event no longer carries `"source"` — **hex rebuilt for the Mega sketches,
+  untested on a board**
+
 ### Added
 - Configurable lever timeout mode: `LEVER_RH_SET_TIMEOUT_MODE (1077)` /
   `LEVER_LH_SET_TIMEOUT_MODE (1377)`, payload key `timeout_mode`, offered for

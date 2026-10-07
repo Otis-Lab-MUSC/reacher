@@ -4,6 +4,7 @@ Maps board identifiers to avrdude parameters and Arduino CLI FQBNs.
 Adding a new board requires only a new entry in BOARD_PROFILES.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
@@ -44,6 +45,20 @@ _USB_ID_MAP: Dict[Tuple[int, int], str] = {
     (0x2A03, 0x0042): "mega",
 }
 
+# The hardware-free port every session may select (see kernel.simulator).
+# "SIMULATOR" is the generic entry offered in the port list; the session manager
+# binds each session that picks it to its own numbered instance (SIM1, SIM2, ...)
+# so several simulated rigs can run side by side in one application.
+SIMULATOR_PORT = "SIMULATOR"
+_SIM_INSTANCE_RE = re.compile(r"^SIM[1-9][0-9]*$")
+
+
+def is_simulator_port(port: Optional[str]) -> bool:
+    """True for the generic ``SIMULATOR`` entry and any numbered ``SIMn`` instance."""
+    # fullmatch: ``$`` alone also matches before a trailing newline, so "SIM1\n" passed
+    # as a second, unlocked "SIM1" (the port lock is keyed on the exact string).
+    return port == SIMULATOR_PORT or bool(port and _SIM_INSTANCE_RE.fullmatch(port))
+
 DEFAULT_BOARD = "mega"
 SUPPORTED_BOARDS: Tuple[str, ...] = tuple(BOARD_PROFILES.keys())
 
@@ -54,7 +69,7 @@ def detect_board_from_port(port_device: str) -> Optional[str]:
     Returns the board identifier (e.g. ``"uno"``) or ``None`` if the
     port is a simulator, uses a clone chip, or is unrecognized.
     """
-    if port_device == "SIMULATOR":
+    if is_simulator_port(port_device):
         return None
     for port_info in list_ports.comports():
         if port_info.device == port_device and port_info.vid and port_info.pid:

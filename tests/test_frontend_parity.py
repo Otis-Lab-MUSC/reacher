@@ -111,9 +111,7 @@ def test_c5b_pcint_constraints_match(meta):
 
 
 def test_c5c_interrupt_constraints_match(meta):
-    """Was a tripwire asserting nothing set `requires_interrupt`; the external
-    start trigger tripped it, `COMPONENT_REQUIRES_INT` was added to pinMeta.ts,
-    and this is the comparison it asked for."""
+    """`COMPONENT_REQUIRES_INT` in pinMeta.ts mirrors `requires_interrupt`."""
     backend = {k: c.requires_interrupt for k, c in _constraint_by_component().items()}
     assert meta["requires_interrupt"] == backend, (
         f"COMPONENT_REQUIRES_INT vs PinConstraint.requires_interrupt: "

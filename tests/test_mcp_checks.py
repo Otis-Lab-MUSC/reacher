@@ -215,10 +215,9 @@ def test_c5b_detects_a_flipped_pcint_flag(live):
 
 
 def test_c5c_detects_a_flipped_interrupt_flag(live):
-    """C5c was a tripwire until the external trigger tripped it; now that both
-    sides declare the flag, it is a comparison like C5a/C5b."""
-    ctx = _drift(live, lambda c: c.pin_meta["requires_interrupt"].update({"ext_trigger": False}))
-    _assert_fails_with_evidence(ctx, "C5c", mentions=["ext_trigger"])
+    """C5c is a comparison like C5a/C5b: both sides declare the flag."""
+    ctx = _drift(live, lambda c: c.pin_meta["requires_interrupt"].update({"cue": True}))
+    _assert_fails_with_evidence(ctx, "C5c", mentions=["cue"])
 
 
 def test_c5c_detects_a_backend_only_interrupt_requirement(live):

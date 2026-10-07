@@ -95,13 +95,9 @@ def c5c_interrupt(ctx: CheckContext) -> Result:
     This began as a tripwire: the field was enforced by validate_pin but no
     constraint set it and no TS mirror existed, so it asserted the set was
     empty and told whoever tripped it to add the mirror and extend the check.
-    The external start trigger tripped it, `COMPONENT_REQUIRES_INT` was added,
-    and this is that extension — a real comparison now.
-
-    Note the constraint is documentary for `ext_trigger` rather than the thing
-    doing the work: `validate_pin` returns on `allowed_pins` before it reaches
-    the role flags. Keeping the two sides in step still matters, because the
-    frontend uses its mirror to decide which pins to offer.
+    The mirror was added when a component first required an interrupt pin;
+    keeping the two sides in step still matters, because the frontend uses it
+    to decide which pins to offer.
     """
     backend = {k: c["requires_interrupt"] for k, c in _constraints(ctx).items()}
     return compare_mappings(

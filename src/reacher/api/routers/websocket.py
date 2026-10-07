@@ -122,22 +122,18 @@ def had_connections() -> bool:
 
 
 def _any_session_active() -> bool:
-    """Return True if any session is in 'running', 'paused', 'uploading' or 'armed' state.
+    """Return True if any session is in 'running', 'paused' or 'uploading' state.
 
     Fix: F-001 (#30) — mid-acquisition guard; F-002 (#36) — mid-flash guard.
     Prevents watchdog and shutdown beacon from killing the process while an
     experiment is recording OR while avrdude is flashing firmware.
-
-    'armed' counts as live: the session is waiting on an external TTL edge that
-    may be minutes away, and shutting the server down would drop the trigger
-    silently — the experiment would simply never start.
     """
     if _app_ref is None:
         return False
     try:
         sm = _app_ref.state.session_manager
         for info in sm._sessions.values():
-            if info.state in ("running", "paused", "uploading", "armed"):
+            if info.state in ("running", "paused", "uploading"):
                 return True
     except Exception:
         pass

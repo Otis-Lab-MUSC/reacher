@@ -100,20 +100,6 @@ class TestSecondStartGuard:
         assert "paused" in resp.json()["detail"]
         assert info.instance.start_program.call_count == 0
 
-    def test_start_now_override_from_armed_still_works(self, client):
-        """The disarm-then-start manual override must survive the new guard:
-        "armed" is not in the blocked set."""
-        sid = _create_session(client)
-        sm = client.app.state.session_manager
-        sm.set_state(sid, "armed")
-        info = sm.get_session(sid)
-
-        resp = client.post(f"/api/program/{sid}/start", headers=AUTH_HEADER)
-
-        assert resp.status_code == 200
-        info.instance.disarm_external_trigger.assert_called_once()
-        info.instance.start_program.assert_called_once()
-
     def test_start_from_connected_is_unaffected(self, client):
         sid = _create_session(client)
         sm = client.app.state.session_manager

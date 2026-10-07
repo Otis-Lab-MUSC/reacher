@@ -16,7 +16,7 @@ import urllib.request
 import warnings
 from typing import Callable, Dict, List, Optional
 
-from .boards import BOARD_PROFILES, DEFAULT_BOARD, get_board_profile
+from .boards import BOARD_PROFILES, DEFAULT_BOARD, get_board_profile, is_simulator_port
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,14 @@ _FIRMWARE_BRANCH = "develop"  # Will migrate to "main" in a future pass
 _FIRMWARE_RAW_BASE = f"https://raw.githubusercontent.com/{_FIRMWARE_REPO}/{_FIRMWARE_BRANCH}/src/reacher/hex"
 _HEX_CACHE_DIR = os.path.expanduser("~/.reacher/hex")
 _CACHE_MAX_AGE_S = 86400  # 24 hours — re-download cached hex files older than this
+
+# Simulated flash (port == SIMULATOR_PORT): total wall time of the "write", and an
+# optional forced failure so the UI's error path can be exercised without a board.
+# Both are read per call so a test or a dev shell can flip them without a restart.
+SIM_UPLOAD_SECONDS_ENV = "REACHER_SIM_UPLOAD_SECONDS"
+SIM_UPLOAD_FAIL_ENV = "REACHER_SIM_UPLOAD_FAIL"
+_SIM_UPLOAD_SECONDS_DEFAULT = 3.0  # a real Mega flash at 115200 baud takes a few seconds
+_SIM_UPLOAD_STEPS = 20  # 5% per tick, like avrdude's progress bar
 
 # Layouts a bundled avrdude.conf has occupied, relative to _MEIPASS.  The
 # packaging spec writes the first one today; the others are searched so a spec
@@ -117,6 +125,44 @@ def _fetch_hex_from_github() -> Optional[str]:
         return None
 
     return _HEX_CACHE_DIR if os.path.isdir(_HEX_CACHE_DIR) else None
+
+
+def _check_intel_hex(path: str) -> int:
+    """Validate an Intel HEX file the way a programmer would; return its data byte count.
+
+    avrdude rejects a record with a bad checksum and a file with no EOF record,
+    so a simulated flash has to as well, or a truncated or corrupt hex would
+    "flash" fine against the SIMULATOR and only fail on a board.
+
+    Raises:
+        ValueError: with the offending line number on the first malformed record.
+    """
+    data_bytes = 0
+    saw_eof = False
+    with open(path, "rb") as fh:
+        for lineno, raw in enumerate(fh.read().lstrip(b"\xef\xbb\xbf").splitlines(), 1):
+            line = raw.strip()
+            if not line:
+                continue
+            if saw_eof:
+                raise ValueError(f"line {lineno}: record after the end-of-file record")
+            if not line.startswith(b":"):
+                raise ValueError(f"line {lineno}: record does not start with ':'")
+            try:
+                record = bytes.fromhex(line[1:].decode("ascii"))
+            except (ValueError, UnicodeDecodeError):
+                raise ValueError(f"line {lineno}: record is not hexadecimal") from None
+            if len(record) < 5 or len(record) != record[0] + 5:
+                raise ValueError(f"line {lineno}: record length does not match its length byte")
+            if sum(record) & 0xFF:
+                raise ValueError(f"line {lineno}: checksum mismatch")
+            if record[3] == 0x00:
+                data_bytes += record[0]
+            elif record[3] == 0x01:
+                saw_eof = True
+    if not saw_eof:
+        raise ValueError("no end-of-file record")
+    return data_bytes
 
 
 class AvrdudeNotFoundError(RuntimeError):
@@ -411,6 +457,9 @@ class FirmwareUploader:
         except OSError as exc:
             logger.warning("Could not read hex file metadata: %s", exc)
 
+        if is_simulator_port(port):
+            return await self._simulate_upload(paradigm, board, hex_path, progress_callback)
+
         # Pre-flight: verify avrdude is reachable before spawning subprocess
         if os.path.isabs(self.avrdude_path):
             if not os.path.isfile(self.avrdude_path):
@@ -529,3 +578,66 @@ class FirmwareUploader:
             if progress_callback:
                 progress_callback(percent, f"Failed (exit {proc.returncode})")
             return False
+
+    async def _simulate_upload(
+        self,
+        paradigm: str,
+        board: str,
+        hex_path: str,
+        progress_callback: Optional[Callable[[int, str], None]],
+    ) -> bool:
+        """Flash the SIMULATOR port: same contract as a real upload, no avrdude.
+
+        Everything up to here has run for real — the hex was resolved, the board
+        profile looked up and the file hashed — so a missing hex or an unknown
+        board fails exactly as it would on hardware. What is stood in for is the
+        programmer: the hex is checksummed, then progress is reported in
+        avrdude's own cadence (``Starting upload`` -> ``Writing`` 5..100 ->
+        ``Complete``) over ``SIM_UPLOAD_SECONDS``. The caller then reboots the
+        simulated board into *paradigm*'s sketch, as it does a real one.
+
+        Returns False with ``last_error`` set on a bad hex or a forced failure
+        (``REACHER_SIM_UPLOAD_FAIL``), mirroring a non-zero avrdude exit.
+        """
+        logger.info("Simulating firmware upload: board=%s paradigm=%s hex=%s", board, paradigm, hex_path)
+        if progress_callback:
+            progress_callback(0, "Starting upload")
+
+        forced = os.environ.get(SIM_UPLOAD_FAIL_ENV, "").strip()
+        failure: Optional[str] = None
+        data_bytes = 0
+        if forced:
+            failure = "simulated failure" if forced == "1" else forced
+        else:
+            try:
+                data_bytes = _check_intel_hex(hex_path)
+            except ValueError as exc:
+                failure = f"invalid Intel HEX in {os.path.basename(hex_path)}: {exc}"
+            except OSError as exc:
+                failure = f"cannot read {hex_path}: {exc}"
+        if failure is not None:
+            self.last_error = (
+                "avrdude exited 1 (simulated flash on the SIMULATOR port).\n"
+                f"stderr: {failure}\n"
+                "stdout: (empty)"
+            )
+            logger.error(self.last_error)
+            if progress_callback:
+                progress_callback(0, "Failed (exit 1)")
+            return False
+
+        try:
+            total_s = float(os.environ.get(SIM_UPLOAD_SECONDS_ENV, _SIM_UPLOAD_SECONDS_DEFAULT))
+        except ValueError:
+            total_s = _SIM_UPLOAD_SECONDS_DEFAULT
+        tick_s = max(total_s, 0.0) / _SIM_UPLOAD_STEPS
+        for step in range(1, _SIM_UPLOAD_STEPS + 1):
+            if tick_s:
+                await asyncio.sleep(tick_s)
+            if progress_callback:
+                progress_callback(step * 100 // _SIM_UPLOAD_STEPS, "Writing")
+
+        logger.info("Simulated firmware upload succeeded for %s (%d bytes)", paradigm, data_bytes)
+        if progress_callback:
+            progress_callback(100, "Complete")
+        return True

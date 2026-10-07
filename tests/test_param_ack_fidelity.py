@@ -57,7 +57,7 @@ def _drain(q: queue.Queue) -> list:
 
 
 def _param_records(records: list) -> list:
-    return [r for r in records if "param" in r and r.get("device") != "EXT_TRIGGER"]
+    return [r for r in records if "param" in r]
 
 
 class TestSimulatorEmitsTheFirmwareShapedAck:
