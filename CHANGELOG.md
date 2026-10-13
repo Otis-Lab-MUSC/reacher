@@ -40,6 +40,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ([#35](https://github.com/Otis-Lab-MUSC/labrynth/issues/35))
 
 ### Fixed
+- **Every deleted session leaked its `monitor_time_limit` thread and about one fd**
+  (100 sessions: +100 threads), and `reset()` started new threads without joining the old
+  ones. New `REACHER.shutdown()` stops and joins the kernel threads under one 20 s
+  deadline (skipping dead threads and the caller's own thread) and closes and drops the
+  session logger; `destroy_session` calls it outside the manager lock
 - **An Infusion or Both limit set without a `delay` never stopped the run.** The kernel
   left `stop_delay` as `None`, so every limit check raised a `TypeError` in the monitor
   thread. The delay now defaults to 0 (stop as soon as the limit is met), and a limit that

@@ -388,6 +388,9 @@ class REACHER:
             self.ser = serial.Serial(baudrate=115200, timeout=1)
         self.queue = queue.Queue(maxsize=5000)  # Fix: F-006 — Match __init__ maxsize
 
+        # Old threads must be gone before the flags flip back: a surviving read_serial
+        # would otherwise keep reading the rebuilt serial object.
+        self._join_worker_threads(timeout=5.0)
         self.serial_flag.clear()
         self.program_flag.set()
         self.time_check_flag.set()
@@ -549,6 +552,54 @@ class REACHER:
             self._close_event_log()
             self._close_controller_log()  # Fix 4.9
             self.logger.info("--> Cleanup complete")
+
+    def shutdown(self, timeout: float = 20.0) -> None:
+        """Stop this instance's threads and release its log handlers.
+
+        **Description:**
+        - Idempotent and never raises.
+        - Does not stop a running program; the caller must do that first.
+        - Signals the serial, queue and time-check threads to exit, closes the
+          serial port, and joins the threads under one shared deadline.
+        - Removes and closes the log handlers, and drops the session logger so
+          it does not persist in ``logging.Logger.manager.loggerDict``.
+        """
+        try:
+            self.time_check_flag.clear()
+            self.serial_flag.set()
+            self.program_flag.set()
+            try:
+                self.queue.put_nowait(None)
+            except queue.Full:
+                pass
+            if self.ser.is_open or self.serial_thread.is_alive():
+                self.close_serial()
+            self._join_worker_threads(timeout)
+        except Exception:
+            self.logger.exception("Error during shutdown")
+        finally:
+            for handler in list(self.logger.handlers):
+                self.logger.removeHandler(handler)
+                handler.close()
+            if self.logger.name != "reacher.default":
+                logging.Logger.manager.loggerDict.pop(self.logger.name, None)
+
+    def _join_worker_threads(self, timeout: float) -> None:
+        """Join the serial, queue and time-check threads under one shared deadline.
+
+        Skips threads that are not alive and the calling thread, so it is safe
+        to call from one of the kernel's own threads. Warns about any still
+        alive after the deadline rather than raising.
+        """
+        deadline = time.monotonic() + timeout
+        threads = (self.serial_thread, self.queue_thread, self.time_check_thread)
+        for thread in threads:
+            if thread is threading.current_thread() or not thread.is_alive():
+                continue
+            thread.join(timeout=max(0, deadline - time.monotonic()))
+        still_alive = [t.name for t in threads if t.is_alive() and t is not threading.current_thread()]
+        if still_alive:
+            self.logger.warning("Threads still alive after %.1fs: %s", timeout, still_alive)
 
     def _resilient(self, target, name: str):
         """Fix 7.1: wrap a thread body so an unhandled exception does not

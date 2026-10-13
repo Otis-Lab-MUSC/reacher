@@ -157,6 +157,12 @@ class SessionManager:
             except Exception:
                 logger.warning("Failed to clear simulator settings for %s", info.port, exc_info=True)
 
+        # Joins can take seconds, so this runs outside self._lock
+        try:
+            info.instance.shutdown()
+        except Exception:
+            logger.warning("Error shutting down session %s", session_id, exc_info=True)
+
         # Now safe to remove
         with self._lock:
             self._sessions.pop(session_id, None)
