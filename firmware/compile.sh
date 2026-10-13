@@ -1,6 +1,9 @@
 #!/bin/bash
 # Compile all REACHER firmware paradigms for every supported board.
-# Requires: arduino-cli with arduino:avr board package installed.
+# Requires: arduino-cli with the arduino:avr board package and the ArduinoJson
+#           library installed (see ARDUINOJSON_VERSION below):
+#             arduino-cli core install arduino:avr
+#             arduino-cli lib install ArduinoJson@7.4.3
 #
 # Usage:  bash compile.sh
 # Output: ../src/reacher/hex/<board>/<paradigm>.hex for each (paradigm, board)
@@ -13,6 +16,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HEX_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/src/reacher/hex"
 LIB_DIR="$SCRIPT_DIR/libraries"
+
+# ArduinoJson is not vendored in libraries/. 7.4.3 reproduces the committed hex
+# byte-for-byte; other versions are untested.
+ARDUINOJSON_VERSION="7.4.3"
+installed_json="$(arduino-cli lib list ArduinoJson 2>/dev/null | awk '$1 == "ArduinoJson" { print $2 }')"
+if [ -z "$installed_json" ]; then
+    echo "error: ArduinoJson is not installed. Run:" >&2
+    echo "    arduino-cli lib install ArduinoJson@$ARDUINOJSON_VERSION" >&2
+    exit 1
+fi
+if [ "$installed_json" != "$ARDUINOJSON_VERSION" ]; then
+    echo "warning: ArduinoJson $installed_json installed; hex is built with $ARDUINOJSON_VERSION." >&2
+    echo "    arduino-cli lib install ArduinoJson@$ARDUINOJSON_VERSION" >&2
+fi
 
 mkdir -p "$HEX_DIR"
 

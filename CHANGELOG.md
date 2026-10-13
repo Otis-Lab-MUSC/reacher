@@ -40,6 +40,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ([#35](https://github.com/Otis-Lab-MUSC/labrynth/issues/35))
 
 ### Fixed
+- `uv.lock` was missing `openpyxl` (added with the Excel export in #82), so
+  `uv run --frozen` failed at test collection; the lock is refreshed
+- `firmware/compile.sh` now checks for the ArduinoJson library, which is not
+  vendored in `firmware/libraries/` and was undocumented; 7.4.3 reproduces the
+  committed hex byte-for-byte
 - **Variable Interval delivered no rewards at all.** `vi`/`vi_lite` zeroed the
   Trigger's live availability window (`windowStart`/`windowEnd`/`firedInWindow`)
   from `configureVariableInterval()` in `Config.h`. Because `vi.ino`'s

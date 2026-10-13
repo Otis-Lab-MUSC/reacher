@@ -11,6 +11,7 @@ This `firmware/` tree lives inside the `reacher` repo (folded in from the now-ar
 ```bash
 ./compile.sh                        # builds 5 paradigms (mega) + 4 _lite paradigms (uno) -> ../src/reacher/hex/{mega,uno}/<paradigm>.hex
 arduino-cli core install arduino:avr  # one-time: install AVR toolchain
+arduino-cli lib install ArduinoJson@7.4.3  # one-time: not vendored in libraries/; pinned for reproducible hex
 doxygen Doxyfile                    # regenerate docs/ (git-ignored)
 
 # Single sketch (FQBN: arduino:avr:mega:cpu=atmega2560):
