@@ -1564,17 +1564,29 @@ class REACHER:
 
         # Then do cleanup (send firmware END, close serial, etc.)
         self._controller_end_received.clear()
-        self.send_serial_command({"cmd": 100})
-        # Wait for the firmware's CONTROLLER END event (~200ms after cmd 100).
-        # Fallback to 2s sleep if it doesn't arrive within 8s.
-        received = self._controller_end_received.wait(timeout=8.0)
-        if not received:
-            self.logger.warning("Timed out waiting for CONTROLLER END — export may be incomplete")
-            time.sleep(2)
+        port_open = getattr(self.ser, "is_open", False)
+        if port_open:
+            try:
+                self.send_serial_command({"cmd": 100})
+            except Exception:
+                self.logger.warning("END-PROGRAM send failed; treating serial port as closed", exc_info=True)
+                port_open = False
+        if port_open:
+            # Wait for the firmware's CONTROLLER END event (~200ms after cmd 100).
+            # Fallback to 2s sleep if it doesn't arrive within 8s.
+            received = self._controller_end_received.wait(timeout=8.0)
+            if not received:
+                self.logger.warning("Timed out waiting for CONTROLLER END — export may be incomplete")
+                time.sleep(2)
+        else:
+            self.logger.warning("Serial port closed; skipping END handshake, exporting buffered data")
         self.program_flag.set()
         # Drain remaining events with timeout to avoid indefinite hang
         self._join_queue_with_timeout(5.0)
-        self.close_serial()
+        try:
+            self.close_serial()
+        except Exception:
+            self.logger.warning("close_serial failed; continuing with export", exc_info=True)
         self.program_end_time = time.time()
         self._write_event_log({"type": "SESSION_END", "timestamp": self.program_end_time})
         self._close_event_log()  # Fix: F-010 — Ensure all events flushed before export

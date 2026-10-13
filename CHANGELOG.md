@@ -40,6 +40,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ([#35](https://github.com/Otis-Lab-MUSC/labrynth/issues/35))
 
 ### Fixed
+- **Stopping or deleting a session whose serial port had closed lost its data.**
+  `stop_program()` always sent END, which raised on a closed port before the export ran:
+  `/stop` returned 500 and a delete dropped the run unexported. With the port closed it now
+  skips the END handshake and its 8 s wait and always exports the buffered data
 - **Every deleted session leaked its `monitor_time_limit` thread and about one fd**
   (100 sessions: +100 threads), and `reset()` started new threads without joining the old
   ones. New `REACHER.shutdown()` stops and joins the kernel threads under one 20 s
