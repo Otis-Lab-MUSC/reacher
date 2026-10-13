@@ -267,7 +267,7 @@ class REACHER:
         self.limit_type: Optional[str] = None
         self.infusion_limit: Optional[int] = None
         self.time_limit: Optional[int] = None
-        self.stop_delay: Optional[int] = None
+        self.stop_delay: int = 0
         self.last_infusion_time: Optional[float] = None
 
         # Configuration variables
@@ -369,10 +369,6 @@ class REACHER:
         self.program_end_time = None
         self.paused_time = 0
         self.paused_start_time = None
-        self.limit_type = None
-        self.infusion_limit = None
-        self.time_limit = None
-        self.stop_delay = None
         self.last_infusion_time = None
 
         self.firmware_information = {}
@@ -1443,9 +1439,9 @@ class REACHER:
         - Sets a delay in seconds after the last infusion before program termination.
 
         **Args:**
-        - `delay (int)`: The delay in seconds.
+        - `delay (int)`: The delay in seconds; None means no delay.
         """
-        self.stop_delay = delay
+        self.stop_delay = delay or 0
 
     def _reset_session_buffers(self) -> None:
         """Clear all per-session data buffers and counters."""
@@ -1736,25 +1732,29 @@ class REACHER:
             return  # No limits to check if program hasn't started or type unset
 
         elapsed_time = current_time - self.program_start_time - self.paused_time
-        infusion_count = self._infusion_count  # Atomic counter — O(1)
+        # Whole-session total: a /split zeroes _infusion_count, which would restart the limit from 0
+        infusion_count = self.get_total_infusion_count()
+        stop_delay = self.stop_delay or 0
+        infusion_met = self.infusion_limit is not None and infusion_count >= self.infusion_limit
+        time_met = self.time_limit is not None and elapsed_time >= self.time_limit
         self.logger.debug(f"Checking limits: elapsed_time={elapsed_time:.2f}, time_limit={self.time_limit}, infusion_count={infusion_count}, infusion_limit={self.infusion_limit}")
 
         if self.limit_type == "Time":
-            if elapsed_time >= self.time_limit:
+            if time_met:
                 self.logger.info("Time limit met, stopping program")
                 self.stop_program()
         elif self.limit_type == "Infusion":
-            if infusion_count >= self.infusion_limit:
+            if infusion_met:
                 if self.last_infusion_time is None:
                     self.last_infusion_time = current_time
-                if self.last_infusion_time and (current_time - self.last_infusion_time >= self.stop_delay):
+                if self.last_infusion_time and (current_time - self.last_infusion_time >= stop_delay):
                     self.logger.info("Infusion limit met and stop delay elapsed, stopping program")
                     self.stop_program()
         elif self.limit_type == "Both":
-            if infusion_count >= self.infusion_limit:
+            if infusion_met:
                 if self.last_infusion_time is None:
                     self.last_infusion_time = current_time
-            if (self.last_infusion_time and (current_time - self.last_infusion_time) >= self.stop_delay) or (elapsed_time >= self.time_limit):
+            if (self.last_infusion_time and (current_time - self.last_infusion_time) >= stop_delay) or time_met:
                 self.logger.info("Either infusion limit with stop delay or time limit met, stopping program")
                 self.stop_program()
         elif self.limit_type == "Trials":

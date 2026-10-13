@@ -40,6 +40,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ([#35](https://github.com/Otis-Lab-MUSC/labrynth/issues/35))
 
 ### Fixed
+- **An Infusion or Both limit set without a `delay` never stopped the run.** The kernel
+  left `stop_delay` as `None`, so every limit check raised a `TypeError` in the monitor
+  thread. The delay now defaults to 0 (stop as soon as the limit is met), and a limit that
+  is only half configured never raises. `reset()` keeps the configured limits, and the
+  infusion limit counts the whole session, so `/split` no longer restarts it from 0
 - `uv.lock` was missing `openpyxl` (added with the Excel export in #82), so
   `uv run --frozen` failed at test collection; the lock is refreshed
 - `firmware/compile.sh` now checks for the ArduinoJson library, which is not
