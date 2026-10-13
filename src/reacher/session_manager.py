@@ -32,6 +32,7 @@ class SessionInfo:
     board: Optional[str] = None
     state: str = "idle"  # idle | uploading | connected | running | paused | stopped
     exported: bool = False  # True once a "stopped" session's data has been exported (see mark_exported)
+    state_before_disconnect: Optional[str] = None  # restored if the kernel recovers the port on its own
 
 
 class SessionManager:
@@ -89,6 +90,23 @@ class SessionManager:
             def _event_callback_wrapper(sid: str, event_type: str, data: dict):
                 if event_type == "disconnect":
                     self.handle_disconnect(sid, data.get("reason", "unknown"))
+                if event_type == "reconnected":
+                    info = self._sessions.get(sid)
+                    if info is not None and info.state == "disconnected":
+                        restored = info.state_before_disconnect or "connected"
+                        info.state = restored
+                        info.state_before_disconnect = None
+                        self._broadcast_state(sid, restored)
+                        _diag_log(
+                            "session.state",
+                            tier=_TIER_KERNEL,
+                            msg=f"Session {sid}: disconnected → {restored} (reconnected)",
+                            src="reacher.session_manager",
+                            session_id=sid,
+                            from_state="disconnected",
+                            to_state=restored,
+                            reason="reconnected",
+                        )
                 if self._event_callback:
                     self._event_callback(sid, event_type, data)
 
@@ -264,6 +282,8 @@ class SessionManager:
         if info is None:
             return
         previous = info.state
+        if previous != "disconnected":
+            info.state_before_disconnect = previous
         info.state = "disconnected"
         self._broadcast_state(session_id, "disconnected")
         logger.warning("Session %s disconnected: %s", session_id, reason)

@@ -75,6 +75,11 @@ async def start_program(session_id: str, request: Request):
             detail=f"Cannot start the program in '{info.state}' state",
         )
 
+    # Checked before start_program(), which resets the buffers: with no open
+    # port the kernel raises, and that would otherwise surface as a 500.
+    if not getattr(info.instance.ser, "is_open", False):
+        raise HTTPException(status_code=409, detail="Connect the board first")
+
     try:
         info.instance.start_program()
     except Exception:
@@ -92,6 +97,9 @@ async def stop_program(session_id: str, request: Request):
         info = sm.get_session(session_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    if not info.instance.program_running and info.state not in ("running", "paused"):
+        return {"status": "not_running"}
 
     try:
         # Fix: F-001 — run_in_executor so time.sleep(2) in stop_program() doesn't block the event loop

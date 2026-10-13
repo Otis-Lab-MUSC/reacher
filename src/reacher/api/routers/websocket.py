@@ -333,6 +333,9 @@ async def _orphan_cleanup():
                         timeout = _SESSION_ORPHAN_TIMEOUT_ACTIVE
                     elif info and info.state == "stopped" and not info.exported:
                         timeout = _SESSION_ORPHAN_TIMEOUT_STOPPED_UNEXPORTED
+                    elif info and info.state == "disconnected" and getattr(info.instance, "program_running", False):
+                        # A serial drop mid-run holds unexported data a client may still come back for.
+                        timeout = _SESSION_ORPHAN_TIMEOUT_ACTIVE
                 except Exception:
                     pass
             if (now - ts) >= timeout:

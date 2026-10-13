@@ -40,6 +40,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ([#35](https://github.com/Otis-Lab-MUSC/labrynth/issues/35))
 
 ### Fixed
+- Session lifecycle guards: `connect` and `disconnect` return 409 while a run is running
+  or paused (connect used to orphan a reader thread; disconnect stranded the run's data);
+  `disconnect` leaves the session `disconnected` instead of `idle`; `/start` returns 409
+  "Connect the board first" on a closed port instead of 500; `/stop` with nothing running
+  returns 200 `{"status": "not_running"}`; `/reset` returns 409 while paused or
+  disconnected. A kernel `reconnected` event restores the pre-drop state, and a
+  disconnected session with a live run gets the 600 s orphan timeout
 - **Stopping or deleting a session whose serial port had closed lost its data.**
   `stop_program()` always sent END, which raised on a closed port before the export ran:
   `/stop` returned 500 and a delete dropped the run unexported. With the port closed it now

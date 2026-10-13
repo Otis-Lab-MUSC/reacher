@@ -66,6 +66,11 @@ async def reset_session(session_id: str, request: Request):
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    if info.state == "paused":
+        raise HTTPException(status_code=409, detail="Cannot reset while paused. Resume or stop first")
+    if info.state == "disconnected":
+        raise HTTPException(status_code=409, detail="Cannot reset while disconnected. Reconnect first")
+
     try:
         info.instance.reset()
         # Re-open serial since reset() closes it
