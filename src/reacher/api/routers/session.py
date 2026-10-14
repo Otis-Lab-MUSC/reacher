@@ -55,6 +55,10 @@ async def get_session(session_id: str, request: Request):
         "program_running": instance.get_program_running(),
         "firmware_info": instance.get_firmware_information(),
         "callback_failures": instance.emit_failure_count,
+        "counted_pumps": instance.get_counted_pumps(),
+        "follows_reward_pump": instance._counted_pumps is None,
+        "infusions_by_pump": instance.get_infusions_by_pump(),
+        "infusion_count": instance.get_total_infusion_count(),
     }
 
 

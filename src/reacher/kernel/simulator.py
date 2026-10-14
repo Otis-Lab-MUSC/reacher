@@ -511,7 +511,7 @@ class FirmwareSimulator:
         elif cmd == 313:  # CUE2_TEST
             self._send_device_test("CUE", self._pins["CUE_2"], "TONE", self.cue2_duration)
         elif cmd == 413:  # PUMP2_TEST
-            self._send_device_test("PUMP", self._pins["PUMP_2"], "INFUSION", self.pump2_duration)
+            self._send({"level": "000", "device": "PUMP2", "param": "test", "value": "FIRED"})
         elif cmd == 482:
             self.pump2_duration = _clamp(cmd_data.get("duration"), 1, 600000)
             self._reconfigure()
@@ -1308,6 +1308,9 @@ class SimulatedSerial:
 
     def open(self):
         self.is_open = True
+        # Opening the port reboots the board, and the firmware's active pump is RAM-only.
+        self._simulator.pump2_active = False
+        self._simulator._reconfigure()
         logger.info("SimulatedSerial opened")
 
     def close(self):

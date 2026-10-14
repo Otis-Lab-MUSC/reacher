@@ -20,6 +20,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   untested on a board**
 
 ### Added
+- Configurable infusion-counting pumps: `POST /api/program/{id}/limit` takes
+  `counted_pumps` (`["PUMP_1"]`, `["PUMP_2"]` or both; `null` = follow the reward pump, the
+  default; omitted = keep the current setting; an empty list is a 400 for Infusion/Both).
+  `REACHER.set_counted_pumps()` / `get_counted_pumps()` / `get_infusions_by_pump()`; a change
+  mid-run applies at once. `GET /api/sessions/{id}` reports `counted_pumps`,
+  `follows_reward_pump`, `infusions_by_pump` and `infusion_count`; exported `metadata.json`
+  adds `infusions_by_pump` and `counted_pumps`; a new `infusion_count` WebSocket event
+  carries the counted total and per-pump split after every counted infusion
 - Configurable lever timeout mode: `LEVER_RH_SET_TIMEOUT_MODE (1077)` /
   `LEVER_LH_SET_TIMEOUT_MODE (1377)`, payload key `timeout_mode`, offered for
   `fr`/`pr`/`vi` and their `_lite` twins. `0` = the timeout starts on every ACTIVE
@@ -40,6 +48,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ([#35](https://github.com/Otis-Lab-MUSC/labrynth/issues/35))
 
 ### Fixed
+- **An Infusion limit on a pump-2 reward chain never fired.** The kernel counted only
+  `PUMP`/`PUMP_1` infusions, so after `SET_ACTIVE_PUMP (221)` selected pump 2 the run went
+  to its time limit. Infusions now count against the reward pump active when they arrive
+  (pump 1 by default and after every port open, pump 2 after 221 = 1)
+- Simulator: the manual pump-2 test (413) echoes `PUMP2 test FIRED` like the firmware
+  instead of logging a `PUMP` infusion, and reopening the simulated port resets the reward
+  chain to pump 1
 - Session lifecycle guards: `connect` and `disconnect` return 409 while a run is running
   or paused (connect used to orphan a reader thread; disconnect stranded the run's data);
   `disconnect` leaves the session `disconnected` instead of `idle`; `/start` returns 409

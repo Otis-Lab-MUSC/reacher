@@ -39,6 +39,10 @@ _FIRMWARE_RX_BUFFER = 128
 
 _USE_VALUE = object()  # sentinel: use the `value` arg from send_command()
 
+_PUMP_KEYS = ("PUMP_1", "PUMP_2")
+# Pavlovian firmware logs pump 1 as "PUMP"; operant firmware logs it as "PUMP_1".
+_PUMP_DEVICE_KEYS = {"PUMP": "PUMP_1", "PUMP_1": "PUMP_1", "PUMP_2": "PUMP_2"}
+
 # Maps command codes to (device_name, field_name, value_or_sentinel)
 # _USE_VALUE means the value is taken from the `value` arg passed to send_command().
 #
@@ -148,6 +152,9 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
 class REACHER:
     """A class to manage serial communication and data collection for REACHER experiments."""
 
+    # Class default so an instance built without __init__ still reads the follow-reward mode.
+    _counted_pumps: Optional[List[str]] = None
+
     def __init__(
         self,
         session_id: Optional[str] = None,
@@ -238,6 +245,12 @@ class REACHER:
         # which come with their own start/end millis).
         self._session_changes: List[Dict] = []
         self._infusion_count: int = 0  # Atomic counter — avoids O(n) rescan in check_limit_met
+        # Per-pump tallies. _infusion_count counts only infusions from the reward pump
+        # active at arrival; these also record the other pump for the session totals.
+        self._infusions_by_pump: Dict[str, int] = {"PUMP_1": 0, "PUMP_2": 0}
+        self._reward_pump: str = "PUMP_1"  # Firmware power-on target; SET_ACTIVE_PUMP (221) moves it
+        # None follows the reward pump; an explicit list pins which pumps' infusions count.
+        self._counted_pumps: Optional[List[str]] = None
         # Counted off the serial stream for the same reason as infusions: an
         # export must not depend on a browser's tally of what it happened to
         # receive. Presses include every lever contact (ACTIVE/INACTIVE/TIMEOUT),
@@ -251,6 +264,7 @@ class REACHER:
         # Segmentation state
         self._segment_number: int = 0
         self._cumulative_infusion_count: int = 0
+        self._cumulative_infusions_by_pump: Dict[str, int] = {"PUMP_1": 0, "PUMP_2": 0}
         self._cumulative_press_count: int = 0
         self._cumulative_trial_count: int = 0
         self._segment_exports: List[str] = []
@@ -356,6 +370,7 @@ class REACHER:
         self.frame_data = []
         self.slm_data = []
         self._infusion_count = 0
+        self._infusions_by_pump = {"PUMP_1": 0, "PUMP_2": 0}
         self._data_warning_emitted = False  # Fix: F-002 — Reset warning flag
         self._event_log_write_count = 0  # Fix: F-010 — Reset write counter
         self._controller_log_write_count = 0  # Fix 4.9 — Reset write counter
@@ -480,6 +495,8 @@ class REACHER:
             self.ser.close()
             time.sleep(1)
         self.ser.open()
+        # Opening the port reboots the board, which falls back to pump 1.
+        self._reward_pump = "PUMP_1"
         if self.serial_flag.is_set():
             self.serial_flag.clear()
         if not self.serial_thread.is_alive():
@@ -1011,12 +1028,17 @@ class REACHER:
         # that stop_program() sets before the END event arrives from firmware).
         if (self.program_running and not self.program_flag.is_set()) \
                 or entry_dict.get('device') == 'CONTROLLER':
+            infusion_pump = None
             with self.thread_lock:
                 self.behavior_data.append(entry_dict)
                 _type_key = f"{entry_dict.get('device')}.{entry_dict.get('event')}"
                 self._event_type_counts[_type_key] = self._event_type_counts.get(_type_key, 0) + 1
-                if entry_dict.get('device') in ('PUMP', 'PUMP_1') and entry_dict.get('event') == 'INFUSION':
-                    self._infusion_count += 1
+                pump = _PUMP_DEVICE_KEYS.get(entry_dict.get('device'))
+                if pump and entry_dict.get('event') == 'INFUSION':
+                    self._infusions_by_pump[pump] += 1
+                    if pump == self._reward_pump:
+                        self._infusion_count += 1
+                    infusion_pump = pump
                 elif entry_dict.get('device') in ('LEVER_RH', 'LEVER_LH') \
                         and str(entry_dict.get('event', '')).endswith('PRESS'):
                     self._press_count += 1
@@ -1037,6 +1059,8 @@ class REACHER:
                     "threshold": self._DATA_WARNING_THRESHOLD,
                 })
             self.logger.info("--> Updated behavioral data")
+            if infusion_pump:
+                self._emit_infusion_count()
 
         # Auto-stop when firmware signals all Pavlovian trials are complete
         if (entry_dict.get('device') == 'PAVLOV'
@@ -1132,6 +1156,9 @@ class REACHER:
         """
         payload = build_command_payload(code, value)
         self.send_serial_command(payload)
+        if code == int(CommandCode.SET_ACTIVE_PUMP):
+            with self.thread_lock:
+                self._reward_pump = "PUMP_2" if value else "PUMP_1"
         if code in _COMMAND_STATE_MAP:
             device, field, mapped = _COMMAND_STATE_MAP[code]
             effective = value if mapped is _USE_VALUE else mapped
@@ -1501,10 +1528,12 @@ class REACHER:
         self.frame_data = []
         self.slm_data = []
         self._infusion_count = 0
+        self._infusions_by_pump = {"PUMP_1": 0, "PUMP_2": 0}
         self._press_count = 0
         self._trial_count = 0
         self._segment_number = 0
         self._cumulative_infusion_count = 0
+        self._cumulative_infusions_by_pump = {"PUMP_1": 0, "PUMP_2": 0}
         self._cumulative_press_count = 0
         self._cumulative_trial_count = 0
         self._segment_exports = []
@@ -1645,10 +1674,13 @@ class REACHER:
             snapshot = list(self.behavior_data)
             segment_infusions = self._infusion_count
             self._cumulative_infusion_count += segment_infusions
+            for p in _PUMP_KEYS:
+                self._cumulative_infusions_by_pump[p] += self._infusions_by_pump[p]
             self._cumulative_press_count += self._press_count
             self._cumulative_trial_count += self._trial_count
             self.behavior_data = []
             self._infusion_count = 0
+            self._infusions_by_pump = {"PUMP_1": 0, "PUMP_2": 0}
             self._press_count = 0
             self._trial_count = 0
             self._data_warning_emitted = False
@@ -1693,8 +1725,10 @@ class REACHER:
             self.frame_data = []
             self.slm_data = []
             self._infusion_count = 0
+            self._infusions_by_pump = {"PUMP_1": 0, "PUMP_2": 0}
             self._segment_number = 0
             self._cumulative_infusion_count = 0
+            self._cumulative_infusions_by_pump = {"PUMP_1": 0, "PUMP_2": 0}
             self._segment_exports = []
             self._segment_event_counts = []
             self._data_warning_emitted = False
@@ -1728,7 +1762,56 @@ class REACHER:
         ``_infusion_count`` alone covers only the current one.
         """
         with self.thread_lock:
+            return self._counted_total_locked()
+
+    def _counted_total_locked(self) -> int:
+        """Caller holds ``thread_lock``."""
+        if self._counted_pumps is None:
             return self._cumulative_infusion_count + self._infusion_count
+        return sum(self._cumulative_infusions_by_pump[p] + self._infusions_by_pump[p] for p in self._counted_pumps)
+
+    def set_counted_pumps(self, pumps: Optional[List[str]]) -> None:
+        """Choose which pump's infusions count toward an Infusion limit.
+
+        **Args:**
+        - `pumps (list | None)`: Pump keys to count, or None to follow the reward pump.
+
+        **Raises:**
+        - `ValueError`: If a pump key is not ``PUMP_1`` or ``PUMP_2``.
+        """
+        if pumps is None:
+            counted = None
+        else:
+            unknown = [p for p in pumps if p not in _PUMP_KEYS]
+            if unknown:
+                raise ValueError(f"Unknown pump key(s): {unknown}")
+            counted = list(dict.fromkeys(pumps))
+        with self.thread_lock:
+            self._counted_pumps = counted
+        self.logger.info("Counted pumps set to: %s", counted if counted is not None else "reward pump")
+        self._emit_infusion_count()
+
+    def get_counted_pumps(self) -> List[str]:
+        """Return the pumps whose infusions count, following the reward pump by default."""
+        with self.thread_lock:
+            if self._counted_pumps is None:
+                return [self._reward_pump]
+            return list(self._counted_pumps)
+
+    def get_infusions_by_pump(self) -> Dict[str, int]:
+        """Return infusions per pump across every segment of this session."""
+        with self.thread_lock:
+            return {p: self._cumulative_infusions_by_pump[p] + self._infusions_by_pump[p] for p in _PUMP_KEYS}
+
+    def _emit_infusion_count(self) -> None:
+        with self.thread_lock:
+            payload = {
+                "counted": self._counted_total_locked(),
+                "by_pump": {p: self._cumulative_infusions_by_pump[p] + self._infusions_by_pump[p] for p in _PUMP_KEYS},
+                "counted_pumps": list(self._counted_pumps) if self._counted_pumps is not None else [self._reward_pump],
+                "follows_reward_pump": self._counted_pumps is None,
+            }
+        self._emit("infusion_count", payload)
 
     def get_total_press_count(self) -> int:
         """Return lever presses across every segment of this session.
