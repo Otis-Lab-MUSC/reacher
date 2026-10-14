@@ -206,12 +206,16 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
         infusion_count = instance.get_total_infusion_count()
         press_count = instance.get_total_press_count()
         trial_count = instance.get_total_trial_count()
+        infusions_by_pump = instance.get_infusions_by_pump()
+        counted_pumps = instance.get_counted_pumps()
     except AttributeError:
         # A stub or simulator instance without the accessors; fall back rather
         # than fail an export the user is waiting on.
         infusion_count = body.infusion_count
         press_count = body.press_count
         trial_count = body.trial_count
+        infusions_by_pump = None
+        counted_pumps = None
     firmware_info = instance.get_firmware_information()
     hardware_settings = instance.get_hardware_settings()
     frame_data = instance.get_frame_data()
@@ -367,6 +371,8 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
                     # this archive rather than only the last one. The body
                     # values are a fallback for a caller with no live instance.
                     "infusion_count": infusion_count,
+                    "infusions_by_pump": infusions_by_pump,
+                    "counted_pumps": counted_pumps,
                     "press_count": press_count,
                     "trial_count": trial_count,
                 },

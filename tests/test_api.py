@@ -39,6 +39,9 @@ def client():
         mock_instance.get_total_infusion_count.return_value = 0
         mock_instance.get_total_press_count.return_value = 0
         mock_instance.get_total_trial_count.return_value = 0
+        mock_instance.get_counted_pumps.return_value = ["PUMP_1"]
+        mock_instance.get_infusions_by_pump.return_value = {"PUMP_1": 0, "PUMP_2": 0}
+        mock_instance._counted_pumps = None
         mock_instance.get_event_log_path.return_value = "/tmp/reacher_test_missing_event_log.jsonl"
         mock_instance.flush_event_log.return_value = None
         mock_instance.emit_failure_count = 0

@@ -5,7 +5,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, field_validator, model_validator
-from typing import Optional
+from typing import List, Literal, Optional
 
 
 router = APIRouter()
@@ -22,6 +22,7 @@ class LimitRequest(BaseModel):
     time_limit: Optional[int] = None
     infusion_limit: Optional[int] = None
     delay: Optional[int] = None
+    counted_pumps: Optional[List[Literal["PUMP_1", "PUMP_2"]]] = None
 
     @field_validator("time_limit")
     @classmethod
@@ -150,6 +151,13 @@ async def set_limit(session_id: str, body: LimitRequest, request: Request):
     instance = info.instance
     if body.type not in ("Time", "Infusion", "Both", "Trials"):
         raise HTTPException(status_code=400, detail=f"Invalid limit type: {body.type}")
+    if "counted_pumps" in body.model_fields_set:
+        if body.counted_pumps == [] and body.type in ("Infusion", "Both"):
+            raise HTTPException(status_code=400, detail="counted_pumps cannot be empty for an Infusion or Both limit")
+        try:
+            instance.set_counted_pumps(body.counted_pumps)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     instance.set_limit_type(body.type)
     if body.infusion_limit is not None:
