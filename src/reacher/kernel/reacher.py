@@ -267,7 +267,7 @@ class REACHER:
         self.limit_type: Optional[str] = None
         self.infusion_limit: Optional[int] = None
         self.time_limit: Optional[int] = None
-        self.stop_delay: Optional[int] = None
+        self.stop_delay: int = 0
         self.last_infusion_time: Optional[float] = None
 
         # Configuration variables
@@ -369,10 +369,6 @@ class REACHER:
         self.program_end_time = None
         self.paused_time = 0
         self.paused_start_time = None
-        self.limit_type = None
-        self.infusion_limit = None
-        self.time_limit = None
-        self.stop_delay = None
         self.last_infusion_time = None
 
         self.firmware_information = {}
@@ -392,6 +388,9 @@ class REACHER:
             self.ser = serial.Serial(baudrate=115200, timeout=1)
         self.queue = queue.Queue(maxsize=5000)  # Fix: F-006 — Match __init__ maxsize
 
+        # Old threads must be gone before the flags flip back: a surviving read_serial
+        # would otherwise keep reading the rebuilt serial object.
+        self._join_worker_threads(timeout=5.0)
         self.serial_flag.clear()
         self.program_flag.set()
         self.time_check_flag.set()
@@ -553,6 +552,54 @@ class REACHER:
             self._close_event_log()
             self._close_controller_log()  # Fix 4.9
             self.logger.info("--> Cleanup complete")
+
+    def shutdown(self, timeout: float = 20.0) -> None:
+        """Stop this instance's threads and release its log handlers.
+
+        **Description:**
+        - Idempotent and never raises.
+        - Does not stop a running program; the caller must do that first.
+        - Signals the serial, queue and time-check threads to exit, closes the
+          serial port, and joins the threads under one shared deadline.
+        - Removes and closes the log handlers, and drops the session logger so
+          it does not persist in ``logging.Logger.manager.loggerDict``.
+        """
+        try:
+            self.time_check_flag.clear()
+            self.serial_flag.set()
+            self.program_flag.set()
+            try:
+                self.queue.put_nowait(None)
+            except queue.Full:
+                pass
+            if self.ser.is_open or self.serial_thread.is_alive():
+                self.close_serial()
+            self._join_worker_threads(timeout)
+        except Exception:
+            self.logger.exception("Error during shutdown")
+        finally:
+            for handler in list(self.logger.handlers):
+                self.logger.removeHandler(handler)
+                handler.close()
+            if self.logger.name != "reacher.default":
+                logging.Logger.manager.loggerDict.pop(self.logger.name, None)
+
+    def _join_worker_threads(self, timeout: float) -> None:
+        """Join the serial, queue and time-check threads under one shared deadline.
+
+        Skips threads that are not alive and the calling thread, so it is safe
+        to call from one of the kernel's own threads. Warns about any still
+        alive after the deadline rather than raising.
+        """
+        deadline = time.monotonic() + timeout
+        threads = (self.serial_thread, self.queue_thread, self.time_check_thread)
+        for thread in threads:
+            if thread is threading.current_thread() or not thread.is_alive():
+                continue
+            thread.join(timeout=max(0, deadline - time.monotonic()))
+        still_alive = [t.name for t in threads if t.is_alive() and t is not threading.current_thread()]
+        if still_alive:
+            self.logger.warning("Threads still alive after %.1fs: %s", timeout, still_alive)
 
     def _resilient(self, target, name: str):
         """Fix 7.1: wrap a thread body so an unhandled exception does not
@@ -1443,9 +1490,9 @@ class REACHER:
         - Sets a delay in seconds after the last infusion before program termination.
 
         **Args:**
-        - `delay (int)`: The delay in seconds.
+        - `delay (int)`: The delay in seconds; None means no delay.
         """
-        self.stop_delay = delay
+        self.stop_delay = delay or 0
 
     def _reset_session_buffers(self) -> None:
         """Clear all per-session data buffers and counters."""
@@ -1517,17 +1564,29 @@ class REACHER:
 
         # Then do cleanup (send firmware END, close serial, etc.)
         self._controller_end_received.clear()
-        self.send_serial_command({"cmd": 100})
-        # Wait for the firmware's CONTROLLER END event (~200ms after cmd 100).
-        # Fallback to 2s sleep if it doesn't arrive within 8s.
-        received = self._controller_end_received.wait(timeout=8.0)
-        if not received:
-            self.logger.warning("Timed out waiting for CONTROLLER END — export may be incomplete")
-            time.sleep(2)
+        port_open = getattr(self.ser, "is_open", False)
+        if port_open:
+            try:
+                self.send_serial_command({"cmd": 100})
+            except Exception:
+                self.logger.warning("END-PROGRAM send failed; treating serial port as closed", exc_info=True)
+                port_open = False
+        if port_open:
+            # Wait for the firmware's CONTROLLER END event (~200ms after cmd 100).
+            # Fallback to 2s sleep if it doesn't arrive within 8s.
+            received = self._controller_end_received.wait(timeout=8.0)
+            if not received:
+                self.logger.warning("Timed out waiting for CONTROLLER END — export may be incomplete")
+                time.sleep(2)
+        else:
+            self.logger.warning("Serial port closed; skipping END handshake, exporting buffered data")
         self.program_flag.set()
         # Drain remaining events with timeout to avoid indefinite hang
         self._join_queue_with_timeout(5.0)
-        self.close_serial()
+        try:
+            self.close_serial()
+        except Exception:
+            self.logger.warning("close_serial failed; continuing with export", exc_info=True)
         self.program_end_time = time.time()
         self._write_event_log({"type": "SESSION_END", "timestamp": self.program_end_time})
         self._close_event_log()  # Fix: F-010 — Ensure all events flushed before export
@@ -1736,25 +1795,29 @@ class REACHER:
             return  # No limits to check if program hasn't started or type unset
 
         elapsed_time = current_time - self.program_start_time - self.paused_time
-        infusion_count = self._infusion_count  # Atomic counter — O(1)
+        # Whole-session total: a /split zeroes _infusion_count, which would restart the limit from 0
+        infusion_count = self.get_total_infusion_count()
+        stop_delay = self.stop_delay or 0
+        infusion_met = self.infusion_limit is not None and infusion_count >= self.infusion_limit
+        time_met = self.time_limit is not None and elapsed_time >= self.time_limit
         self.logger.debug(f"Checking limits: elapsed_time={elapsed_time:.2f}, time_limit={self.time_limit}, infusion_count={infusion_count}, infusion_limit={self.infusion_limit}")
 
         if self.limit_type == "Time":
-            if elapsed_time >= self.time_limit:
+            if time_met:
                 self.logger.info("Time limit met, stopping program")
                 self.stop_program()
         elif self.limit_type == "Infusion":
-            if infusion_count >= self.infusion_limit:
+            if infusion_met:
                 if self.last_infusion_time is None:
                     self.last_infusion_time = current_time
-                if self.last_infusion_time and (current_time - self.last_infusion_time >= self.stop_delay):
+                if self.last_infusion_time and (current_time - self.last_infusion_time >= stop_delay):
                     self.logger.info("Infusion limit met and stop delay elapsed, stopping program")
                     self.stop_program()
         elif self.limit_type == "Both":
-            if infusion_count >= self.infusion_limit:
+            if infusion_met:
                 if self.last_infusion_time is None:
                     self.last_infusion_time = current_time
-            if (self.last_infusion_time and (current_time - self.last_infusion_time) >= self.stop_delay) or (elapsed_time >= self.time_limit):
+            if (self.last_infusion_time and (current_time - self.last_infusion_time) >= stop_delay) or time_met:
                 self.logger.info("Either infusion limit with stop delay or time limit met, stopping program")
                 self.stop_program()
         elif self.limit_type == "Trials":

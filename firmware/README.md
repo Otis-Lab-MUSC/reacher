@@ -358,6 +358,9 @@ The `Scheduler` class implements a trigger-chain-action system for the four oper
 
 - `arduino-cli` installed and on your PATH
 - Arduino AVR board package: `arduino-cli core install arduino:avr`
+- ArduinoJson library (not vendored in `libraries/`): `arduino-cli lib install ArduinoJson@7.4.3`.
+  The committed hex is built against 7.4.3; `compile.sh` refuses to run without ArduinoJson and
+  warns on any other version.
 
 ### Compilation
 

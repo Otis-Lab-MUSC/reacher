@@ -34,6 +34,11 @@ async def connect_serial(session_id: str, request: Request):
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    # Reopening the port under a live run would orphan its simulator/reader
+    # thread and flip the state to "connected" while program_running is still True.
+    if info.state in ("running", "paused"):
+        raise HTTPException(status_code=409, detail="Cannot connect while the program is running or paused")
+
     instance = info.instance
     try:
         # info.paradigm is used only by the SIMULATOR branch, so the simulated
@@ -182,6 +187,14 @@ async def disconnect_serial(session_id: str, request: Request):
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    # A run's buffered data is only reachable through this session; closing the
+    # port mid-run would leave it stranded with no way to stop or export it.
+    if info.state in ("running", "paused"):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot disconnect while the program is running or paused. Stop it first",
+        )
+
     try:
         info.instance.close_serial()
     except Exception:
@@ -189,7 +202,9 @@ async def disconnect_serial(session_id: str, request: Request):
         logger.exception("Serial disconnect failed for session %s", session_id)
         raise HTTPException(status_code=500, detail="Failed to close serial connection")
 
-    sm.set_state(session_id, "idle")
+    # "disconnected" rather than "idle": the port is closed, and /start and the UI
+    # need to know that without inspecting the serial handle.
+    sm.set_state(session_id, "disconnected")
     return {"status": "disconnected"}
 
 

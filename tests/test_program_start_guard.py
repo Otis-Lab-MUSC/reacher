@@ -105,6 +105,7 @@ class TestSecondStartGuard:
         sm = client.app.state.session_manager
         sm.set_state(sid, "connected")
         info = sm.get_session(sid)
+        info.instance.ser.is_open = True
 
         resp = client.post(f"/api/program/{sid}/start", headers=AUTH_HEADER)
 
