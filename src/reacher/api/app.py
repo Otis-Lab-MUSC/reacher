@@ -417,6 +417,9 @@ app = create_app()
 
 def main():
     """CLI entry-point (``reacher`` command)."""
+    if "--version" in sys.argv[1:] or "-V" in sys.argv[1:]:
+        print(__version__)
+        return
     diagnostics.configure_logging()
     if _is_already_running():
         print(f"REACHER is already running on port {PORT}.")

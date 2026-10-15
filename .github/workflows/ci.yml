@@ -4,50 +4,74 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Required gate — lint must pass to merge into main.
   lint:
     name: lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
         with:
+          enable-cache: true
           python-version: '3.11'
 
+      - name: Check lockfile
+        run: uv lock --check
+
       - name: Install (dev extra)
-        run: python -m pip install -e ".[dev]"
+        run: uv sync --frozen --extra dev
 
       - name: Ruff lint
-        run: ruff check .
+        run: uv run --frozen ruff check .
 
-  # Advisory — runs the suite for visibility. Previously kept non-required
-  # citing two failing tests/test_commands.py command-registry tests and an
-  # unclean `ruff format` tree; a clean-env `pip install -e ".[dev]"` + pytest
-  # run (2026-09-10 audit) showed 0 test failures, so the test-failure half of
-  # that justification was stale. `ruff format --check` does still fail on
-  # dozens of files, but this workflow never runs it, so it isn't protecting
-  # anything here either way. Note: making this job actually block merges
-  # needs a GitHub branch-protection change — editing this file alone does
-  # not make the job required.
+      - name: Shellcheck install script
+        run: shellcheck -S warning scripts/install.sh
+
+  # Required check via branch protection (set in repo settings, not this file).
+  # The parity tests skip loudly without the labrynth sibling checkout below
+  # (see find_labrynth_root in src/reacher/mcp/sources/ts.py).
   test:
     name: test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: reacher
     steps:
-      - name: Checkout
+      - name: Checkout reacher
         uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
         with:
+          path: reacher
+
+      - name: Checkout labrynth
+        uses: actions/checkout@v4
+        with:
+          repository: Otis-Lab-MUSC/labrynth
+          path: labrynth
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: reacher/uv.lock
           python-version: '3.11'
 
+      - name: Check lockfile
+        run: uv lock --check
+
       - name: Install (dev extra)
-        run: python -m pip install -e ".[dev]"
+        run: uv sync --frozen --extra dev
 
       - name: Tests
-        run: pytest
+        run: uv run --frozen pytest -rs

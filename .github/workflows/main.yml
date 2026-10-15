@@ -9,6 +9,10 @@ permissions:
   contents: write
   id-token: write   # Required for PyPI trusted publishing (OIDC)
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   PYTHON_VERSION: '3.11'
 
@@ -18,6 +22,7 @@ jobs:
   # -------------------------------------------------------------------
   version-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       version: ${{ steps.extract.outputs.version }}
     steps:
@@ -37,11 +42,18 @@ jobs:
         run: python scripts/bump-version.py --check "${{ steps.extract.outputs.version }}"
 
   # -------------------------------------------------------------------
+  # Gate — full lint + test suite (reusable ci.yml)
+  # -------------------------------------------------------------------
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  # -------------------------------------------------------------------
   # Build — sdist + wheel
   # -------------------------------------------------------------------
   build-wheel:
-    needs: [version-check]
+    needs: [version-check, ci]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -71,11 +83,37 @@ jobs:
           retention-days: 7
 
   # -------------------------------------------------------------------
+  # Gate — install the built wheel in a clean venv and boot it
+  # -------------------------------------------------------------------
+  wheel-smoke:
+    needs: [build-wheel]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+
+      - name: Smoke-test the wheel
+        run: bash scripts/wheel_smoke.sh dist/*.whl
+
+  # -------------------------------------------------------------------
   # Publish to PyPI (trusted publisher / OIDC)
   # -------------------------------------------------------------------
   publish-pypi:
-    needs: [build-wheel]
+    needs: [build-wheel, wheel-smoke]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: pypi
     permissions:
       id-token: write
@@ -93,8 +131,9 @@ jobs:
   # GitHub Release
   # -------------------------------------------------------------------
   release:
-    needs: [build-wheel, version-check]
+    needs: [build-wheel, version-check, wheel-smoke]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Download dist artifacts
         uses: actions/download-artifact@v4
