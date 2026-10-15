@@ -35,7 +35,7 @@ releases are cut only from `main` after CI is green.**
 git checkout main && git pull
 
 # 2. Bump + verify (never hand-edit versions).
-python scripts/bump-version.py 3.1.0          # or 3.1.0-alpha.1, etc.
+python scripts/bump-version.py 3.1.0          # or 3.1.0-alpha.1, etc. (also refreshes uv.lock)
 python scripts/bump-version.py --check 3.1.0
 
 # 3. Recompile firmware hex so binaries report the new version.

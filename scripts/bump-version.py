@@ -20,6 +20,7 @@ semver string to the form that file stores; ``--check`` compares against the
 transformed value, so CI (which passes the bare tag, e.g. ``3.0.0-alpha.1``)
 still validates the derived spellings.
 
+The bump also refreshes ``uv.lock`` (CI fails on a stale lock).
 After bumping, recompile the firmware hex artifacts (``bash firmware/compile.sh``)
 so the shipped binaries report the new version.
 """
@@ -27,6 +28,8 @@ so the shipped binaries report the new version.
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -162,6 +165,23 @@ def check_version(expected: str) -> bool:
     return ok
 
 
+def refresh_lock() -> None:
+    """Re-resolve ``uv.lock`` so it records the new package version.
+
+    CI runs ``uv lock --check``; a bump that leaves the lock on the old
+    version fails every gate and blocks the release tag.
+    """
+    uv = shutil.which("uv")
+    if uv is None:
+        print("  WARNING: uv not found; run `uv lock` before committing", file=sys.stderr)
+        return
+    result = subprocess.run([uv, "lock"], cwd=ROOT, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"  WARNING: `uv lock` failed; run it by hand\n{result.stderr}", file=sys.stderr)
+        return
+    print("  uv.lock refreshed")
+
+
 def main() -> None:
     args = sys.argv[1:]
 
@@ -192,6 +212,7 @@ def main() -> None:
 
     print(f"Bumping version to {new_version}:")
     set_version(new_version)
+    refresh_lock()
     check_version(new_version)
     print("Done.")
 
