@@ -16,8 +16,8 @@ def _make_hex_dir(tmp_path, board_hexes: dict[str, list[str]]) -> str:
 
 
 def test_uno_only_lists_lite_paradigms(tmp_path):
-    """Even if legacy full-paradigm hex files are still on disk for uno,
-    only "_lite" paradigms are ever offered for that board."""
+    """Even if full-paradigm hex files are on disk for uno (e.g. a user's
+    REACHER_HEX_DIR), only "_lite" paradigms are ever offered for that board."""
     hex_dir = _make_hex_dir(tmp_path, {
         "uno": ["fr", "pr", "vi", "omission", "pavlovian", *LITE_PARADIGMS],
     })
@@ -58,3 +58,17 @@ def test_pavlovian_has_no_uno_lite_build():
 @pytest.mark.parametrize("paradigm", LITE_PARADIGMS)
 def test_shipped_lite_hex_resolves(paradigm):
     assert FirmwareUploader().get_hex_path(paradigm, "uno").endswith(f"{paradigm}.hex")
+
+
+def test_no_full_paradigm_hex_ships_for_uno():
+    """The full sketches don't fit a Uno; stale copies were removed from package data."""
+    uploader = FirmwareUploader()
+    for paradigm in ("fr", "pr", "vi", "omission", "pavlovian"):
+        with pytest.raises(FileNotFoundError):
+            uploader.get_hex_path(paradigm, "uno")
+
+
+def test_flat_hex_layout_is_not_resolved(tmp_path):
+    (tmp_path / "fr_lite.hex").write_bytes(b":00000001FF\n")
+    with pytest.raises(FileNotFoundError):
+        FirmwareUploader(hex_dir=str(tmp_path)).get_hex_path("fr_lite", "uno")

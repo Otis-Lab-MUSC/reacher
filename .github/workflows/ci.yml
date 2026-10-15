@@ -75,3 +75,44 @@ jobs:
 
       - name: Tests
         run: uv run --frozen pytest -rs
+
+  # Recompiles every sketch and requires the committed hex to match byte for
+  # byte, so a firmware change or version bump without `compile.sh` fails here.
+  firmware:
+    name: firmware
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up arduino-cli
+        uses: arduino/setup-arduino-cli@v2
+        with:
+          version: 1.5.1
+
+      - name: Install AVR core and ArduinoJson
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install arduino:avr@1.8.8
+          arduino-cli lib install ArduinoJson@7.4.3
+
+      - name: Compile firmware
+        run: bash firmware/compile.sh
+
+      - name: Committed hex matches source
+        run: |
+          git diff --exit-code -- src/reacher/hex
+          untracked="$(git status --porcelain src/reacher/hex)"
+          if [ -n "$untracked" ]; then
+            echo "compile.sh produced unexpected files:"
+            echo "$untracked"
+            exit 1
+          fi
+
+      - name: Explain hex mismatch
+        if: failure()
+        run: |
+          echo "Files that differ from the committed hex:"
+          git status --porcelain src/reacher/hex
+          echo "committed hex does not match the firmware source: run bash firmware/compile.sh and commit the result"

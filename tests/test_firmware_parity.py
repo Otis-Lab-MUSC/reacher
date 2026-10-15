@@ -429,3 +429,13 @@ def test_scheduler_start_session_still_seeds_the_window():
             f"Scheduler::StartSession no longer seeds {field}; the VI window "
             "would start uninitialised"
         )
+
+
+def test_no_orphan_hex_artifacts(sketches):
+    """The converse of C11: every committed hex is built by compile.sh from a sketch."""
+    expected = {f"{s['board']}/{name}.hex" for name, s in sketches.items()}
+    present = {f"{p.parent.name}/{p.name}" for p in HEX_ROOT.glob("*/*.hex")}
+    assert present == expected, (
+        f"hex with no sketch (delete): {sorted(present - expected)}; "
+        f"sketch with no hex: {sorted(expected - present)}"
+    )

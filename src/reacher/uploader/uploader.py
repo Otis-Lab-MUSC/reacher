@@ -13,7 +13,6 @@ import shutil
 import sys
 import time
 import urllib.request
-import warnings
 from typing import Callable, Dict, List, Optional
 
 from .boards import BOARD_PROFILES, DEFAULT_BOARD, get_board_profile, is_simulator_port
@@ -338,9 +337,7 @@ class FirmwareUploader:
     def get_hex_path(self, paradigm: str, board: str = DEFAULT_BOARD) -> str:
         """Return the absolute path to the .hex file for *paradigm* and *board*.
 
-        Looks for ``hex/{board}/{paradigm}.hex`` first.  Falls back to the
-        flat ``hex/{paradigm}.hex`` layout only when *board* is ``"uno"``
-        (backwards compatibility with pre-board-aware hex directories).
+        Looks for ``hex/{board}/{paradigm}.hex``.
 
         Raises:
             ValueError: If *paradigm* is unknown or *board* is unsupported.
@@ -356,18 +353,6 @@ class FirmwareUploader:
         if os.path.isfile(board_path):
             return board_path
 
-        # Fallback: flat layout (uno only, for backwards compat)
-        if board.lower() == "uno":
-            flat_path = os.path.join(self.hex_dir, f"{paradigm}.hex")
-            if os.path.isfile(flat_path):
-                warnings.warn(
-                    f"Using flat hex layout ({flat_path}). "
-                    "Migrate to hex/uno/{paradigm}.hex.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                return flat_path
-
         raise FileNotFoundError(
             f"Hex file not found for board={board!r}, paradigm={paradigm!r}. "
             f"Expected: {board_path}"
@@ -377,11 +362,9 @@ class FirmwareUploader:
         """Return paradigms whose hex files are present on disk for *board*.
 
         UNO-class boards only ever offer "_lite" paradigms — their reduced
-        SRAM/pin count can't run the full sketches, whose hex files are kept
-        on disk under ``hex/uno/`` only for backwards compatibility (manual
-        flashing, diagnostics). This filter is declarative rather than
-        relying on those legacy files being absent, so it can't silently
-        regress if one is ever re-added.
+        SRAM/pin count can't run the full sketches. This filter is
+        declarative rather than relying on their hex files being absent, so it
+        can't silently regress if one is ever re-added.
         """
         available = []
         for p in PARADIGMS:
