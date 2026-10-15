@@ -5,9 +5,36 @@ would append to the developer's real ``~/REACHER/LOG/runs`` and leave a live
 writer thread behind between tests.
 """
 
+import os
+
 import pytest
 
 from reacher import diagnostics
+
+_LABRYNTH_MISSING = "labrynth checkout not found"
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Fail, rather than skip, a cross-repo parity test on CI with no labrynth checkout.
+
+    A skip there would leave the frontend contract unverified while the run
+    still reports green.
+    """
+    outcome = yield
+    report = outcome.get_result()
+    if not report.skipped or os.environ.get("CI", "").lower() not in ("1", "true", "yes"):
+        return
+    longrepr = report.longrepr
+    reason = longrepr[2] if isinstance(longrepr, tuple) else str(longrepr)
+    if _LABRYNTH_MISSING not in reason:
+        return
+    report.outcome = "failed"
+    report.longrepr = (
+        "labrynth sibling checkout is missing in CI — this parity test would have been "
+        "skipped and reported as passing. Check out Otis-Lab-MUSC/labrynth as a sibling "
+        f"of the reacher checkout.\n\nOriginal skip: {reason}"
+    )
 
 
 @pytest.fixture(autouse=True)
