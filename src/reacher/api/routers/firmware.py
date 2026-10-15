@@ -63,6 +63,15 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
             detail=f"Unsupported board: {body.board!r}. Supported: {SUPPORTED_BOARDS}",
         )
 
+    # UNO-class boards can't run the full sketches (SRAM/pin count); the same
+    # restriction list_available applies. Reject before any hex lookup.
+    if body.board.lower() == "uno" and not body.paradigm.endswith("_lite"):
+        allowed = [p for p in PARADIGMS if p.endswith("_lite")]
+        raise HTTPException(
+            status_code=400,
+            detail=f"Board 'uno' only supports the lite paradigms: {', '.join(allowed)}",
+        )
+
     try:
         info = sm.get_session(session_id)
     except KeyError:

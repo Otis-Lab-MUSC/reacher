@@ -38,7 +38,9 @@ git checkout main && git pull
 python scripts/bump-version.py 3.1.0          # or 3.1.0-alpha.1, etc. (also refreshes uv.lock)
 python scripts/bump-version.py --check 3.1.0
 
-# 3. Recompile firmware hex so binaries report the new version.
+# 3. Recompile firmware hex so binaries report the new version. Commit the
+#    hex in the same release commit: CI's `firmware` job and
+#    tests/test_hex_artifacts.py fail on a stale stamp or mismatched binary.
 bash firmware/compile.sh
 
 # 4. Commit, push, tag.
