@@ -147,6 +147,17 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     1102: ("SLM", "frequency", _USE_VALUE),
     1103: ("SLM", "duration", _USE_VALUE),
     1176: ("SLM", "pin", _USE_VALUE),
+    # --- AUX TTL output (Mega fr) --- field names match Aux::ReportConfig's 000 line
+    1400: ("AUX", "armed", False),
+    1401: ("AUX", "armed", True),
+    1472: ("AUX", "duration", _USE_VALUE),
+    1477: ("AUX", "onset_delay", _USE_VALUE),
+    1480: ("AUX", "mode", _USE_VALUE),
+    1481: ("AUX", "probability", _USE_VALUE),
+    1482: ("AUX", "block_k", _USE_VALUE),
+    1483: ("AUX", "block_n", _USE_VALUE),
+    1484: ("AUX", "seed", _USE_VALUE),
+    1485: ("AUX", "test_fire", _USE_VALUE),
 }
 
 class REACHER:
@@ -873,6 +884,10 @@ class REACHER:
         param_row = self._normalise_param_change(event)
         if event["device"] == "CONTROLLER":
             with self.thread_lock:  # Fix: F-009 — guard cross-thread dict access
+                # An IDN line replaces the capability set: firmware reflashed to
+                # an older build must not inherit the previous build's caps.
+                if "sketch" in event and "caps" not in event:
+                    self.firmware_information.pop("caps", None)
                 self.firmware_information.update(event)
                 if param_row is not None:
                     self._merge_hardware_row(param_row)
@@ -2033,6 +2048,14 @@ class REACHER:
         """
         with self.thread_lock:  # Fix: F-009 — snapshot under lock
             return dict(self.firmware_information)
+
+    def get_firmware_caps(self) -> set:
+        """Capability tokens from the firmware IDN ``caps`` field (empty before IDN)."""
+        with self.thread_lock:
+            caps = self.firmware_information.get("caps")
+        if not isinstance(caps, str):
+            return set()
+        return {c.strip() for c in caps.split(",") if c.strip()}
 
     def get_hardware_settings(self) -> List:
         with self.thread_lock:  # Fix: F-009 — snapshot under lock

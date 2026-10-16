@@ -101,6 +101,15 @@ _ARM_COMMANDS = {
 }
 
 MAX_PAVLOV_TRIALS = 128  # PavlovianScheduler.h
+MAX_CHAIN_STEPS = 6  # Action.h
+
+# AUX TTL output (Mega fr only): Pins.h PIN_AUX and Aux.h clamps.
+PIN_AUX = 22
+AUX_MAX_DURATION = 5000
+AUX_MAX_ONSET_DELAY = 600000
+AUX_MAX_BLOCK_N = 100
+AUX_MODE_INDEPENDENT = 0
+AUX_MODE_BLOCK = 1
 FRAME_INTERVAL_MS = 100  # microscope frame cadence while armed (a real scope runs faster)
 
 
@@ -149,6 +158,61 @@ class TimeoutWindow:
     def set_end(self, orientation: str, end: int) -> None:
         """A chain's SET_TIMEOUT step: write the lever's window end directly."""
         self._end[orientation] = end
+
+
+class AuxDraw:
+    """AuxDraw.h, bit for bit: xorshift32 plus the block schedule.
+
+    Kept identical to the firmware so a seeded session can be checked against a
+    bench run. Independent of ``FirmwareSimulator._rng``, as the firmware's draw
+    is independent of ``random()``.
+    """
+
+    def __init__(self) -> None:
+        self.state = 1
+        self.block_k = 0
+        self.block_n = 1
+        self.remaining_k = 0
+        self.remaining_n = 1
+
+    def reset(self, seed: int, k: int, n: int) -> None:
+        self.state = (seed & 0xFFFFFFFF) or 1
+        self.set_block(k, n)
+
+    def set_block(self, k: int, n: int) -> None:
+        self.block_k = self.remaining_k = k
+        self.block_n = self.remaining_n = n
+
+    def next(self) -> int:
+        x = self.state
+        x ^= (x << 13) & 0xFFFFFFFF
+        x ^= x >> 17
+        x ^= (x << 5) & 0xFFFFFFFF
+        self.state = x
+        return x
+
+    def draw_independent(self, probability: int) -> bool:
+        return self.next() % 100 < probability
+
+    def draw_block(self) -> bool:
+        if self.remaining_n == 0:
+            self.remaining_k, self.remaining_n = self.block_k, self.block_n
+        shock = self.next() % self.remaining_n < self.remaining_k
+        if shock:
+            self.remaining_k -= 1
+        self.remaining_n -= 1
+        if self.remaining_n == 0:
+            self.remaining_k, self.remaining_n = self.block_k, self.block_n
+        return shock
+
+
+def _uint32(value) -> int:
+    """ArduinoJson's ``(uint32_t)`` read: missing or out of range reads as 0."""
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return value if 0 <= value <= 0xFFFFFFFF else 0
 
 
 @dataclass
@@ -362,6 +426,27 @@ class FirmwareSimulator:
             self.cue_frequency = self.pav_cs_plus_freq
             self.cue2_frequency = self.pav_cs_minus_freq
 
+        # AUX TTL output (Aux.cpp defaults: a fresh board can never shock).
+        self.aux_armed = False
+        self.aux_duration = 500
+        self.aux_onset_delay = 0
+        self.aux_mode = AUX_MODE_INDEPENDENT
+        self.aux_probability = 0
+        self.aux_block_k = 0
+        self.aux_block_n = 10
+        self.aux_seed = 0
+        self.aux_effective_seed = 0
+        self.aux_test_fire = False
+        self._aux_draw = AuxDraw()
+        self._aux_draw.reset(1, self.aux_block_k, self.aux_block_n)
+        # Stands in for analogRead(A1) ^ micros(). A separate stream, so an auto
+        # seed never consumes self._rng and existing fr runs stay bit-identical.
+        self._aux_seed_rng = random.Random(seed)
+        # Bumped wherever the firmware clears its pending queue (pause, end), so a
+        # delayed AUX step queued before that never fires, as on the board.
+        self._aux_pending_gen = 0
+        self._test_mode = False
+
         # Runtime clock (ms since session start)
         self._clock = 0
         self._heap: list = []
@@ -390,6 +475,11 @@ class FirmwareSimulator:
     @property
     def _is_pav(self) -> bool:
         return self._base == "pavlovian"
+
+    @property
+    def _has_aux(self) -> bool:
+        """Only the Mega fr sketch carries AUX; fr_lite and the others never do."""
+        return self.paradigm == "fr"
 
     @property
     def lever_rh_timeout(self) -> int:
@@ -426,6 +516,8 @@ class FirmwareSimulator:
                 # fr.ino:IDENTIFY — a reconnect disarms the board, so whatever the
                 # host wants live has to be re-armed after it.
                 self._disarm_all()
+                self.aux_armed = False
+                self.aux_test_fire = False
             self._send_identification()
         elif cmd == 101:  # SESSION_START
             self.start()
@@ -436,7 +528,12 @@ class FirmwareSimulator:
         elif cmd == 103:  # TEST_CHAIN
             self._send_test_chain()
         elif cmd == 104:  # TEST_MODE
-            pass
+            # Scheduler::SetTestMode ignores the request during a session.
+            if not self._running:
+                self._test_mode = bool(cmd_data.get("enable"))
+        elif 1400 <= cmd <= 1499:
+            if self._has_aux:
+                self._handle_aux(cmd, cmd_data)
         # Device tests
         elif cmd == 303:  # CUE_TEST
             self._send_device_test("CUE", self._pins["CUE"], "TONE", self.cue_duration)
@@ -621,6 +718,74 @@ class FirmwareSimulator:
         elif cmd in (694, 695):
             self.pav_laser_phase = {694: "REWARD", 695: "CUE"}[cmd]
 
+    def _aux_ack(self, param: str, value) -> None:
+        self._send({"level": "000", "device": "AUX", "param": param, "value": value})
+
+    def _handle_aux(self, cmd: int, cmd_data: dict) -> None:
+        """fr.ino's AUX cases. Each setter acks the effective (clamped) value."""
+        if cmd == 1401:
+            self.aux_armed = True
+        elif cmd == 1400:
+            self.aux_armed = False
+        elif cmd == 1403:
+            self._send({"level": "000", "device": "AUX_1", "param": "test", "value": "FIRED"})
+        elif cmd == 1472:
+            self.aux_duration = _clamp(cmd_data.get("duration"), 1, AUX_MAX_DURATION)
+            self._reconfigure()
+            self._aux_ack("duration", self.aux_duration)
+        elif cmd == 1477:
+            self.aux_onset_delay = min(_uint32(cmd_data.get("delay")), AUX_MAX_ONSET_DELAY)
+            self._reconfigure()
+            self._aux_ack("onset_delay", self.aux_onset_delay)
+        elif cmd == 1480:
+            self.aux_mode = min(_uint32(cmd_data.get("mode")), AUX_MODE_BLOCK)
+            self._aux_ack("mode", self.aux_mode)
+        elif cmd == 1481:
+            self.aux_probability = min(_uint32(cmd_data.get("probability")), 100)
+            self._aux_ack("probability", self.aux_probability)
+        elif cmd == 1482:
+            self.aux_block_k = min(_uint32(cmd_data.get("k")), self.aux_block_n)
+            self._aux_draw.set_block(self.aux_block_k, self.aux_block_n)
+            self._aux_ack("block_k", self.aux_block_k)
+        elif cmd == 1483:
+            self.aux_block_n = max(1, min(_uint32(cmd_data.get("n")), AUX_MAX_BLOCK_N))
+            if self.aux_block_k > self.aux_block_n:
+                self.aux_block_k = self.aux_block_n
+                self._aux_ack("block_k", self.aux_block_k)
+            self._aux_draw.set_block(self.aux_block_k, self.aux_block_n)
+            self._aux_ack("block_n", self.aux_block_n)
+        elif cmd == 1484:
+            self.aux_seed = self.aux_effective_seed = _uint32(cmd_data.get("seed"))
+            self._aux_ack("seed", self.aux_seed)
+        elif cmd == 1485:
+            self.aux_test_fire = bool(cmd_data.get("enable", False))
+            self._aux_ack("test_fire", self.aux_test_fire)
+
+    def _aux_reset_session(self) -> None:
+        """Aux::ResetSession: reseed (auto if 0) and restart the block."""
+        self.aux_effective_seed = self.aux_seed or (self._aux_seed_rng.getrandbits(32) | 1)
+        self._aux_draw.reset(self.aux_effective_seed, self.aux_block_k, self.aux_block_n)
+
+    def _aux_fire(self, now: int) -> None:
+        """Scheduler::ExecuteAction for the AUX step: draw, then log the outcome."""
+        if not self.aux_armed:
+            return
+        test_ctx = self._test_mode or not self._running
+        end = now
+        if test_ctx and not self.aux_test_fire:
+            event = "SHOCK_SUPPRESSED"  # no draw: the PRNG stream is untouched
+        else:
+            draw = self._aux_draw
+            shock = draw.draw_block() if self.aux_mode == AUX_MODE_BLOCK else draw.draw_independent(
+                self.aux_probability)
+            event = "SHOCK" if shock else "SHOCK_OMITTED"
+            if shock:
+                end = now + self.aux_duration
+        self._send({
+            "level": "007", "device": "AUX_1", "pin": PIN_AUX,
+            "event": event, "start_timestamp": now, "end_timestamp": end,
+        })
+
     def _clamp_delay(self, value) -> int:
         # vi.ino caps onset delays at 60 s; the other operant sketches at 600 s.
         return _clamp(value, 0, 60000 if self._base == "vi" else 600000)
@@ -659,6 +824,7 @@ class FirmwareSimulator:
         if paused == self._paused:
             return
         if paused:
+            self._aux_pending_gen += 1  # Scheduler::SetPaused -> ClearPending()
             self._pause_wall = time.monotonic()
         else:
             # The session clock stood still for as long as the board was paused.
@@ -677,6 +843,7 @@ class FirmwareSimulator:
             "level": "000", "device": "CONTROLLER", "sketch": sketch,
             "version": "v2.0.0-sim", "baud_rate": 115200,
             "schedule": self.schedule,
+            **({"caps": "aux"} if self._has_aux else {}),
         })
         self._send_device_configs()
     def _send_device_configs(self) -> None:
@@ -805,6 +972,13 @@ class FirmwareSimulator:
             controller["active_lever"] = self._active_orientation()
         self._send(controller)
         self._send_device_configs()
+        if self._has_aux:
+            self._send({
+                "level": "000", "device": "AUX", "armed": self.aux_armed, "duration": self.aux_duration,
+                "onset_delay": self.aux_onset_delay, "mode": self.aux_mode, "probability": self.aux_probability,
+                "block_k": self.aux_block_k, "block_n": self.aux_block_n, "seed": self.aux_effective_seed,
+                "test_fire": self.aux_test_fire,
+            })
 
     # --- Session ---
 
@@ -828,6 +1002,9 @@ class FirmwareSimulator:
         self._anchor = time.monotonic()
         self._scheduler_start()
         self._reconfigure()  # fr.ino StartSession(): ReconfigureChain() after Scheduler::StartSession()
+        self._test_mode = False  # Scheduler::StartSession clears test mode
+        if self._has_aux:
+            self._aux_reset_session()
         self._send_session_config()
         self._start_activity()
         if self._realtime:
@@ -853,6 +1030,10 @@ class FirmwareSimulator:
         self._paused = False
         if was_running:
             self._scheduler_end()
+            # fr.ino's post-session drain disarms AUX (it is not in DeviceSet, so
+            # the arm snapshot above never restores it), and drops the test-fire opt-in.
+            self.aux_armed = False
+            self.aux_test_fire = False
         # Mirrors firmware's EndSession() (e.g. fr.ino:225-233), which prints the
         # CONTROLLER END event synchronously in the cmd-100 handler. Without this,
         # stop_program()'s _controller_end_received.wait() (reacher.py) always hits
@@ -943,6 +1124,7 @@ class FirmwareSimulator:
         for trig in self._triggers:
             trig.reset()
         self._heap = []
+        self._aux_pending_gen += 1
 
     def _reconfigure(self) -> None:
         """ReconfigureChain() + the sketch's configureXxx(): rebuild triggers and chains.
@@ -986,6 +1168,9 @@ class FirmwareSimulator:
         ]
         if base != "omission":
             steps.append(_Step("timeout", self._active_orientation(), None, 0, self.timeout_interval))
+        # fr.ino appendAuxStep(): last step of chain 0, after the steps[0..3] patch.
+        if self._has_aux and len(steps) < MAX_CHAIN_STEPS:
+            steps.append(_Step("activate", "AUX", None, self.aux_onset_delay, self.aux_duration))
         self._chains[0] = steps
 
         if self.laser_rh_only:
@@ -1010,6 +1195,9 @@ class FirmwareSimulator:
                 continue
             if step.offset == 0:
                 self._execute(step, now)
+            elif step.target == "AUX":
+                self._at(now + step.offset, lambda s=step, g=self._aux_pending_gen: (
+                    g == self._aux_pending_gen and self._execute(s, self._clock)))
             else:
                 self._at(now + step.offset, lambda s=step: self._execute(s, self._clock))
 
@@ -1042,6 +1230,8 @@ class FirmwareSimulator:
         elif target == "LASER":
             if self.laser_armed and self.laser_mode == "CONTINGENT":
                 self._log_activation("LASER", now, end)
+        elif target == "AUX":
+            self._aux_fire(now)
 
     def _on_active_press(self, orientation: str, now: int) -> str:
         """Scheduler::OnInputEvent for a press that classified ACTIVE.
