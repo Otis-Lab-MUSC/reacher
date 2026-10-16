@@ -137,6 +137,8 @@ class TestGetCommandsForParadigm:
 
 
 TWO_PHOTON_CODES = [900, 901, 903, 976, 1100, 1101, 1102, 1103, 1176]
+# AUX (tail-shock TTL) is Mega fr only: not two-photon, but never on a lite board.
+MEGA_ONLY_CODES = [1400, 1401, 1403, 1472, 1477, 1480, 1481, 1482, 1483, 1484, 1485]
 
 # The one paradigm-defining parameter each schedule cannot work without.
 PARADIGM_PARAM_CODE = {"pr": 205, "vi": 204, "omission": 203}
@@ -154,14 +156,19 @@ class TestLiteParadigms:
         for code in TWO_PHOTON_CODES:
             assert code not in cmds, f"Two-photon code {code} must not be available for {lite}"
 
+    def test_mega_only_excluded(self, lite):
+        cmds = get_commands_for_paradigm(lite)
+        for code in MEGA_ONLY_CODES:
+            assert code not in cmds, f"Mega-only code {code} must not be available for {lite}"
+
     def test_is_exactly_its_base_minus_two_photon(self, lite):
-        """The load-bearing invariant: stripping 2P must not cost anything else.
+        """The load-bearing invariant: stripping 2P (and Mega-only AUX) must not cost anything else.
 
         Guards against a lite paradigm being silently omitted from a command's
         ``paradigms`` list, which would leave the board unable to be configured.
         """
         base = lite.removesuffix("_lite")
-        expected = set(get_commands_for_paradigm(base)) - set(TWO_PHOTON_CODES)
+        expected = set(get_commands_for_paradigm(base)) - set(TWO_PHOTON_CODES) - set(MEGA_ONLY_CODES)
         assert set(get_commands_for_paradigm(lite)) == expected
 
     def test_laser_included(self, lite):

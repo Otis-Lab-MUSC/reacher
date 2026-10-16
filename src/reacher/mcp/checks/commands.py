@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ...schema import MEGA_ONLY_CMD_PREFIXES as _MEGA_ONLY_PREFIXES
 from ...schema import TWO_PHOTON_CMD_PREFIXES as _TWO_PHOTON_PREFIXES
 from .registry import CheckContext, Result, Status, register
 
@@ -92,10 +93,10 @@ def c13_lite_twin_parity(ctx: CheckContext) -> Result:
         if base is None:
             continue
         base_refs, lite_refs = set(base["cmd_refs"]), set(sketch["cmd_refs"])
-        two_photon = {c for c in base_refs if c.startswith(_TWO_PHOTON_PREFIXES)}
-        if gap := sorted((base_refs - two_photon) - lite_refs):
+        stripped = {c for c in base_refs if c.startswith(_TWO_PHOTON_PREFIXES + _MEGA_ONLY_PREFIXES)}
+        if gap := sorted((base_refs - stripped) - lite_refs):
             missing[name] = gap
-        if extra := sorted(c for c in lite_refs if c.startswith(_TWO_PHOTON_PREFIXES)):
+        if extra := sorted(c for c in lite_refs if c.startswith(_TWO_PHOTON_PREFIXES + _MEGA_ONLY_PREFIXES)):
             leaked[name] = extra
     if not (missing or leaked):
         return Result(check.id, check.title, check.severity, Status.PASS,
