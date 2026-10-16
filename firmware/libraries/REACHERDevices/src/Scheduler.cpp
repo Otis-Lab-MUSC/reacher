@@ -10,6 +10,7 @@
 #include "Pump.h"
 #include "Laser.h"
 #include "Microscope.h"
+#include "Aux.h"
 
 Scheduler::Scheduler() {
   leverRH = nullptr;
@@ -21,6 +22,9 @@ Scheduler::Scheduler() {
   pump2 = nullptr;
   laser = nullptr;
   microscope = nullptr;
+#if defined(__AVR_ATmega2560__)
+  aux = nullptr;
+#endif
   sessionOffset = 0;
   timeoutInterval = 20000;
   timeoutMode = TIMEOUT_MODE_EVERY_PRESS;  // legacy default; sketches re-assert it at setup()
@@ -76,6 +80,12 @@ void Scheduler::RegisterLaser(Laser* l) {
 void Scheduler::RegisterMicroscope(Microscope* mic) {
   microscope = mic;
 }
+
+#if defined(__AVR_ATmega2560__)
+void Scheduler::RegisterAux(Aux* a) {
+  aux = a;
+}
+#endif
 
 void Scheduler::Update(uint32_t now) {
   if (!sessionPaused) {
@@ -256,6 +266,16 @@ void Scheduler::ExecuteAction(const Action& action, uint32_t now) {
             LogDeviceActivation(DeviceType::LASER, now, now + action.param);
           }
           break;
+#if defined(__AVR_ATmega2560__)
+        case DeviceType::AUX:
+          if (aux && aux->Armed()) {
+            // TEST_CHAIN runs with no session, so !sessionActive is a test context too.
+            AuxOutcome outcome = aux->Fire(now, testMode || !sessionActive);
+            uint32_t endTs = (outcome == AuxOutcome::FIRED) ? now + aux->Duration() : now;
+            LogAuxOutcome((uint8_t)outcome, now, endTs);
+          }
+          break;
+#endif
         default:
           break;
       }
@@ -298,6 +318,9 @@ void Scheduler::TickOutputs(uint32_t now) {
   if (pump) pump->Await(now);
   if (pump2) pump2->Await(now);
   if (laser) laser->Await(now);
+#if defined(__AVR_ATmega2560__)
+  if (aux) aux->Await(now);
+#endif
 }
 
 void Scheduler::SchedulePending(const Action& action, uint32_t fireTime) {
@@ -380,6 +403,26 @@ void Scheduler::LogDeviceActivation(DeviceType target, uint32_t startTs, uint32_
   Serial.println('}');
 }
 
+#if defined(__AVR_ATmega2560__)
+void Scheduler::LogAuxOutcome(uint8_t outcome, uint32_t startTs, uint32_t endTs) {
+  const __FlashStringHelper* event;
+  switch ((AuxOutcome)outcome) {
+    case AuxOutcome::FIRED:   event = F("SHOCK"); break;
+    case AuxOutcome::OMITTED: event = F("SHOCK_OMITTED"); break;
+    default:                  event = F("SHOCK_SUPPRESSED"); break;
+  }
+  Serial.print(F("{\"level\":\"007\",\"device\":\"AUX_1\",\"pin\":"));
+  Serial.print(aux->Pin());
+  Serial.print(F(",\"event\":\""));
+  Serial.print(event);
+  Serial.print(F("\",\"start_timestamp\":"));
+  Serial.print(startTs - sessionOffset);
+  Serial.print(F(",\"end_timestamp\":"));
+  Serial.print(endTs - sessionOffset);
+  Serial.println('}');
+}
+#endif
+
 void Scheduler::SetTimeoutInterval(uint32_t interval) {
   timeoutInterval = interval;
   for (uint8_t ci = 0; ci < MAX_CHAINS; ci++) {
@@ -445,6 +488,9 @@ void Scheduler::SetPaused(bool paused, uint32_t now) {
     // Silence cues immediately; let pumps finish current infusion
     if (cue) noTone(cue->Pin());
     if (cue2) noTone(cue2->Pin());
+#if defined(__AVR_ATmega2560__)
+    if (aux) aux->ForceOff();
+#endif
   } else {
     // Fix: FW-006 — Compensate time-based triggers for pause duration
     uint32_t pausedDuration = now - pauseStart;
@@ -527,6 +573,9 @@ void Scheduler::EndSession(uint32_t now) {
   if (pump2) digitalWrite(pump2->Pin(), LOW);
   if (laser) laser->SetSessionActive(false);
   if (laser) digitalWrite(laser->Pin(), LOW);
+#if defined(__AVR_ATmega2560__)
+  if (aux) aux->ForceOff();
+#endif
 }
 
 void Scheduler::TestChain(uint32_t now) {
@@ -554,6 +603,9 @@ void Scheduler::SetTestMode(bool enable, uint32_t now) {
     if (pump) digitalWrite(pump->Pin(), LOW);
     if (pump2) digitalWrite(pump2->Pin(), LOW);
     if (laser) digitalWrite(laser->Pin(), LOW);
+#if defined(__AVR_ATmega2560__)
+    if (aux) aux->ForceOff();
+#endif
   }
 }
 

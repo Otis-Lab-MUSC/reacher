@@ -24,6 +24,10 @@ class Pump;
 class Laser;
 /// Forward declaration
 class Microscope;
+#if defined(__AVR_ATmega2560__)
+/// Forward declaration
+class Aux;
+#endif
 
 /// Maximum number of configurable triggers.
 static constexpr uint8_t MAX_TRIGGERS = 2;
@@ -65,6 +69,10 @@ public:
   void RegisterLaser(Laser* laser);
   /// @brief Register the microscope.
   void RegisterMicroscope(Microscope* mic);
+#if defined(__AVR_ATmega2560__)
+  /// @brief Register the AUX TTL output (Mega only).
+  void RegisterAux(Aux* a);
+#endif
 
   /// @brief Main loop tick — advances triggers, pending queue, and output devices.
   /// @param now Current millis() value
@@ -152,6 +160,9 @@ private:
   Pump*        pump2;        ///< Secondary syringe pump
   Laser*       laser;        ///< Optogenetic laser
   Microscope*  microscope;   ///< Microscope sync interface
+#if defined(__AVR_ATmega2560__)
+  Aux*         aux;          ///< AUX TTL output (nullptr unless the sketch registers one)
+#endif
 
   // Triggers and chains
   Trigger triggers[MAX_TRIGGERS];  ///< Configurable trigger conditions
@@ -189,6 +200,10 @@ private:
   void LogLeverPress(DeviceType source, PressClass cls);
   /// @brief Serialize device activation event to serial JSON (level 007).
   void LogDeviceActivation(DeviceType target, uint32_t startTs, uint32_t endTs);
+#if defined(__AVR_ATmega2560__)
+  /// @brief Serialize the AUX outcome for one reward (level 007, device AUX_1).
+  void LogAuxOutcome(uint8_t outcome, uint32_t startTs, uint32_t endTs);
+#endif
   /// @brief Queue an action for deferred execution.
   void SchedulePending(const Action& action, uint32_t fireTime);
   /// @brief Resolve a DeviceType to its SwitchLever pointer.
