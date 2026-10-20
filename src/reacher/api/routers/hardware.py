@@ -138,7 +138,14 @@ async def get_commands(session_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Session not found")
 
     paradigm = info.paradigm or "fr"
-    cmds = get_commands_for_paradigm(paradigm)
+    caps = _firmware_caps(info)
+    # A paradigm name cannot tell an AUX-capable fr build from an older one, so
+    # capability-gated specs need the connected firmware's IDN to advertise them.
+    cmds = {
+        code: spec
+        for code, spec in get_commands_for_paradigm(paradigm).items()
+        if spec.requires_cap is None or spec.requires_cap in caps
+    }
     return {
         "paradigm": paradigm,
         "commands": [
@@ -152,6 +159,15 @@ async def get_commands(session_id: str, request: Request):
             for spec in cmds.values()
         ],
     }
+
+
+def _firmware_caps(info) -> set:
+    instance = getattr(info, "instance", None)
+    getter = getattr(instance, "get_firmware_caps", None)
+    if getter is None:
+        return set()
+    caps = getter()
+    return caps if isinstance(caps, set) else set()
 
 
 def release_session(session_id: str) -> None:

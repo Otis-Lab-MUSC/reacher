@@ -22,6 +22,7 @@
 #include <Laser.h>
 #include <Microscope.h>
 #include <Slm.h>
+#include <Aux.h>
 #include <Scheduler.h>
 #include <ReacherHelpers.h>
 #include "Config.h"
@@ -65,6 +66,7 @@ LickCircuit lickCircuit(PIN_LICK_CIRCUIT);
 Laser       laser(PIN_LASER, LASER_FREQUENCY, LASER_DURATION);
 Microscope  microscope(PIN_MICROSCOPE_TRIG, PIN_MICROSCOPE_TS);
 Slm         slm(PIN_SLM_TS);
+Aux         aux(PIN_AUX);
 
 Scheduler scheduler;
 
@@ -81,6 +83,7 @@ void ParseCommands();
 void StartSession();
 void EndSession();
 void ReconfigureChain();
+void appendAuxStep();
 void SendIdentification();
 
 ISR(PCINT0_vect) { if (Slm::instance) Slm::instance->HandlePCINT(); }
@@ -94,7 +97,7 @@ void onLeverRelease(DeviceType source) {
 }
 
 void SendIdentification() {
-  Serial.println(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"sketch\":\"fr.ino\",\"version\":\"v3.4.0-beta.9\",\"baud_rate\":115200,\"schedule\":\"FIXED_RATIO\"}"));
+  Serial.println(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"sketch\":\"fr.ino\",\"version\":\"v3.4.0-beta.9\",\"baud_rate\":115200,\"schedule\":\"FIXED_RATIO\",\"caps\":\"aux\"}"));
 }
 
 void setup() {
@@ -116,6 +119,7 @@ void setup() {
   scheduler.RegisterPump2(&pump2);
   scheduler.RegisterLaser(&laser);
   scheduler.RegisterMicroscope(&microscope);
+  scheduler.RegisterAux(&aux);
 
   rLever.SetCallback(onLeverPress);
   rLever.SetReleaseCallback(onLeverRelease);
@@ -128,6 +132,7 @@ void setup() {
   scheduler.SetTimeoutInterval(TIMEOUT_INTERVAL);
   scheduler.SetTimeoutMode(TIMEOUT_MODE);
   configureFixedRatio(scheduler, cue, cue2, *activePump, laser, 1, DeviceType::LEVER_RH, activePumpTarget);
+  appendAuxStep();  // TEST_CHAIN before the first session must reach AUX (and be suppressed)
 
   SendIdentification();
   wdt_enable(WDTO_8S);
@@ -148,6 +153,8 @@ void loop() {
   if (sessionEndPending && (int32_t)(millis() - SESSION_END_TIMESTAMP) >= SCOPE_DRAIN_MS) {
     armToggleDevices(devices, false);
     slm.ArmToggle(false);
+    aux.ArmToggle(false);  // AUX is not in DeviceSet
+    aux.SetTestFire(false);  // the test-fire opt-in never outlives the session it was given for
     sessionEndPending = false;
   }
 
@@ -199,6 +206,22 @@ void ReconfigureChain() {
     Trigger* t1 = scheduler.GetTrigger(1);
     if (t1) t1->enabled = false;
   }
+  appendAuxStep();
+}
+
+// AUX is the last step of reward chain 0, appended after configureFixedRatio
+// and the steps[0..3] offset patch so those fixed indices are untouched.
+// Config.h stays byte-identical with fr_lite.
+void appendAuxStep() {
+  Chain* c0 = scheduler.GetChain(0);
+  if (c0 && c0->numSteps < MAX_CHAIN_STEPS) {
+    Action& a = c0->steps[c0->numSteps++];
+    a.type = ActionType::ACTIVATE_DEVICE;
+    a.target = DeviceType::AUX;
+    a.sourceFilter = DeviceType::NONE;
+    a.offsetMs = aux.OnsetDelay();
+    a.param = aux.Duration();
+  }
 }
 
 void StartSession() {
@@ -206,6 +229,7 @@ void StartSession() {
   microscope.Trigger();
   scheduler.StartSession(SESSION_START_TIMESTAMP);
   ReconfigureChain();
+  aux.ResetSession();
 
   Serial.println(F("{\"level\":\"007\",\"device\":\"CONTROLLER\",\"event\":\"START\",\"timestamp\":0}"));
 
@@ -227,6 +251,7 @@ void StartSession() {
   reportDeviceConfig(F("SLM"), slm.Armed(), slm.LaserFrequency(), slm.LaserDuration());
   reportDeviceLever(F("LEVER_RH"), rLever.Armed(), rLever.IsReinforced());
   reportDeviceLever(F("LEVER_LH"), lLever.Armed(), lLever.IsReinforced());
+  aux.ReportConfig();
 }
 
 void EndSession() {
@@ -355,9 +380,12 @@ void ParseCommands() {
             if (!sessionEndPending) { EndSession(); sessionEndPending = true; }
             break;
           case Cmd::IDENTIFY:
+            aux.ForceOff();
             if (!scheduler.IsSessionActive()) {
               armToggleDevices(devices, false);
               slm.ArmToggle(false);
+              aux.ArmToggle(false);
+              aux.SetTestFire(false);
             }
             SendIdentification(); break;
           case Cmd::TEST_CHAIN:
@@ -418,6 +446,41 @@ void ParseCommands() {
           case Cmd::SLM_SET_LASER_DURATION:
             slm.SetLaserDuration((uint32_t)inputJson["duration"]);
             logParamChange(F("SLM"), F("duration"), slm.LaserDuration()); break;
+
+          // AUX TTL output (Mega only). Setters ack the effective (clamped) value.
+          case Cmd::AUX_ARM:    aux.ArmToggle(true); break;
+          case Cmd::AUX_DISARM: aux.ForceOff(); aux.ArmToggle(false); break;  // drop a pulse in flight
+          case Cmd::AUX_TEST:
+            aux.Test(millis());
+            logParamChange(F("AUX_1"), F("test"), F("FIRED")); break;
+          case Cmd::AUX_SET_DURATION:
+            aux.SetDuration((uint32_t)inputJson["duration"]); ReconfigureChain();
+            logParamChange(F("AUX"), F("duration"), aux.Duration()); break;
+          case Cmd::AUX_SET_ONSET_DELAY:
+            aux.SetOnsetDelay((uint32_t)inputJson["delay"]); ReconfigureChain();
+            logParamChange(F("AUX"), F("onset_delay"), aux.OnsetDelay()); break;
+          case Cmd::AUX_SET_MODE:
+            aux.SetMode((uint32_t)inputJson["mode"]);
+            logParamChange(F("AUX"), F("mode"), (uint32_t)aux.Mode()); break;
+          case Cmd::AUX_SET_PROBABILITY:
+            aux.SetProbability((uint32_t)inputJson["probability"]);
+            logParamChange(F("AUX"), F("probability"), (uint32_t)aux.Probability()); break;
+          case Cmd::AUX_SET_BLOCK_K:
+            aux.SetBlockK((uint32_t)inputJson["k"]);
+            logParamChange(F("AUX"), F("block_k"), (uint32_t)aux.BlockK()); break;
+          case Cmd::AUX_SET_BLOCK_N:
+            if (aux.SetBlockN((uint32_t)inputJson["n"])) {
+              logParamChange(F("AUX"), F("block_k"), (uint32_t)aux.BlockK());
+            }
+            logParamChange(F("AUX"), F("block_n"), (uint32_t)aux.BlockN()); break;
+          case Cmd::AUX_SET_SEED:
+            aux.SetSeed((uint32_t)inputJson["seed"]);
+            logParamChange(F("AUX"), F("seed"), aux.Seed()); break;
+          case Cmd::AUX_SET_TEST_FIRE: {
+            bool enable = inputJson["enable"] | false;
+            aux.SetTestFire(enable);
+            logParamChange(F("AUX"), F("test_fire"), aux.TestFire()); break;
+          }
 
           default:
             logUnknownCommand(command);

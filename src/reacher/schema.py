@@ -84,6 +84,7 @@ PIN_SYMBOL_TO_COMPONENT: dict[str, str] = {
 # told *why* a pin is not offered rather than finding it silently missing.
 FIXED_PINS: dict[str, str] = {
     "PIN_MICROSCOPE_TS": "microscope frame timestamp is wired to INT0; the ISR is not remappable",
+    "PIN_AUX": "AUX is Mega-only; runtime remap deferred",
 }
 
 #: How ``REACHER.update_behavioral_events`` rewrites firmware level-007 device
@@ -288,6 +289,11 @@ KNOWN_FIRMWARE_GAPS: dict[str, dict[str, Any]] = {
 # A lite sketch is its base minus two-photon support, so MICROSCOPE_* and SLM_*
 # divergence is the strip working as intended; anything else is drift.
 TWO_PHOTON_CMD_PREFIXES = ("MICROSCOPE_", "SLM_")
+
+# Commands that exist only on the Mega build of a sketch, for a reason other than
+# two-photon hardware. AUX (tail-shock TTL) is Mega fr only, so its absence from
+# fr_lite is expected rather than drift.
+MEGA_ONLY_CMD_PREFIXES = ("AUX_",)
 
 
 def parse_commands_header(path: Path) -> dict[str, int]:

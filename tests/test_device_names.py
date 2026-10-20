@@ -130,7 +130,8 @@ SIMULATOR_LEGACY_NAMES = {
 
 def test_l8_simulator_emits_names_firmware_actually_emits(namespaces):
     """The simulator must not invent device names, or tests exercise fiction."""
-    by_level = {"000": set(namespaces["config"]), "007": set(namespaces["event"])}
+    # logParamChange prints at level 000 too (Device.cpp), so its names are real 000 names.
+    by_level = {"000": set(namespaces["config"]) | set(namespaces["param"]), "007": set(namespaces["event"])}
     violations = []
     for level, device in _SIM_LEVEL_RE.findall(SIMULATOR.read_text()):
         if (level, device) in SIMULATOR_LEGACY_NAMES or level not in by_level:
