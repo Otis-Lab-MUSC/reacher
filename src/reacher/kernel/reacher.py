@@ -870,6 +870,15 @@ class REACHER:
         return {**{k: v for k, v in event.items() if k not in ("param", "value")}, event["param"]: event["value"]}
 
     def update_firmware_information(self, event: dict) -> None:
+        if "device" not in event:
+            # Session-parameter extras of the StartSession dump (pr_step,
+            # variable_interval, omission_interval, Pavlovian timing). Not a
+            # device row, and not emitted as config: the web store appends a
+            # fresh hardware row for every device-less config record.
+            with self.thread_lock:
+                self.firmware_information.update(event)
+            self.logger.info("--> Updated session parameters: %s", event)
+            return
         param_row = self._normalise_param_change(event)
         if event["device"] == "CONTROLLER":
             with self.thread_lock:  # Fix: F-009 — guard cross-thread dict access
@@ -1556,6 +1565,10 @@ class REACHER:
         if self.program_flag.is_set():
             self.program_flag.clear()
         self.program_running = True
+        # Cleared here, not in stop_program: firmware can end the session on
+        # its own (an unarmed Pavlovian run ends on the first loop tick), and
+        # that END must still count when Stop is pressed later.
+        self._controller_end_received.clear()
         try:
             self.send_serial_command({"cmd": 101})
         except Exception:
@@ -1592,7 +1605,6 @@ class REACHER:
                 self.logger.warning("on_stop callback failed", exc_info=True)
 
         # Then do cleanup (send firmware END, close serial, etc.)
-        self._controller_end_received.clear()
         port_open = getattr(self.ser, "is_open", False)
         if port_open:
             try:
@@ -1739,6 +1751,11 @@ class REACHER:
         if self.program_flag.is_set():
             self.program_flag.clear()
 
+        # The END that cmd 100 produced belongs to the run being replaced. Let
+        # the queue thread handle it, then clear the flag, so the next Stop
+        # waits for this run's own END. No new END can arrive before cmd 101.
+        self._controller_end_received.wait(timeout=1.0)
+        self._controller_end_received.clear()
         self.send_serial_command({"cmd": 101})
         self.program_start_time = time.time()
 
