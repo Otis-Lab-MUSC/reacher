@@ -23,7 +23,10 @@ enum class DeviceType : uint8_t {
   PUMP_2,      ///< Secondary syringe pump
   LASER,       ///< Optogenetic laser
   MICROSCOPE,  ///< Two-photon microscope sync
-  NONE         ///< No device / wildcard
+  NONE,        ///< No device / wildcard
+#if defined(__AVR_ATmega2560__)
+  AUX          ///< TTL output (tail shock), Mega only
+#endif
 };
 
 /// @brief Base class for all hardware peripherals. Manages pin, arm state, and timestamp offset.

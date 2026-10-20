@@ -7,6 +7,7 @@
 //   Prefix:  1xx=Controller  2xx=Session  3xx=Cue  4xx=Pump
 //            5xx=Lick  6xx=Laser  9xx=Microscope
 //            10xx=RH Lever  11xx=SLM  13xx=LH Lever
+//            14xx=AUX TTL output (Mega fr only)
 //   Suffix:  x00=disarm  x01=arm  x03=test
 //            x71=set frequency  x72=set duration
 //            x74=set timeout  x75=set ratio  x76=set pin
@@ -160,6 +161,19 @@ namespace Cmd {
   constexpr int LEVER_LH_SET_TIMEOUT_MODE = 1377;
   constexpr int LEVER_LH_SET_INACTIVE = 1380;
   constexpr int LEVER_LH_SET_ACTIVE  = 1381;
+
+  // --- AUX TTL output (14xx, Mega fr only) ---
+  constexpr int AUX_DISARM           = 1400;
+  constexpr int AUX_ARM              = 1401;
+  constexpr int AUX_TEST             = 1403;  // One pulse now, armed or not
+  constexpr int AUX_SET_DURATION     = 1472;  // ms, clamp 1..5000
+  constexpr int AUX_SET_ONSET_DELAY  = 1477;  // ms from the rewarded press; >0 uses a pending slot
+  constexpr int AUX_SET_MODE         = 1480;  // 0 = independent, 1 = block
+  constexpr int AUX_SET_PROBABILITY  = 1481;  // 0..100, independent mode
+  constexpr int AUX_SET_BLOCK_K      = 1482;  // Clamp to 0..n; restarts the block
+  constexpr int AUX_SET_BLOCK_N      = 1483;  // 1..100; restarts the block
+  constexpr int AUX_SET_SEED         = 1484;  // 0 = auto at session start
+  constexpr int AUX_SET_TEST_FIRE    = 1485;  // Allow pulses in test mode / TEST_CHAIN
 }
 
 #endif // COMMANDS_H

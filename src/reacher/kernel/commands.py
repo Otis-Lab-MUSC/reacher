@@ -148,6 +148,19 @@ class CommandCode(IntEnum):
     LEVER_LH_SET_INACTIVE = 1380
     LEVER_LH_SET_ACTIVE = 1381
 
+    # --- AUX TTL output (14xx, Mega fr only) ---
+    AUX_DISARM = 1400
+    AUX_ARM = 1401
+    AUX_TEST = 1403
+    AUX_SET_DURATION = 1472
+    AUX_SET_ONSET_DELAY = 1477
+    AUX_SET_MODE = 1480
+    AUX_SET_PROBABILITY = 1481
+    AUX_SET_BLOCK_K = 1482
+    AUX_SET_BLOCK_N = 1483
+    AUX_SET_SEED = 1484
+    AUX_SET_TEST_FIRE = 1485
+
 
 # Base paradigms that ship a "_lite" (two-photon-stripped) UNO variant.
 # Pavlovian has none: even without Microscope + SLM it overflows the UNO's
@@ -194,6 +207,9 @@ class CommandSpec:
     payload_type: Optional[str] = None  # "int", "bool"
     paradigms: List[str] = field(default_factory=lambda: list(ALL_PARADIGMS))
     deprecated: bool = False
+    # IDN ``caps`` token the connected firmware must advertise. A paradigm name
+    # alone cannot tell an AUX-capable fr build from an older one.
+    requires_cap: Optional[str] = None
 
 
 # Complete command registry — every command from Commands.h
@@ -805,6 +821,71 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         "Reassign the SLM timestamp input pin (PCINT0/PORTB group — pins 10–13 on the Mega, 8–13 on the UNO)",
         payload_key="pin", payload_type="int",
         paradigms=NON_LITE_PARADIGMS,
+    ),
+
+    # --- AUX TTL output (14xx) --- (Mega fr only; never on "_lite" boards)
+    1400: CommandSpec(
+        CommandCode.AUX_DISARM, "AUX_DISARM",
+        "Disarm the AUX TTL output and force it LOW",
+        paradigms=["fr"], requires_cap="aux",
+    ),
+    1401: CommandSpec(
+        CommandCode.AUX_ARM, "AUX_ARM",
+        "Arm the AUX TTL output (tail shock on rewarded presses)",
+        paradigms=["fr"], requires_cap="aux",
+    ),
+    1403: CommandSpec(
+        CommandCode.AUX_TEST, "AUX_TEST",
+        "Fire one AUX pulse now, armed or not",
+        paradigms=["fr"], requires_cap="aux",
+    ),
+    1472: CommandSpec(
+        CommandCode.AUX_SET_DURATION, "AUX_SET_DURATION",
+        "Set the AUX pulse width (ms, 1-5000)",
+        payload_key="duration", payload_type="int",
+        paradigms=["fr"], requires_cap="aux",
+    ),
+    1477: CommandSpec(
+        CommandCode.AUX_SET_ONSET_DELAY, "AUX_SET_ONSET_DELAY",
+        "Set the AUX onset delay from the rewarded press (ms)",
+        payload_key="delay", payload_type="int",
+        paradigms=["fr"], requires_cap="aux",
+    ),
+    1480: CommandSpec(
+        CommandCode.AUX_SET_MODE, "AUX_SET_MODE",
+        "Set the AUX draw mode (0 = independent, 1 = block)",
+        payload_key="mode", payload_type="int",
+        paradigms=["fr"], requires_cap="aux",
+    ),
+    1481: CommandSpec(
+        CommandCode.AUX_SET_PROBABILITY, "AUX_SET_PROBABILITY",
+        "Set the AUX shock probability per reward (0-100, independent mode)",
+        payload_key="probability", payload_type="int",
+        paradigms=["fr"], requires_cap="aux",
+    ),
+    1482: CommandSpec(
+        CommandCode.AUX_SET_BLOCK_K, "AUX_SET_BLOCK_K",
+        "Set shocks per block (k, clamped to 0..n; restarts the block)",
+        payload_key="k", payload_type="int",
+        paradigms=["fr"], requires_cap="aux",
+    ),
+    1483: CommandSpec(
+        CommandCode.AUX_SET_BLOCK_N, "AUX_SET_BLOCK_N",
+        "Set rewards per block (n, 1-100; restarts the block)",
+        payload_key="n", payload_type="int",
+        paradigms=["fr"], requires_cap="aux",
+    ),
+    1484: CommandSpec(
+        CommandCode.AUX_SET_SEED, "AUX_SET_SEED",
+        "Set the AUX PRNG seed (0 = auto at session start)",
+        payload_key="seed", payload_type="int",
+        paradigms=["fr"], requires_cap="aux",
+    ),
+    1485: CommandSpec(
+        CommandCode.AUX_SET_TEST_FIRE, "AUX_SET_TEST_FIRE",
+        "Allow AUX pulses in test mode and TEST_CHAIN (default off)",
+        payload_key="enable", payload_type="bool",
+        paradigms=["fr"], requires_cap="aux",
     ),
 }
 

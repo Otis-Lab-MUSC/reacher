@@ -2,6 +2,7 @@ import logging
 import os
 import queue
 import json
+import threading
 import time
 
 import pytest
@@ -252,6 +253,117 @@ def test_close_serial(reacher, mock_serial):
     reacher.close_serial()
     mock_serial.close.assert_called_once()
     assert reacher.serial_flag.is_set()
+
+
+# The line setup() prints, and the line IDENTIFY prints again (fr.ino SendIdentification).
+_BOOT_IDENTIFICATION = (
+    '{"level":"000","device":"CONTROLLER","sketch":"fr.ino",'
+    '"version":"v3.4.0-beta.9","baud_rate":115200,"schedule":"FIXED_RATIO"}'
+)
+
+
+def _pump_serial_lines(reacher, lines, mocker):
+    """Drive read_serial with bytes readline() would return, then drain the queue."""
+    mocker.patch("time.sleep")
+    pending = list(lines)
+
+    class _Port:
+        is_open = True
+        timeout = 1
+
+        @property
+        def in_waiting(self):
+            if not pending:
+                reacher.serial_flag.set()
+                return 0
+            return 1
+
+        def readline(self):
+            return pending.pop(0)
+
+    reacher.ser = _Port()
+    reacher.serial_flag.clear()
+    reacher.read_serial()
+    queued = []
+    while not reacher.queue.empty():
+        queued.append(reacher.queue.get_nowait())
+    return queued
+
+
+class TestBootBannerNotParsedAsJson:
+    """A connect can hand the boot identification line to the JSON parser in pieces.
+
+    open_serial starts the reader, waits out the bootloader, then
+    reset_input_buffer(). setup() has already printed SendIdentification.
+    readline() returns on newline or on the 1s timeout, so that drain leaves
+    either the tail of the line (through the newline) or the head with no
+    newline. handle_data json.loads every queued line and logs
+    "Failed to parse JSON" at ERROR. The IDENTIFY exchange that follows is a
+    whole frame; connect waits on that, and it must still be applied.
+    """
+
+    def _errors(self, reacher, mocker):
+        seen = []
+        mocker.patch.object(
+            reacher.logger,
+            "error",
+            side_effect=lambda msg, *args, **kwargs: seen.append(str(msg)),
+        )
+        return seen
+
+    def _apply(self, reacher, mocker, lines):
+        mocker.patch("builtins.open", mocker.mock_open())
+        mocker.patch("os.fsync")
+        errors = self._errors(reacher, mocker)
+        queued = _pump_serial_lines(reacher, lines, mocker)
+        for line in queued:
+            reacher.handle_data(line)
+        return queued, errors
+
+    def test_banner_tail_is_not_ingested_as_json(self, reacher, mocker):
+        cut = _BOOT_IDENTIFICATION.index('"sketch"') + 3
+        tail = (_BOOT_IDENTIFICATION[cut:] + "\n").encode()
+        ident = (_BOOT_IDENTIFICATION + "\n").encode()
+        assert not tail.decode().lstrip().startswith("{")
+
+        queued, errors = self._apply(reacher, mocker, [tail, ident])
+
+        assert queued == [_BOOT_IDENTIFICATION]
+        assert not any("Failed to parse JSON" in msg for msg in errors)
+        assert reacher.firmware_information["sketch"] == "fr.ino"
+        assert reacher._firmware_ready.is_set()
+
+    def test_banner_head_is_not_glued_onto_the_next_frame(self, reacher, mocker):
+        cut = _BOOT_IDENTIFICATION.index('"sketch"') + 3
+        head = _BOOT_IDENTIFICATION[:cut].encode()
+        ident = (_BOOT_IDENTIFICATION + "\n").encode()
+        assert head.startswith(b"{") and not head.endswith(b"\n")
+
+        queued, errors = self._apply(reacher, mocker, [head, ident])
+
+        assert queued == [_BOOT_IDENTIFICATION]
+        assert not any("Failed to parse JSON" in msg for msg in errors)
+        assert reacher.firmware_information["sketch"] == "fr.ino"
+        assert reacher._firmware_ready.is_set()
+
+    def test_timeout_split_of_one_json_line_is_reassembled(self, reacher, mocker):
+        cut = 24
+        head = _BOOT_IDENTIFICATION[:cut].encode()
+        tail = (_BOOT_IDENTIFICATION[cut:] + "\n").encode()
+        assert head.startswith(b"{") and not tail.decode().lstrip().startswith("{")
+
+        queued, errors = self._apply(reacher, mocker, [head, tail])
+
+        assert queued == [_BOOT_IDENTIFICATION]
+        assert not any("Failed to parse JSON" in msg for msg in errors)
+        assert reacher.firmware_information["sketch"] == "fr.ino"
+
+    def test_malformed_json_object_still_logs_an_error(self, reacher, mocker):
+        queued, errors = self._apply(reacher, mocker, [b'{"level":\n'])
+
+        assert queued == ['{"level":']
+        assert any("Failed to parse JSON" in msg for msg in errors)
+        assert reacher.firmware_information.get("sketch") is None
 
 
 def test_send_serial_command(reacher, mock_serial):
@@ -1492,3 +1604,134 @@ class TestSimulatorControllerEnd:
         assert elapsed < 3.0, f"stop_program() took {elapsed:.2f}s — CONTROLLER END likely timed out"
         assert sim_reacher._controller_end_received.is_set()
         assert sim_reacher.program_flag.is_set()
+
+
+class TestDevicelessParamRecords:
+    """CLI-3: pr/vi/omission/pavlovian print level-000 session-parameter rows
+    with no ``device`` key at StartSession. They used to KeyError in
+    update_firmware_information and surface as an ERROR log + kernel_error.
+    """
+
+    RECORDS = [
+        {"level": "000", "pr_step": 1},
+        {"level": "000", "variable_interval": 15000},
+        {"level": "000", "omission_interval": 20000},
+        {"level": "000", "cs_plus_freq": 6000, "cs_minus_freq": 12000, "cue_duration": 2000,
+         "trace_interval": 1000, "consumption_ms": 3000, "iti_mean": 30000,
+         "iti_min": 20000, "iti_max": 40000},
+    ]
+
+    @pytest.fixture
+    def instance(self, reacher, mocker):
+        reacher.logger = logging.getLogger("test.paramrecord")
+        mocker.patch.object(reacher, "_write_controller_log")
+        reacher._emit = Mock()
+        return reacher
+
+    @pytest.mark.parametrize("record", RECORDS, ids=["pr", "vi", "omission", "pavlovian"])
+    def test_record_is_stored_without_error(self, instance, record, caplog):
+        hardware_before = list(instance.hardware_settings)
+
+        with caplog.at_level(logging.DEBUG, logger="test.paramrecord"):
+            instance.handle_data(json.dumps(record))
+
+        assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+        emitted = [c.args[0] for c in instance._emit.call_args_list]
+        assert "kernel_error" not in emitted
+        assert "config" not in emitted
+        assert instance.hardware_settings == hardware_before
+        for key, value in record.items():
+            if key != "level":
+                assert instance.firmware_information[key] == value
+        assert not instance._firmware_ready.is_set()
+
+
+class TestStopAfterFirmwareEnd:
+    """CLI-4: an unarmed Pavlovian session ends itself on the first loop tick,
+    so the CONTROLLER END lands before Stop. The later cmd 100 hits the
+    firmware's "already ended" early return, so no second END is sent.
+    """
+
+    END = json.dumps({"level": "007", "device": "CONTROLLER", "event": "END", "timestamp": 87})
+
+    @pytest.fixture
+    def instance(self, reacher, mocker, mock_serial):
+        reacher.ser.is_open = True
+        reacher.logger = logging.getLogger("test.stopafterend")
+        for name in ("_join_queue_with_timeout", "close_serial", "_write_event_log",
+                     "_close_event_log", "_auto_export", "_write_session_summary",
+                     "_write_controller_log"):
+            mocker.patch.object(reacher, name)
+        return reacher
+
+    def test_stop_after_end_is_prompt_and_quiet(self, instance, caplog):
+        instance.start_program()
+        instance.handle_data(self.END)
+
+        with patch("reacher.kernel.reacher.time.sleep") as sleep, \
+                caplog.at_level(logging.DEBUG, logger="test.stopafterend"):
+            start = time.monotonic()
+            instance.stop_program()
+            elapsed = time.monotonic() - start
+
+        assert elapsed < 1.0, f"stop_program() took {elapsed:.2f}s"
+        assert "Timed out waiting for CONTROLLER END" not in caplog.text
+        assert "export may be incomplete" not in caplog.text
+        assert (2,) not in [c.args for c in sleep.call_args_list]
+
+    def test_end_from_previous_run_does_not_satisfy_next_stop(self, instance, mocker, caplog):
+        instance.start_program()
+        instance.handle_data(self.END)
+        instance.stop_program()
+        instance.ser.is_open = True
+
+        instance.start_program()
+        assert not instance._controller_end_received.is_set()
+
+        ev = instance._controller_end_received
+        wait = mocker.patch.object(ev, "wait", side_effect=lambda timeout=None: ev.is_set())
+        with patch("reacher.kernel.reacher.time.sleep"), \
+                caplog.at_level(logging.WARNING, logger="test.stopafterend"):
+            instance.stop_program()
+
+        wait.assert_called_once()
+        assert "Timed out waiting for CONTROLLER END" in caplog.text
+
+    def test_end_from_restart_does_not_satisfy_next_stop(self, instance, mocker, caplog):
+        # Restart's own cmd 100 makes the firmware send END for the run it replaces.
+        instance.start_program()
+
+        def firmware(command):
+            if command.get("cmd") == 100:
+                instance.handle_data(self.END)
+
+        with patch.object(instance, "send_serial_command", side_effect=firmware), \
+                patch("reacher.kernel.reacher.time.sleep"):
+            instance.restart_program()
+        assert not instance._controller_end_received.is_set()
+
+        ev = instance._controller_end_received
+        wait = mocker.patch.object(ev, "wait", side_effect=lambda timeout=None: ev.is_set())
+        with patch("reacher.kernel.reacher.time.sleep"), \
+                caplog.at_level(logging.WARNING, logger="test.stopafterend"):
+            instance.stop_program()
+
+        wait.assert_called_once()
+        assert "Timed out waiting for CONTROLLER END" in caplog.text
+
+    def test_late_end_from_restart_is_consumed_before_new_run(self, instance):
+        # The replaced run's END can be handled after restart's sleep (a slow
+        # queue, or lines requeued at the buffer swap). It must not carry over.
+        instance.start_program()
+        timer = threading.Timer(0.05, instance.handle_data, (self.END,))
+
+        def firmware(command):
+            if command.get("cmd") == 100:
+                timer.start()
+
+        with patch.object(instance, "send_serial_command", side_effect=firmware), \
+                patch("reacher.kernel.reacher.time.sleep"):
+            instance.restart_program()
+        timer.join()
+
+        assert not instance._controller_end_received.is_set()

@@ -64,6 +64,10 @@ def sketches(doc):
 # sharper — a reordering defeats a diff but not a set comparison.
 
 
+# AUX_ is Mega-only (fr), not two-photon, but a lite twin drops it the same way.
+LITE_STRIPPED_PREFIXES = schema.TWO_PHOTON_CMD_PREFIXES + schema.MEGA_ONLY_CMD_PREFIXES
+
+
 @pytest.mark.parametrize("base_name", LITE_CAPABLE_PARADIGMS)
 def test_lite_twin_config_is_byte_identical_to_base(base_name):
     """C13a: paradigm chain configuration has nothing to do with two-photon hardware.
@@ -89,7 +93,7 @@ def test_lite_twin_shares_every_non_two_photon_command(base_name, sketches):
     """
     base_refs = set(sketches[base_name]["cmd_refs"])
     lite_refs = set(sketches[f"{base_name}_lite"]["cmd_refs"])
-    stripped = {c for c in base_refs if c.startswith(schema.TWO_PHOTON_CMD_PREFIXES)}
+    stripped = {c for c in base_refs if c.startswith(LITE_STRIPPED_PREFIXES)}
     missing = (base_refs - stripped) - lite_refs
     assert not missing, (
         f"{base_name}_lite is missing commands handled by {base_name}: {sorted(missing)}"
@@ -98,10 +102,10 @@ def test_lite_twin_shares_every_non_two_photon_command(base_name, sketches):
 
 @pytest.mark.parametrize("base_name", LITE_CAPABLE_PARADIGMS)
 def test_lite_twin_handles_no_two_photon_commands(base_name, sketches):
-    """The strip must be complete — a lite build has no two-photon hardware at all."""
+    """The strip must be complete — a lite build has no two-photon or Mega-only hardware."""
     lite_refs = set(sketches[f"{base_name}_lite"]["cmd_refs"])
-    leaked = {c for c in lite_refs if c.startswith(schema.TWO_PHOTON_CMD_PREFIXES)}
-    assert not leaked, f"{base_name}_lite references two-photon commands: {sorted(leaked)}"
+    leaked = {c for c in lite_refs if c.startswith(LITE_STRIPPED_PREFIXES)}
+    assert not leaked, f"{base_name}_lite references stripped commands: {sorted(leaked)}"
 
 
 # --- C14: declaration <-> handler parity ---------------------------------
