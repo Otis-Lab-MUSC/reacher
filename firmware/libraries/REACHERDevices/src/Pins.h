@@ -42,7 +42,8 @@ constexpr int8_t PIN_PUMP_2         = 8;
 
 #if defined(__AVR_ATmega2560__)
 /// AUX TTL output (tail shock box input). Mega header: clear of the SLM
-/// PCINT0 group (10-13) and the pin-13 LED. Not runtime-remappable.
+/// PCINT0 group (10-13) and the pin-13 LED. Default pin; remappable at runtime
+/// with AUX_SET_PIN (1476).
 constexpr int8_t PIN_AUX            = 22;
 #endif
 

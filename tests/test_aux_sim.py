@@ -16,7 +16,8 @@ GOLDEN_FIRST_FIVE = [3336926330, 1697253807, 2816511904, 1955480042, 718842323]
 GOLDEN_INDEPENDENT_P30 = ".SS.S......S...S.SS."
 GOLDEN_BLOCK_K2_N5 = "S..S.SS...S.S...S.S."
 
-ARM = (1001, 1401)  # RH lever + AUX; FR1 by default, fr timeout defaults to 0
+CONFIGURE = {"cmd": 1472, "duration": 500}  # AUX defaults to unconfigured (duration 0): arm refuses
+ARM = (1001, CONFIGURE, 1401)  # RH lever + AUX; FR1 by default, fr timeout defaults to 0
 OUTCOMES = ("SHOCK", "SHOCK_OMITTED", "SHOCK_SUPPRESSED")
 
 
@@ -123,7 +124,7 @@ def test_block_mode_gives_exactly_k_per_n(k, n):
 def test_one_outcome_per_reward_and_shock_spans_the_pulse():
     _, msgs = run([
         {"cmd": 472, "duration": 100}, {"cmd": 1481, "probability": 50}, {"cmd": 1472, "duration": 250},
-    ], arm=(1001, 1401, 401))
+    ], arm=(1001, CONFIGURE, 1401, 401))
     rewarded, aux = rewards(msgs), aux_events(msgs)
     assert len(rewarded) > 10
     assert [m["start_timestamp"] for m in aux] == [m["start_timestamp"] for m in rewarded]
@@ -175,7 +176,7 @@ def test_session_start_reports_one_aux_config_line_with_seed():
     cfg = [m for m in msgs if m.get("level") == "000" and m.get("device") == "AUX" and "param" not in m]
     assert cfg == [{
         "level": "000", "device": "AUX", "armed": True, "duration": 500, "onset_delay": 0, "mode": 0,
-        "probability": 30, "block_k": 0, "block_n": 10, "seed": 12345, "test_fire": False,
+        "probability": 30, "block_k": 0, "block_n": 0, "seed": 12345, "test_fire": False,
     }]
 
 
@@ -193,6 +194,65 @@ def test_aux_auto_seed_does_not_perturb_the_rest_of_the_session():
     _, without = run(arm=(1001,), seed=5)
     strip = [m for m in with_aux if m.get("device") not in ("AUX", "AUX_1")]
     assert [m for m in strip if m.get("level") == "007"] == [m for m in without if m.get("level") == "007"]
+
+
+def test_arm_refused_while_unconfigured():
+    sim, q = _sim()
+    _send(sim, 1401)
+    assert _drain(q) == [{
+        "level": "006", "device": "AUX", "error_code": "AUX_UNCONFIGURED", "command": 1401,
+        "desc": "AUX not configured: set duration (and block N in block mode) first",
+    }]
+    assert not sim.aux_armed
+
+
+def test_test_fire_refused_while_unconfigured():
+    sim, q = _sim()
+    _send(sim, 1403)
+    assert [m["error_code"] for m in _drain(q)] == ["AUX_UNCONFIGURED"]
+
+
+def test_arm_accepted_once_duration_is_set_in_independent_mode():
+    sim, _ = _sim()
+    _send(sim, {"cmd": 1472, "duration": 300}, 1401)
+    assert sim.aux_armed
+
+
+def test_block_mode_with_n_unset_refuses_arm():
+    sim, q = _sim()
+    _send(sim, CONFIGURE, {"cmd": 1480, "mode": 1})
+    _drain(q)
+    _send(sim, 1401)
+    assert [m["error_code"] for m in _drain(q)] == ["AUX_UNCONFIGURED"]
+    assert not sim.aux_armed
+    _send(sim, {"cmd": 1483, "n": 5}, 1401)
+    assert sim.aux_armed
+
+
+def test_pin_change_mid_pulse_drops_the_pulse_and_reports_the_new_pin():
+    sim, q = _sim()
+    _send(sim, *ARM, {"cmd": 1481, "probability": 100})
+    sim.start()
+    _drain(q)
+    sim._fire_chain(0, sim._clock)
+    assert sim.aux_pulse_end is not None
+    _drain(q)
+    _send(sim, {"cmd": 1476, "pin": 30})
+    assert sim.aux_pulse_end is None
+    assert not sim.aux_armed
+    assert _drain(q) == [
+        {"level": "001", "device": "AUX", "pin": PIN_AUX, "desc": "DISARMED"},
+        {"level": "000", "device": "AUX", "param": "pin", "value": 30},
+    ]
+
+
+def test_a_later_pulse_reports_the_new_pin():
+    sim, q = _sim()
+    _send(sim, *ARM, {"cmd": 1481, "probability": 100}, {"cmd": 1476, "pin": 30}, 1401)
+    sim.start()
+    _drain(q)
+    sim._fire_chain(0, sim._clock)
+    assert [m["pin"] for m in aux_events(_drain(q))] == [30]
 
 
 def test_setters_ack_the_effective_value():
@@ -220,6 +280,8 @@ def test_shrinking_n_reclamps_k_and_acks_it_first():
 
 def test_aux_test_logs_like_pump_test():
     sim, q = _sim()
+    _send(sim, CONFIGURE)
+    _drain(q)
     _send(sim, 1403)  # disarmed: AUX_TEST is an explicit operator action, armed or not
     assert _drain(q) == [{"level": "000", "device": "AUX_1", "param": "test", "value": "FIRED"}]
 
@@ -229,7 +291,7 @@ def test_aux_test_logs_like_pump_test():
 
 def test_test_chain_is_suppressed_without_touching_the_prng():
     sim, q = _sim()
-    _send(sim, 1401, SEED_12345, {"cmd": 1481, "probability": 100})
+    _send(sim, CONFIGURE, 1401, SEED_12345, {"cmd": 1481, "probability": 100})
     state = sim._aux_draw.state
     _send(sim, 103)
     events = aux_events(_drain(q))
@@ -240,7 +302,7 @@ def test_test_chain_is_suppressed_without_touching_the_prng():
 
 def test_test_chain_fires_only_with_test_fire_opt_in():
     sim, q = _sim()
-    _send(sim, 1401, {"cmd": 1481, "probability": 100}, {"cmd": 1485, "enable": True}, 103)
+    _send(sim, CONFIGURE, 1401, {"cmd": 1481, "probability": 100}, {"cmd": 1485, "enable": True}, 103)
     assert [m["event"] for m in aux_events(_drain(q))] == ["SHOCK"]
 
 
@@ -257,7 +319,7 @@ def test_test_mode_is_a_test_context_and_session_start_clears_it():
 def test_pause_drops_a_delayed_outcome_like_the_firmware_pending_queue():
     """Scheduler::SetPaused clears pending actions; a delayed AUX step goes with them."""
     sim, q = _sim()
-    _send(sim, 1401, {"cmd": 1481, "probability": 100}, {"cmd": 1477, "delay": 1000})
+    _send(sim, CONFIGURE, 1401, {"cmd": 1481, "probability": 100}, {"cmd": 1477, "delay": 1000})
     sim.start()
     _drain(q)
     sim._fire_chain(0, sim._clock)
@@ -269,7 +331,7 @@ def test_pause_drops_a_delayed_outcome_like_the_firmware_pending_queue():
 
 def test_delayed_outcome_fires_at_reward_plus_delay_when_not_interrupted():
     sim, q = _sim()
-    _send(sim, 1401, {"cmd": 1481, "probability": 100}, {"cmd": 1477, "delay": 1000})
+    _send(sim, CONFIGURE, 1401, {"cmd": 1481, "probability": 100}, {"cmd": 1477, "delay": 1000})
     sim.start()
     _drain(q)
     t = sim._clock
@@ -281,9 +343,9 @@ def test_delayed_outcome_fires_at_reward_plus_delay_when_not_interrupted():
 
 def test_identify_and_session_end_disarm_aux_and_clear_test_fire():
     sim, _ = _sim()
-    _send(sim, 1401, {"cmd": 1485, "enable": True}, 102)
+    _send(sim, CONFIGURE, 1401, {"cmd": 1485, "enable": True}, 102)
     assert not sim.aux_armed and not sim.aux_test_fire
-    _send(sim, 1401, {"cmd": 1485, "enable": True})
+    _send(sim, CONFIGURE, 1401, {"cmd": 1485, "enable": True})
     sim.start()
     sim.run_until(10_000)
     sim.stop()
@@ -304,4 +366,51 @@ def test_test_mode_suppresses_a_reward_without_touching_the_prng():
     _send(sim, {"cmd": 1485, "enable": True})
     _drain(q)
     sim._fire_chain(0, sim._clock)
+    assert [m["event"] for m in aux_events(_drain(q))] == ["SHOCK"]
+
+
+def test_pin_conflict_is_refused_and_the_pin_stays():
+    sim, q = _sim()
+    _send(sim, *ARM)
+    _drain(q)
+    for taken in (13, 10, 4, 6, 11, 9):  # LED, RH lever, pump, laser, SLM ts, microscope trigger
+        _send(sim, {"cmd": 1476, "pin": taken})
+        assert _drain(q) == [{
+            "level": "006", "device": "AUX", "error_code": "AUX_PIN_CONFLICT",
+            "desc": "AUX pin in use by another device", "command": 1476, "pin": taken,
+        }]
+    assert sim.aux_pin == PIN_AUX
+    assert sim.aux_armed
+
+
+def test_unconfigured_refusal_names_the_command():
+    sim, q = _sim()
+    _send(sim, 1401, 1403)
+    assert [m.get("command") for m in _drain(q) if m.get("error_code") == "AUX_UNCONFIGURED"] == [1401, 1403]
+
+
+@pytest.mark.parametrize("cmd", [{"cmd": 1400}, {"cmd": 1476, "pin": 30}])
+def test_disarm_or_pin_change_drops_a_queued_onset_shock(cmd):
+    """Scheduler::ClearPendingFor(AUX): a reward's delayed shock must not survive disarm or a pin move."""
+    sim, q = _sim()
+    _send(sim, CONFIGURE, 1401, {"cmd": 1481, "probability": 100}, {"cmd": 1477, "delay": 1000})
+    sim.start()
+    _drain(q)
+    sim._fire_chain(0, sim._clock)  # reward lands; AUX step queued 1 s out
+    _send(sim, cmd, 1401)  # disarm or move, then re-arm before the onset elapses
+    sim._heap = [e for e in sim._heap if e[2].__name__ == "<lambda>"]  # keep only chain steps
+    sim.run_until(sim._clock + 5000)
+    assert not aux_events(_drain(q))
+
+
+def test_queued_onset_shock_survives_an_unrelated_command():
+    """Golden negative for the test above: without a disarm the queued shock fires."""
+    sim, q = _sim()
+    _send(sim, CONFIGURE, 1401, {"cmd": 1481, "probability": 100}, {"cmd": 1477, "delay": 1000})
+    sim.start()
+    _drain(q)
+    sim._fire_chain(0, sim._clock)
+    _send(sim, {"cmd": 1484, "seed": 7})
+    sim._heap = [e for e in sim._heap if e[2].__name__ == "<lambda>"]
+    sim.run_until(sim._clock + 5000)
     assert [m["event"] for m in aux_events(_drain(q))] == ["SHOCK"]

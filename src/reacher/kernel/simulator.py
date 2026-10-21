@@ -105,6 +105,8 @@ MAX_CHAIN_STEPS = 6  # Action.h
 
 # AUX TTL output (Mega fr only): Pins.h PIN_AUX and AuxOutput.h clamps.
 PIN_AUX = 22
+PIN_SLM_TS = 11  # Pins.h
+PIN_MICROSCOPE_TRIG = 9  # Pins.h
 AUX_MAX_DURATION = 5000
 AUX_MAX_ONSET_DELAY = 600000
 AUX_MAX_BLOCK_N = 100
@@ -195,6 +197,9 @@ class AuxDraw:
         return self.next() % 100 < probability
 
     def draw_block(self) -> bool:
+        if self.block_n == 0:
+            self.next()
+            return False
         if self.remaining_n == 0:
             self.remaining_k, self.remaining_n = self.block_k, self.block_n
         shock = self.next() % self.remaining_n < self.remaining_k
@@ -428,12 +433,14 @@ class FirmwareSimulator:
 
         # AUX TTL output (AuxOutput.cpp defaults: a fresh board can never shock).
         self.aux_armed = False
-        self.aux_duration = 500
+        self.aux_duration = 0
         self.aux_onset_delay = 0
         self.aux_mode = AUX_MODE_INDEPENDENT
         self.aux_probability = 0
         self.aux_block_k = 0
-        self.aux_block_n = 10
+        self.aux_block_n = 0
+        self.aux_pin = PIN_AUX
+        self.aux_pulse_end = None  # end of the pulse in flight; None once dropped or never started
         self.aux_seed = 0
         self.aux_effective_seed = 0
         self.aux_test_fire = False
@@ -455,6 +462,7 @@ class FirmwareSimulator:
         self._pause_wall = 0.0
         self._saved_arm_state: Optional[dict] = None
         self._end_ms: Optional[int] = None  # set when the board ends the session itself
+        self._self_ended = False  # the Pavlovian sketch already printed END; a later cmd 100 must not
         self._last_source: Optional[str] = None  # Scheduler::_lastInputSource
         self._pav_types: List[bool] = []
         self._pav_index = 0
@@ -512,6 +520,7 @@ class FirmwareSimulator:
         operant = base != "pavlovian"
 
         if cmd == 102:  # IDENTIFY
+            self._aux_force_off()
             if not self._running:
                 # fr.ino:IDENTIFY — a reconnect disarms the board, so whatever the
                 # host wants live has to be re-armed after it.
@@ -718,16 +727,34 @@ class FirmwareSimulator:
         elif cmd in (694, 695):
             self.pav_laser_phase = {694: "REWARD", 695: "CUE"}[cmd]
 
+    @property
+    def _aux_configured(self) -> bool:
+        """Aux::Configured(): a pulse width, and a block N in block mode."""
+        return self.aux_duration > 0 and (self.aux_mode == AUX_MODE_INDEPENDENT or self.aux_block_n > 0)
+
+    def _aux_force_off(self) -> None:
+        """Aux::ForceOff: the pin goes LOW and any pulse in flight is dropped."""
+        self.aux_pulse_end = None
+
     def _aux_ack(self, param: str, value) -> None:
         self._send({"level": "000", "device": "AUX", "param": param, "value": value})
 
     def _handle_aux(self, cmd: int, cmd_data: dict) -> None:
         """fr.ino's AUX cases. Each setter acks the effective (clamped) value."""
         if cmd == 1401:
+            if not self._aux_configured:
+                self._aux_unconfigured_error(1401)
+                return
+            self._aux_pending_gen += 1  # Scheduler::ClearPendingFor(AUX)
             self.aux_armed = True
         elif cmd == 1400:
+            self._aux_pending_gen += 1  # Scheduler::ClearPendingFor(AUX)
+            self._aux_force_off()
             self.aux_armed = False
         elif cmd == 1403:
+            if not self._aux_configured:
+                self._aux_unconfigured_error(1403)
+                return
             self._send({"level": "000", "device": "AUX_1", "param": "test", "value": "FIRED"})
         elif cmd == 1472:
             self.aux_duration = _clamp(cmd_data.get("duration"), 1, AUX_MAX_DURATION)
@@ -760,6 +787,29 @@ class FirmwareSimulator:
         elif cmd == 1485:
             self.aux_test_fire = bool(cmd_data.get("enable", False))
             self._aux_ack("test_fire", self.aux_test_fire)
+        elif cmd == 1476:
+            pin = _clamp(22 if cmd_data.get("pin") is None else cmd_data.get("pin"), 2, 53)
+            # fr.ino auxPinConflicts(): pin 13 (LED) or any other device's pin is refused.
+            if pin == 13 or pin in self._pins.values() or pin in (PIN_SLM_TS, PIN_MICROSCOPE_TRIG):
+                self._send({
+                    "level": "006", "device": "AUX", "error_code": "AUX_PIN_CONFLICT",
+                    "desc": "AUX pin in use by another device", "command": 1476, "pin": pin,
+                })
+                return
+            self._aux_pending_gen += 1  # Scheduler::ClearPendingFor(AUX)
+            # Aux::SetPin = ForceOff + Device::SetPin; a set pin on an armed device disarms first.
+            self._aux_force_off()
+            if self.aux_armed:
+                self.aux_armed = False
+                self._send({"level": "001", "device": "AUX", "pin": self.aux_pin, "desc": "DISARMED"})
+            self.aux_pin = pin
+            self._aux_ack("pin", self.aux_pin)
+
+    def _aux_unconfigured_error(self, command: int) -> None:
+        self._send({
+            "level": "006", "device": "AUX", "error_code": "AUX_UNCONFIGURED", "command": command,
+            "desc": "AUX not configured: set duration (and block N in block mode) first",
+        })
 
     def _aux_reset_session(self) -> None:
         """Aux::ResetSession: reseed (auto if 0) and restart the block."""
@@ -781,8 +831,10 @@ class FirmwareSimulator:
             event = "SHOCK" if shock else "SHOCK_OMITTED"
             if shock:
                 end = now + self.aux_duration
+                # Aux::StartPulse returns without raising the pin when duration is 0.
+                self.aux_pulse_end = end if self.aux_duration > 0 else None
         self._send({
-            "level": "007", "device": "AUX_1", "pin": PIN_AUX,
+            "level": "007", "device": "AUX_1", "pin": self.aux_pin,
             "event": event, "start_timestamp": now, "end_timestamp": end,
         })
 
@@ -998,6 +1050,7 @@ class FirmwareSimulator:
         self._clock = 0
         self._heap = []
         self._end_ms = None
+        self._self_ended = False
         self._anchor = time.monotonic()
         self._scheduler_start()
         self._reconfigure()  # fr.ino StartSession(): ReconfigureChain() after Scheduler::StartSession()
@@ -1017,6 +1070,14 @@ class FirmwareSimulator:
         self._begin_run()
 
     def stop(self):
+        if self._self_ended:
+            # pavlovian.ino EndSession() returns early once the session is no longer active: no second END.
+            self._stop_event.set()
+            if self._thread and self._thread.is_alive() and self._thread is not threading.current_thread():
+                self._thread.join(timeout=3)
+            self._thread = None
+            self._paused = False
+            return
         # Capture arm states before disarming (mirrors firmware behavior)
         self._saved_arm_state = self._capture_arm_state()
         end_ts = self._end_ms if self._end_ms is not None else self._session_ms()
@@ -1033,10 +1094,29 @@ class FirmwareSimulator:
             # the arm snapshot above never restores it), and drops the test-fire opt-in.
             self.aux_armed = False
             self.aux_test_fire = False
+            self._aux_force_off()
         # Mirrors firmware's EndSession() (e.g. fr.ino:225-233), which prints the
         # CONTROLLER END event synchronously in the cmd-100 handler. Without this,
         # stop_program()'s _controller_end_received.wait() (reacher.py) always hits
         # its 8s timeout against the simulator.
+        self._send({
+            "level": "007", "device": "CONTROLLER",
+            "event": "END", "timestamp": end_ts,
+        })
+
+    def _pav_self_end(self) -> None:
+        """pavlovian.ino loop(): IsComplete() -> EndSession() (prints END), then disarm the devices."""
+        if not self._running:
+            return
+        end_ts = self._clock
+        self._saved_arm_state = self._capture_arm_state()
+        self._running = False
+        self._self_ended = True
+        self._scheduler_end()
+        self.lever_rh_armed = self.lever_lh_armed = False
+        self.cue_armed = self.cue2_armed = False
+        self.pump_armed = self.pump2_armed = False
+        self.lick_armed = self.laser_armed = self.microscope_armed = False
         self._send({
             "level": "007", "device": "CONTROLLER",
             "event": "END", "timestamp": end_ts,
@@ -1341,6 +1421,7 @@ class FirmwareSimulator:
         if total == 0:
             self._pav_types = []
             self._end_ms = 0  # IsComplete() right away: the sketch ends the session itself
+            self._at(0, self._pav_self_end)
             return
         cs_plus = min(cs_plus, total)
         types = [False] * cs_plus + [True] * (total - cs_plus)
@@ -1432,6 +1513,7 @@ class FirmwareSimulator:
             self._pav_trial_event("ALL_TRIALS_COMPLETE")
             self._pav_index += 1
             self._end_ms = self._clock
+            self._at(self._clock, self._pav_self_end)
         else:
             self._pav_schedule_iti(self._clock)
 

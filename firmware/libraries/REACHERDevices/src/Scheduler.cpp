@@ -479,6 +479,14 @@ void Scheduler::ClearPending() {
   }
 }
 
+#if defined(__AVR_ATmega2560__)
+void Scheduler::ClearPendingFor(DeviceType target) {
+  for (uint8_t i = 0; i < MAX_PENDING; i++) {
+    if (pending[i].action.target == target) pending[i].active = false;
+  }
+}
+#endif
+
 void Scheduler::SetPaused(bool paused, uint32_t now) {
   if (!sessionActive) return;
   sessionPaused = paused;

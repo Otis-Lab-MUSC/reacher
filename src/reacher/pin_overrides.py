@@ -71,6 +71,7 @@ class PinConstraint:
     requires_pwm: bool = False
     requires_interrupt: bool = False
     requires_pcint: bool = False  # must be in PCINT0/PORTB group (10–13 on Mega) for ISR
+    mega_only: bool = False       # the firmware sketch that owns this pin only exists on Mega
 
 
 # Map command code -> PinConstraint. Cue/Cue2/Laser drive PWM; Microscope
@@ -87,6 +88,7 @@ PIN_CONSTRAINTS: dict[int, PinConstraint] = {
     int(CommandCode.LEVER_RH_SET_PIN):         PinConstraint("lever_rh"),
     int(CommandCode.LEVER_LH_SET_PIN):         PinConstraint("lever_lh"),
     int(CommandCode.SLM_SET_PIN):              PinConstraint("slm", requires_pcint=True),
+    int(CommandCode.AUX_SET_PIN):              PinConstraint("aux", mega_only=True),
 }
 
 # Reverse lookup: component_key -> set-pin command code.
@@ -134,6 +136,15 @@ def validate_pin(code: int, pin: int, board: Optional[str]) -> Optional[dict]:
     constraint = PIN_CONSTRAINTS.get(code)
     if constraint is None:
         return None
+    if constraint.mega_only and (board or "").lower() != "mega":
+        return {
+            "error": "pin_role_violation",
+            "component": constraint.component_key,
+            "required": "mega",
+            "got": pin,
+            "board": (board or "unknown").lower(),
+            "reason": "AUX is Mega-only; this board has no AUX output",
+        }
     digital, pwm, interrupt, pcint0 = board_sets(board)
 
     if constraint.requires_pcint:

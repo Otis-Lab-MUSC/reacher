@@ -9,13 +9,14 @@
 
 Aux::Aux(int8_t pin)
   : Device(pin, OUTPUT, "AUX") {
-  // Defaults can never shock: disarmed, p = 0, k = 0, test-fire off.
-  duration = 500;
+  // Defaults can never shock: unconfigured until the host sets duration (and N in
+  // block mode), disarmed, p = 0, k = 0, test-fire off.
+  duration = 0;
   onsetDelay = 0;
   mode = AUX_MODE_INDEPENDENT;
   probability = 0;
   blockK = 0;
-  blockN = 10;
+  blockN = 0;
   seed = 0;
   effectiveSeed = 0;
   testFire = false;
@@ -56,6 +57,7 @@ void Aux::Test(uint32_t now) {
 }
 
 void Aux::StartPulse(uint32_t now) {
+  if (duration == 0) return;
   startTimestamp = now;
   endTimestamp = now + duration;
   active = true;

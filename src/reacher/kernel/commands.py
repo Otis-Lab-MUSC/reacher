@@ -160,6 +160,7 @@ class CommandCode(IntEnum):
     AUX_SET_BLOCK_N = 1483
     AUX_SET_SEED = 1484
     AUX_SET_TEST_FIRE = 1485
+    AUX_SET_PIN = 1476
 
 
 # Base paradigms that ship a "_lite" (two-photon-stripped) UNO variant.
@@ -885,6 +886,12 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
         CommandCode.AUX_SET_TEST_FIRE, "AUX_SET_TEST_FIRE",
         "Allow AUX pulses in test mode and TEST_CHAIN (default off)",
         payload_key="enable", payload_type="bool",
+        paradigms=["fr"], requires_cap="aux",
+    ),
+    1476: CommandSpec(
+        CommandCode.AUX_SET_PIN, "AUX_SET_PIN",
+        "Move the AUX shock output to another pin (drops any pulse first)",
+        payload_key="pin", payload_type="int",
         paradigms=["fr"], requires_cap="aux",
     ),
 }

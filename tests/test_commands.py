@@ -138,7 +138,7 @@ class TestGetCommandsForParadigm:
 
 TWO_PHOTON_CODES = [900, 901, 903, 976, 1100, 1101, 1102, 1103, 1176]
 # AUX (tail-shock TTL) is Mega fr only: not two-photon, but never on a lite board.
-MEGA_ONLY_CODES = [1400, 1401, 1403, 1472, 1477, 1480, 1481, 1482, 1483, 1484, 1485]
+MEGA_ONLY_CODES = [1400, 1401, 1403, 1472, 1476, 1477, 1480, 1481, 1482, 1483, 1484, 1485]
 
 # The one paradigm-defining parameter each schedule cannot work without.
 PARADIGM_PARAM_CODE = {"pr": 205, "vi": 204, "omission": 203}

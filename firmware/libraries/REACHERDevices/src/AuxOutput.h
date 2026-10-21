@@ -55,6 +55,13 @@ public:
   /// @brief Emit the single level-000 AUX config line.
   void ReportConfig() const;
 
+  /// @brief True iff duration is set and, in block mode, N is set.
+  // Inline: an out-of-line member shifts the pavlovian hex through the shared archive.
+  bool Configured() const { return duration > 0 && (mode == AUX_MODE_INDEPENDENT || blockN > 0); }
+
+  /// @brief Drop the pin LOW and move the output to @p newPin.
+  void SetPin(int8_t newPin) { ForceOff(); Device::SetPin(newPin); }
+
   void SetDuration(uint32_t ms);
   void SetOnsetDelay(uint32_t ms);
   void SetMode(uint32_t mode);

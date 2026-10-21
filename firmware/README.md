@@ -76,7 +76,7 @@ All pin assignments are defined in `libraries/REACHERDevices/src/Pins.h`:
 | 9 | `PIN_MICROSCOPE_TRIG` | OUTPUT | Microscope trigger pulse (50 ms HIGH) |
 | 10 | `PIN_LEVER_RH` | INPUT_PULLUP | Right-hand lever |
 | 13 | `PIN_LEVER_LH` | INPUT_PULLUP | Left-hand lever (note: shares the onboard LED line; INPUT_PULLUP validated but revisit if reads are unstable) |
-| 22 | `PIN_AUX` | OUTPUT | AUX TTL output (tail-shock box input), Mega only, fr only. Driven HIGH for the pulse width; forced LOW on end, pause, test-mode exit, disarm and IDN. Fit a pull-down on the box input: pins float during reset/flash |
+| 22 | `PIN_AUX` | OUTPUT | AUX TTL output (tail-shock box input), Mega only, fr only. Default pin, remappable at runtime with `AUX_SET_PIN` (1476). Driven HIGH for the pulse width; forced LOW on end, pause, test-mode exit, disarm and IDN. Fit a pull-down on the box input: pins float during reset/flash |
 
 ---
 
@@ -350,7 +350,7 @@ The `Scheduler` class implements a trigger-chain-action system for the four oper
 | 900–903 | Microscope | DISARM (900), ARM (901), TEST (903) |
 | 1000–1081 | Right lever | ARM (1001), DISARM (1000), TIMEOUT (1074), RATIO (1075), TIMEOUT_MODE (1077 — scheduler-wide), INACTIVE (1080), ACTIVE (1081) |
 | 1300–1381 | Left lever | ARM (1301), DISARM (1300), TIMEOUT (1374), RATIO (1375), TIMEOUT_MODE (1377 — same flag as 1077), INACTIVE (1380), ACTIVE (1381) |
-| 1400–1485 | AUX TTL output (Mega fr only; IDN `caps:"aux"`) | DISARM (1400), ARM (1401), TEST (1403), DUR (1472, 1–5000 ms), ONSET_DELAY (1477), MODE (1480: 0 independent, 1 block), PROBABILITY (1481, 0–100), BLOCK_K (1482), BLOCK_N (1483, 1–100), SEED (1484, 0 = auto), TEST_FIRE (1485) |
+| 1400–1485 | AUX TTL output (Mega fr only; IDN `caps:"aux"`) | DISARM (1400), ARM (1401), TEST (1403), DUR (1472, 1–5000 ms; unconfigured at power-on, ARM and TEST refused until set), PIN (1476, clamped 2–53), ONSET_DELAY (1477), MODE (1480: 0 independent, 1 block), PROBABILITY (1481, 0–100), BLOCK_K (1482), BLOCK_N (1483, 1–100), SEED (1484, 0 = auto), TEST_FIRE (1485) |
 
 ---
 
