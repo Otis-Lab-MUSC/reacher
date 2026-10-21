@@ -103,7 +103,7 @@ _ARM_COMMANDS = {
 MAX_PAVLOV_TRIALS = 128  # PavlovianScheduler.h
 MAX_CHAIN_STEPS = 6  # Action.h
 
-# AUX TTL output (Mega fr only): Pins.h PIN_AUX and Aux.h clamps.
+# AUX TTL output (Mega fr only): Pins.h PIN_AUX and AuxOutput.h clamps.
 PIN_AUX = 22
 AUX_MAX_DURATION = 5000
 AUX_MAX_ONSET_DELAY = 600000
@@ -426,7 +426,7 @@ class FirmwareSimulator:
             self.cue_frequency = self.pav_cs_plus_freq
             self.cue2_frequency = self.pav_cs_minus_freq
 
-        # AUX TTL output (Aux.cpp defaults: a fresh board can never shock).
+        # AUX TTL output (AuxOutput.cpp defaults: a fresh board can never shock).
         self.aux_armed = False
         self.aux_duration = 500
         self.aux_onset_delay = 0

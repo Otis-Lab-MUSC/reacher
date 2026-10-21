@@ -465,7 +465,7 @@ reacher/firmware/
 │           ├── Laser.h/.cpp
 │           ├── LickCircuit.h/.cpp
 │           ├── Microscope.h/.cpp
-│           ├── Aux.h/.cpp        # AUX TTL output (Mega only)
+│           ├── AuxOutput.h/.cpp  # AUX TTL output (Mega only)
 │           ├── AuxDraw.h         # AUX seeded draw, no Arduino dependency
 │           ├── Scheduler.h/.cpp  # Trigger/chain/action engine
 │           ├── Trigger.h

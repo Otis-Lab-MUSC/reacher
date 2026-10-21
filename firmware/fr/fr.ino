@@ -22,7 +22,7 @@
 #include <Laser.h>
 #include <Microscope.h>
 #include <Slm.h>
-#include <Aux.h>
+#include <AuxOutput.h>
 #include <Scheduler.h>
 #include <ReacherHelpers.h>
 #include "Config.h"

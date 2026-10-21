@@ -10,7 +10,7 @@
 #include "Pump.h"
 #include "Laser.h"
 #include "Microscope.h"
-#include "Aux.h"
+#include "AuxOutput.h"
 
 Scheduler::Scheduler() {
   leverRH = nullptr;

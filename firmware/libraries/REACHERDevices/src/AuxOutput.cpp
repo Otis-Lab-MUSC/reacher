@@ -1,9 +1,9 @@
 /**
- * @file Aux.cpp
+ * @file AuxOutput.cpp
  * @brief Aux implementation — seeded TTL pulse output with forced-off safety.
  */
 
-#include "Aux.h"
+#include "AuxOutput.h"
 
 #if defined(__AVR_ATmega2560__)
 

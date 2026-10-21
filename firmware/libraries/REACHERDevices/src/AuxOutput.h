@@ -1,5 +1,5 @@
 /**
- * @file Aux.h
+ * @file AuxOutput.h
  * @brief Mega-only TTL output (tail shock) fired as the last step of reward chain 0.
  * @ingroup output_devices
  */
