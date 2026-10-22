@@ -167,6 +167,7 @@ namespace Cmd {
   constexpr int AUX_ARM              = 1401;
   constexpr int AUX_TEST             = 1403;  // One pulse now, armed or not
   constexpr int AUX_SET_DURATION     = 1472;  // ms, clamp 1..5000
+  constexpr int AUX_SET_PIN          = 1476;  // Mega fr only; ForceOff then move the pin
   constexpr int AUX_SET_ONSET_DELAY  = 1477;  // ms from the rewarded press; >0 uses a pending slot
   constexpr int AUX_SET_MODE         = 1480;  // 0 = independent, 1 = block
   constexpr int AUX_SET_PROBABILITY  = 1481;  // 0..100, independent mode

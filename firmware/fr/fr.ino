@@ -84,6 +84,7 @@ void StartSession();
 void EndSession();
 void ReconfigureChain();
 void appendAuxStep();
+void auxUnconfiguredError(int command);
 void SendIdentification();
 
 ISR(PCINT0_vect) { if (Slm::instance) Slm::instance->HandlePCINT(); }
@@ -262,6 +263,21 @@ void EndSession() {
   Serial.print(F("{\"level\":\"007\",\"device\":\"CONTROLLER\",\"event\":\"END\",\"timestamp\":"));
   Serial.print(SESSION_END_TIMESTAMP - SESSION_START_TIMESTAMP);
   Serial.println('}');
+}
+
+void auxUnconfiguredError(int command) {
+  Serial.print(F("{\"level\":\"006\",\"device\":\"AUX\",\"error_code\":\"AUX_UNCONFIGURED\",\"command\":"));
+  Serial.print(command);
+  Serial.print(F(",\"desc\":\"AUX not configured: set duration (and block N in block mode) first\"}"));
+  Serial.println();
+}
+
+// Pin 13 drives the onboard LED (see Pins.h), so it is never a valid AUX output.
+bool auxPinConflicts(uint8_t p) {
+  if (p == 13) return true;
+  return p == rLever.Pin() || p == lLever.Pin() || p == cue.Pin() || p == cue2.Pin() ||
+         p == pump.Pin() || p == pump2.Pin() || p == lickCircuit.Pin() || p == laser.Pin() ||
+         p == microscope.TriggerPin() || p == microscope.TimestampPin() || p == slm.TimestampPin();
 }
 
 void ParseCommands() {
@@ -448,9 +464,15 @@ void ParseCommands() {
             logParamChange(F("SLM"), F("duration"), slm.LaserDuration()); break;
 
           // AUX TTL output (Mega only). Setters ack the effective (clamped) value.
-          case Cmd::AUX_ARM:    aux.ArmToggle(true); break;
-          case Cmd::AUX_DISARM: aux.ForceOff(); aux.ArmToggle(false); break;  // drop a pulse in flight
+          case Cmd::AUX_ARM:
+            if (!aux.Configured()) { auxUnconfiguredError(command); break; }
+            scheduler.ClearPendingFor(DeviceType::AUX);
+            aux.ArmToggle(true); break;
+          case Cmd::AUX_DISARM:  // drop a pulse in flight and any queued onset
+            scheduler.ClearPendingFor(DeviceType::AUX);
+            aux.ForceOff(); aux.ArmToggle(false); break;
           case Cmd::AUX_TEST:
+            if (!aux.Configured()) { auxUnconfiguredError(command); break; }
             aux.Test(millis());
             logParamChange(F("AUX_1"), F("test"), F("FIRED")); break;
           case Cmd::AUX_SET_DURATION:
@@ -459,6 +481,19 @@ void ParseCommands() {
           case Cmd::AUX_SET_ONSET_DELAY:
             aux.SetOnsetDelay((uint32_t)inputJson["delay"]); ReconfigureChain();
             logParamChange(F("AUX"), F("onset_delay"), aux.OnsetDelay()); break;
+          case Cmd::AUX_SET_PIN: {
+            uint32_t p = inputJson["pin"] | 22;
+            if (p < 2) p = 2;
+            if (p > 53) p = 53;
+            if (auxPinConflicts(p)) {
+              Serial.print(F("{\"level\":\"006\",\"device\":\"AUX\",\"error_code\":\"AUX_PIN_CONFLICT\",\"desc\":\"AUX pin in use by another device\",\"command\":1476,\"pin\":"));
+              Serial.print(p);
+              Serial.println('}');
+              break;
+            }
+            scheduler.ClearPendingFor(DeviceType::AUX);
+            aux.SetPin((int8_t)p); break;
+          }
           case Cmd::AUX_SET_MODE:
             aux.SetMode((uint32_t)inputJson["mode"]);
             logParamChange(F("AUX"), F("mode"), (uint32_t)aux.Mode()); break;

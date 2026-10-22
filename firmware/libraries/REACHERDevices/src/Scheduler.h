@@ -114,6 +114,10 @@ public:
 
   /// @brief Deactivate all pending actions in the queue.
   void ClearPending();
+#if defined(__AVR_ATmega2560__)
+  /// @brief Deactivate pending actions whose target is @p target (AUX onset slots).
+  void ClearPendingFor(DeviceType target);
+#endif
 
   /// @brief Initialize session state: reset triggers, pending queue, and lever timeouts.
   /// @param now Session start timestamp (millis)

@@ -178,6 +178,7 @@ class TestHardwareEndpoints:
         monkeypatch.setattr(hardware, "_RATE_LIMIT", 10_000)
         sid = client.post("/api/sessions", json={"port": "/dev/ttyUSB0"}, headers=AUTH_HEADER).json()["session_id"]
         instance = client.app.state.session_manager.get_session(sid).instance
+        instance.get_firmware_caps.return_value = {"aux"}  # reach the value gate, not the caps gate
 
         needs_value = [
             s for c, s in COMMAND_REGISTRY.items()

@@ -20,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   untested on a board**
 
 ### Added
+- Shock output pin is selectable at runtime: `AUX_SET_PIN (1476)`, payload `{"cmd":1476,"pin":N}`, on the Mega `fr` sketch (default pin 22). The host validates the pin for the Mega only and skips the command on firmware without the `aux` capability
+- Level-`006` `AUX_UNCONFIGURED` refusal: arming or test-firing the shock output is refused until its duration (and block N in block mode) is set
 - Configurable infusion-counting pumps: `POST /api/program/{id}/limit` takes
   `counted_pumps` (`["PUMP_1"]`, `["PUMP_2"]` or both; `null` = follow the reward pump, the
   default; omitted = keep the current setting; an empty list is a 400 for Infusion/Both).
@@ -47,7 +49,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   primary one on the next connect. New `GET`/`DELETE /api/serial/pump-target` endpoints
   ([#35](https://github.com/Otis-Lab-MUSC/labrynth/issues/35))
 
+### Changed
+- Shock output defaults are now duration `0` and block N `0` (unconfigured) in the firmware, UI store and simulator. Arming or test-firing is refused until duration (and N in block mode) is set. **Hex rebuilt for the Mega `fr` sketch** (`bash firmware/compile.sh`)
+
 ### Fixed
+- Block-mode shock draw with N = 0 no longer divides by zero; a 0 ms shock pulse never drives the pin
 - **An Infusion limit on a pump-2 reward chain never fired.** The kernel counted only
   `PUMP`/`PUMP_1` infusions, so after `SET_ACTIVE_PUMP (221)` selected pump 2 the run went
   to its time limit. Infusions now count against the reward pump active when they arrive
@@ -112,6 +118,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is the opt-in fix; nothing changes for anyone who does not set it
 - No hardware verification was possible — every behavioral claim above comes from
   reading the firmware and from the host-side simulator, not from a rig
+
+### Known issues
+- The shock output (AUX) works on the Arduino Mega with the `fr` sketch only
+- A Pavlovian session started with no cues armed ends on the firmware's first tick. Since 3.4.0-beta.10 Stop returns at once in that case; earlier backends waited about 10 s and logged "export may be incomplete"
 
 ---
 

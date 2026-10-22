@@ -103,10 +103,16 @@ async def connect_serial(session_id: str, request: Request):
     skipped_pins: list[dict] = []
     try:
         saved = pin_overrides.get(info.port, detected_board)
+        caps = instance.get_firmware_caps()
         for component, pin in saved.items():
             code = pin_overrides.SET_PIN_CODE_FOR.get(component)
             if code is None:
                 skipped_pins.append({"component": component, "reason": "unknown_component"})
+                continue
+            requires_cap = COMMAND_REGISTRY[code].requires_cap
+            if requires_cap is not None and requires_cap not in caps:
+                # No IDN reply means no caps at all, which is not the same as firmware lacking the cap.
+                skipped_pins.append({"component": component, "reason": "firmware_lacks_cap" if caps else "idn_timeout"})
                 continue
             violation = pin_overrides.validate_pin(code, pin, detected_board)
             if violation is not None:

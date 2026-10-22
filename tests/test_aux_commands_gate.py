@@ -16,7 +16,7 @@ from reacher.api.routers.hardware import get_commands
 from reacher.kernel.reacher import REACHER
 from reacher.kernel.simulator import FirmwareSimulator
 
-AUX_CODES = {1400, 1401, 1403, 1472, 1477, 1480, 1481, 1482, 1483, 1484, 1485}
+AUX_CODES = {1400, 1401, 1403, 1472, 1476, 1477, 1480, 1481, 1482, 1483, 1484, 1485}
 
 IDN_FR_OLD = {"level": "000", "device": "CONTROLLER", "sketch": "fr.ino", "version": "v3.4.0-beta.9",
               "baud_rate": 115200, "schedule": "FIXED_RATIO"}

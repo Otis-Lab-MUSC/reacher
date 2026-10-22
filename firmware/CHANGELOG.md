@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **External TTL session-start trigger.** Deleted `ExternalTrigger.{h,cpp}`, `PIN_EXT_TRIGGER` (`Pins.h`), the `EXT_TRIGGER_DISARM (1200)` / `EXT_TRIGGER_ARM (1201)` / `EXT_TRIGGER_SET_PIN (1276)` commands (`Commands.h`; codes left unassigned, nothing renumbered), and the arm/consume/disarm wiring in `fr`/`pr`/`vi`/`omission`/`pavlovian`. `StartSession()` no longer takes an `external` flag and the level-`007` CONTROLLER `START` event no longer carries a `"source"` field (now identical to the `_lite` twins). The microscope trigger *output* pulse is unchanged. Shipped hex must be rebuilt (`bash firmware/compile.sh`).
 
 ### Added
+- `AUX_SET_PIN (1476)` — moves the shock output (`PIN_AUX`, default 22) at runtime, `{"cmd":1476,"pin":N}`, Mega `fr` only. `Aux::SetPin()` drops the pin LOW before the move
+- `AUX_ARM (1401)` and `AUX_TEST (1403)` answer a level-`006` `AUX_UNCONFIGURED` error line while duration (or block N in block mode) is unset
 - `LEVER_RH_SET_TIMEOUT_MODE (1077)` / `LEVER_LH_SET_TIMEOUT_MODE (1377)` — select when the lever timeout window is armed. `0` = every ACTIVE press (the existing behavior, and the default), `1` = only a press that fires the reward chain. Accepted by `fr`, `fr_lite`, `pr`, `pr_lite`, `vi`, `vi_lite`; omission and pavlovian are excluded (omission forces a `0` interval, pavlovian is non-operant and has no lever timeout). Like `1074`/`1374`, the two codes are **not** independent: both write one scheduler-wide flag and the last write wins
 - `Scheduler::SetTimeoutMode()` / `TimeoutMode()` and the `TIMEOUT_MODE_EVERY_PRESS` / `TIMEOUT_MODE_REWARD_ONLY` constants (`Scheduler.h`). Runtime state only — no EEPROM; the host re-sends it on every connect, as it does for the timeout interval. Values above `1` are clamped
 - `"timeout_mode"` field on the level-`000` CONTROLLER config line emitted at session start by `fr`/`pr`/`vi` and their lite twins
@@ -20,7 +22,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - `Scheduler::OnInputEvent()` now offers the press to the triggers *before* arming the timeout window. In mode `0` this is behavior-preserving: on a rewarded press the chain's own `SET_TIMEOUT` step writes the same `now + TimeoutInterval()` to the same lever, and nothing inside `FireChain()` reads `timeoutEnd`
 
+### Changed
+- `Aux` defaults are duration `0` and block N `0` (unconfigured at power-on). Serial setters still clamp `0` up to `1`, so `0` is only the power-on state. Shipped hex must be rebuilt (`bash firmware/compile.sh`)
+
 ### Fixed
+- Block-mode shock draw with N = 0 no longer divides by zero; a 0 ms pulse never drives the pin
 - **VI fired no reward chain, ever.** `configureVariableInterval()` in `vi/Config.h` and `vi_lite/Config.h` assigned `t->windowStart = 0; t->windowEnd = 0; t->firedInWindow = false;` — runtime state belonging to `Scheduler::StartSession()` (which seeds the window) and `Trigger::Reset()` (which clears it at `EndSession`). `vi.ino`'s `StartSession()` calls `ReconfigureChain()` *immediately after* `scheduler.StartSession()`, so the helper overwrote the freshly seeded window with zeros. `Trigger::OnTick()` gates its re-arm on `windowEnd > 0`, and nothing else in the firmware writes `windowEnd`, so the zero was permanent: `OnInputEvent()`'s `(int32_t)(windowEnd - timestamp) > 0` evaluated `0 - timestamp` and was always false. The three assignments are removed; the trigger block now sets configuration only (`type`, `chainIndex`, `enabled`, `intervalMin`, `sourceFilter`, `probability`). Removing the writes — rather than reordering `vi.ino` — also fixes the mid-session path, where `SET_VI_INTERVAL (204)` calls `ReconfigureChain()` and would otherwise kill a live window. Regressed in `70fcf35` (2026-06-25, session-start filter-shadow reset), shipped v3.0.1 through v3.4.0-beta.3
 - Flash after the fix: `vi` (MEGA) 35920 B / 14%; `vi_lite` (UNO) 30468 B / 94%, down 38 B. `pr_lite` remains the tightest UNO build at 31050 B / 96%. No other hex artifact changed — the untouched sketches recompiled byte-identical
 
@@ -29,6 +35,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Regression guard: `tests/test_firmware_parity.py` C16 asserts no paradigm `Config.h` assigns `windowStart`/`windowEnd`/`firedInWindow`, plus a converse check that `Scheduler::StartSession()` still seeds them (so removing the writes cannot silently leave the window uninitialised instead). The existing VI coverage could not catch this: `FirmwareSimulator._run_vi` is a scripted generator that never instantiates the firmware `Trigger` state machine, so it modelled the intended schedule rather than the shipped one and stayed green throughout
 - The mode `0` consequence, unchanged but worth stating: a `TIMEOUT`-classified press is logged but never reaches `Trigger::OnInputEvent`, so it does not count toward the ratio. With ratio > 1 and a non-zero timeout the animal must therefore space **every** press by at least the timeout interval to earn anything, and in VI an ACTIVE press just before an availability window opens can cost the reward outright. FR ships `timeout = 0` (`fr/Config.h`) and is immune at defaults; PR and VI ship `20000`
 - Not verified on hardware — no rig was available. Behavioral claims here come from code reading plus the host-side simulator
+
+### Known issues
+- The shock output (AUX) works on the Arduino Mega with the `fr` sketch only
+- A Pavlovian session started with no cues armed ends on the firmware's first tick. Since 3.4.0-beta.10 Stop returns at once in that case; earlier backends waited about 10 s and logged "export may be incomplete"
 
 ---
 

@@ -77,6 +77,12 @@ async def send_command(session_id: str, body: CommandRequest, request: Request):
             detail=f"Command {spec.name} not available for {info.paradigm} paradigm",
         )
 
+    if spec.requires_cap is not None and spec.requires_cap not in _firmware_caps(info):
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "firmware_lacks_cap", "cap": spec.requires_cap},
+        )
+
     # Pin-reassignment commands have board- and role-aware validation, plus
     # a state gate (only allowed when the rig is connected but not running).
     if body.code in pin_overrides.PIN_CONSTRAINTS:
@@ -90,6 +96,14 @@ async def send_command(session_id: str, body: CommandRequest, request: Request):
         violation = pin_overrides.validate_pin(body.code, body.value, info.board)
         if violation is not None:
             raise HTTPException(status_code=422, detail=violation)
+        if body.code == int(CommandCode.AUX_SET_PIN):
+            # The shock output must never share a pin with another device.
+            owner = _pin_owner(info, body.value, exclude="aux")
+            if owner is not None:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"error": "pin_conflict", "pin": body.value, "component": owner},
+                )
     elif spec.payload_key is not None:
         # A payload command without its value would pass the range gate below
         # and reach the board as a bare {"cmd": N}, where the missing key reads
@@ -170,6 +184,20 @@ def _firmware_caps(info) -> set:
     return caps if isinstance(caps, set) else set()
 
 
+# Pins.h defaults per component key (Mega); the microscope timestamp pin is fixed in firmware.
+_DEFAULT_COMPONENT_PINS = {
+    "cue": 3, "cue2": 7, "pump": 4, "pump2": 8, "lick": 5, "laser": 6,
+    "microscope_trigger": 9, "microscope_ts": 2, "lever_rh": 10, "lever_lh": 13,
+    "slm": 11, "aux": 22,
+}
+
+
+def _pin_owner(info, pin: int, exclude: str) -> Optional[str]:
+    """Component other than *exclude* whose effective pin (override over default) is *pin*."""
+    pins = {**_DEFAULT_COMPONENT_PINS, **pin_overrides.get(info.port, getattr(info, "board", None))}
+    return next((c for c, p in pins.items() if c != exclude and p == pin), None)
+
+
 def release_session(session_id: str) -> None:
     """Fix: F-008 — Remove rate-limit state for a destroyed session to prevent memory leak."""
     _command_timestamps.pop(session_id, None)
@@ -228,7 +256,19 @@ async def set_pins(session_id: str, body: PinAssignmentsRequest, request: Reques
             detail={"error": "unknown_components", "components": sorted(unknown)},
         )
 
-    # 2. Reject pin collisions across components
+    # 2. Reject components the connected firmware cannot honour (e.g. AUX on a non-aux build)
+    caps = _firmware_caps(info)
+    unsupported = [
+        c for c in assignments
+        if (cap := COMMAND_REGISTRY[pin_overrides.SET_PIN_CODE_FOR[c]].requires_cap) is not None and cap not in caps
+    ]
+    if unsupported:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "unsupported_components", "components": sorted(unsupported)},
+        )
+
+    # 3. Reject pin collisions across components
     seen: dict[int, str] = {}
     collisions: list[dict] = []
     for component, pin in assignments.items():
@@ -242,7 +282,7 @@ async def set_pins(session_id: str, body: PinAssignmentsRequest, request: Reques
             detail={"error": "pin_collision", "collisions": collisions},
         )
 
-    # 3. Validate each pin per its component's role constraint and the board
+    # 4. Validate each pin per its component's role constraint and the board
     violations: list[dict] = []
     for component, pin in assignments.items():
         code = pin_overrides.SET_PIN_CODE_FOR[component]
@@ -252,7 +292,7 @@ async def set_pins(session_id: str, body: PinAssignmentsRequest, request: Reques
     if violations:
         raise HTTPException(status_code=422, detail={"error": "pin_violations", "violations": violations})
 
-    # 4. Dispatch in stable order so the firmware processes them deterministically
+    # 5. Dispatch in stable order so the firmware processes them deterministically
     applied: dict[str, int] = {}
     errors: list[dict] = []
     for component in pin_overrides.COMPONENT_KEYS:
@@ -267,7 +307,7 @@ async def set_pins(session_id: str, body: PinAssignmentsRequest, request: Reques
             logger.error("Pin command %s (%d) failed on session %s", component, code, session_id, exc_info=True)
             errors.append({"component": component, "error": str(exc)})
 
-    # 5. Persist the resulting map (only what successfully applied) per-port
+    # 6. Persist the resulting map (only what successfully applied) per-port
     if applied:
         try:
             existing = pin_overrides.get(info.port)

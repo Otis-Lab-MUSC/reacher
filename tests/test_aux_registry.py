@@ -2,10 +2,15 @@
 
 from pathlib import Path
 
+import logging
+import re
+from unittest.mock import Mock, patch
+
 import pytest
 
-from reacher import schema
+from reacher import pin_overrides, schema
 from reacher.kernel.commands import COMMAND_REGISTRY, CommandCode, build_command_payload, get_commands_for_paradigm
+from reacher.kernel.reacher import REACHER
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIRMWARE = REPO_ROOT / "firmware"
@@ -22,6 +27,7 @@ AUX_CONTRACT = {
     1482: ("AUX_SET_BLOCK_K", "k"),
     1483: ("AUX_SET_BLOCK_N", "n"),
     1484: ("AUX_SET_SEED", "seed"),
+    1476: ("AUX_SET_PIN", "pin"),
     1485: ("AUX_SET_TEST_FIRE", "enable"),
 }
 
@@ -57,9 +63,40 @@ def test_test_fire_payload_is_bool():
     assert build_command_payload(1485, 1) == {"cmd": 1485, "enable": True}
 
 
-def test_pin_aux_is_fixed_not_remappable():
-    assert "PIN_AUX" in schema.FIXED_PINS
-    assert "PIN_AUX" not in schema.PIN_SYMBOL_TO_COMPONENT
+def test_pin_aux_is_remappable_as_the_aux_component():
+    assert schema.PIN_SYMBOL_TO_COMPONENT["PIN_AUX"] == "aux"
+    assert "PIN_AUX" not in schema.FIXED_PINS
+
+
+@pytest.mark.parametrize(("board", "ok"), [("mega", True), ("uno", False), (None, False)])
+def test_aux_pin_is_mega_only(board, ok):
+    violation = pin_overrides.validate_pin(1476, 30, board)
+    assert (violation is None) is ok
+    if not ok:
+        assert violation["error"] == "pin_role_violation"
+        assert violation["component"] == "aux"
+        assert "Mega-only" in violation["reason"]
+
+
+@pytest.fixture
+def reacher():
+    with (
+        patch("serial.Serial"),
+        patch("threading.Thread"),
+        patch("os.makedirs"),
+        patch("logging.basicConfig"),
+        patch.object(logging.FileHandler, "_open", return_value=Mock()),
+    ):
+        yield REACHER()
+
+
+def test_aux_unconfigured_error_disarms_the_optimistic_arm(reacher):
+    reacher.hardware_settings.append({"device": "AUX", "armed": True})
+    reacher.handle_firmware_error({
+        "level": "006", "device": "AUX", "error_code": "AUX_UNCONFIGURED",
+        "desc": "AUX not configured: set duration (and block N in block mode) first",
+    })
+    assert next(e for e in reacher.hardware_settings if e["device"] == "AUX")["armed"] is False
 
 
 def test_mega_only_prefix_is_not_two_photon():
@@ -96,4 +133,6 @@ def test_fr_sketch_contract_strings():
     assert '\\"caps\\":\\"aux\\"' in ino
     assert "numSteps < MAX_CHAIN_STEPS" in ino
     # Disarm must drop a pulse in flight, not only clear the armed flag.
-    assert "case Cmd::AUX_DISARM: aux.ForceOff();" in ino
+    disarm = re.search(r"case Cmd::AUX_DISARM:(.*?)break;", ino, re.S)
+    assert disarm and "aux.ForceOff();" in disarm.group(1)
+    assert "ClearPendingFor(DeviceType::AUX)" in disarm.group(1)

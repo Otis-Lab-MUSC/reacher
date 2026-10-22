@@ -60,6 +60,8 @@ _PUMP_DEVICE_KEYS = {"PUMP": "PUMP_1", "PUMP_1": "PUMP_1", "PUMP_2": "PUMP_2"}
 # The lick circuit is the trap: firmware calls it LICK at 000 and LICK_CIRCUIT at
 # 007. LICK is canonical here, matching the normalization the 007 handler already
 # performs below. tests/test_device_names.py::test_l8_* enforces this.
+_AUX_DEFAULT_PIN = 22  # Pins.h PIN_AUX
+
 _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     # --- Arm/Disarm ---
     300: ("CUE", "armed", False),
@@ -161,6 +163,7 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     1482: ("AUX", "block_k", _USE_VALUE),
     1483: ("AUX", "block_n", _USE_VALUE),
     1484: ("AUX", "seed", _USE_VALUE),
+    1476: ("AUX", "pin", _USE_VALUE),
     1485: ("AUX", "test_fire", _USE_VALUE),
 }
 
@@ -277,6 +280,7 @@ class REACHER:
         # active at arrival; these also record the other pump for the session totals.
         self._infusions_by_pump: Dict[str, int] = {"PUMP_1": 0, "PUMP_2": 0}
         self._reward_pump: str = "PUMP_1"  # Firmware power-on target; SET_ACTIVE_PUMP (221) moves it
+        self._aux_pin_before_set: Optional[int] = None  # restored if firmware refuses AUX_SET_PIN
         # None follows the reward pump; an explicit list pins which pumps' infusions count.
         self._counted_pumps: Optional[List[str]] = None
         # Counted off the serial stream for the same reason as infusions: an
@@ -365,7 +369,7 @@ class REACHER:
         self.behavior_filename: Optional[str] = None
         self.code_dict: Dict = {
             "000": self.update_firmware_information,
-            "001": self.logger.info,
+            "001": self.handle_log_event,
             "006": self.handle_firmware_error,
             "007": self.update_behavioral_events,
             "008": self.update_frame_events,
@@ -907,6 +911,17 @@ class REACHER:
             self.logger.error(f"Error processing data: {e}. Raw line: {line}")
             self._emit("kernel_error", {"reason": str(e), "raw": line})
 
+    def handle_log_event(self, event: dict) -> None:
+        """Handle firmware log/state events (level 001).
+
+        The board is the source of truth for AUX armed state: Device::ArmToggle
+        prints ARMED/DISARMED on every transition, including the ones the host
+        never asked for (SetPin, IDENTIFY, ForceOff).
+        """
+        self.logger.info(event)
+        if event.get("device") == "AUX" and event.get("desc") in ("ARMED", "DISARMED"):
+            self._update_hardware_setting("AUX", {"armed": event["desc"] == "ARMED"})
+
     def handle_firmware_error(self, event: dict) -> None:
         """Handle firmware error events (level 006).
 
@@ -925,6 +940,17 @@ class REACHER:
             except (ValueError, TypeError):
                 desc = f"{desc} (unregistered code {command})"
         self.logger.error(f"Firmware error [{error_code}]: {desc}")
+        if error_code == "AUX_UNCONFIGURED" and event.get("command") in (None, int(CommandCode.AUX_ARM), str(int(CommandCode.AUX_ARM))):
+            # The optimistic armed=True from sending 1401 never took effect on the board.
+            # A refused test-fire (1403) says nothing about the armed state; a line with no
+            # command echo (older firmware) can only have come from the arm path.
+            self._update_hardware_setting("AUX", {"armed": False})
+        elif error_code == "AUX_PIN_CONFLICT":
+            # The optimistic pin from sending 1476 never took effect on the board.
+            with self.thread_lock:
+                previous = self._aux_pin_before_set
+            if previous is not None:
+                self._update_hardware_setting("AUX", {"pin": previous})
         self._emit("error", event)
 
     # Fix: XL-001 — Minimum firmware version check
@@ -975,6 +1001,9 @@ class REACHER:
                 if param_row is not None:
                     self._merge_hardware_row(param_row)
             self.logger.info("--> Updated arduino configuration")
+            if "sketch" in event and self._has_aux(event):
+                # IDENTIFY disarms every device on the board.
+                self._update_hardware_setting("AUX", {"armed": False})
             # Fix: LAZ-001 — Signal firmware readiness (IDENTIFY ack received)
             # Unblock any waiting connect/post-upload flow so state transitions to "connected"
             self._firmware_ready.set()
@@ -1370,10 +1399,24 @@ class REACHER:
         if code == int(CommandCode.SET_ACTIVE_PUMP):
             with self.thread_lock:
                 self._reward_pump = "PUMP_2" if value else "PUMP_1"
+        if code == int(CommandCode.AUX_SET_PIN):
+            with self.thread_lock:
+                row = next((e for e in self.hardware_settings if e.get("device") == "AUX"), {})
+                self._aux_pin_before_set = row.get("pin", _AUX_DEFAULT_PIN)
         if code in _COMMAND_STATE_MAP:
             device, field, mapped = _COMMAND_STATE_MAP[code]
             effective = value if mapped is _USE_VALUE else mapped
             self._update_hardware_setting(device, {field: effective})
+        if code == int(CommandCode.AUX_SET_PIN):
+            # Device::SetPin disarms before moving the pin.
+            self._update_hardware_setting("AUX", {"armed": False})
+
+    def _has_aux(self, idn: dict) -> bool:
+        caps = idn.get("caps")
+        if isinstance(caps, str) and "aux" in {c.strip() for c in caps.split(",")}:
+            return True
+        with self.thread_lock:
+            return any(e.get("device") == "AUX" for e in self.hardware_settings)
 
     def _emit(self, event_type: str, data: dict) -> None:
         """Broadcast an event via the registered callback (if any).

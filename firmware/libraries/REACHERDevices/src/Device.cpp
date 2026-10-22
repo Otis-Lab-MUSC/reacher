@@ -39,6 +39,9 @@ void Device::SetPin(int8_t newPin) {
     digitalWrite(pin, LOW);
   }
   pin = newPin;
+  if (mode == OUTPUT) {
+    digitalWrite(pin, LOW);
+  }
   pinMode(pin, mode);
   if (mode == OUTPUT) {
     digitalWrite(pin, LOW);

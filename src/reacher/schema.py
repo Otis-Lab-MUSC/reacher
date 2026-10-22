@@ -78,13 +78,13 @@ PIN_SYMBOL_TO_COMPONENT: dict[str, str] = {
     "PIN_LASER": "laser",
     "PIN_MICROSCOPE_TRIG": "microscope_trigger",
     "PIN_SLM_TS": "slm",
+    "PIN_AUX": "aux",
 }
 
 # Pins fixed in firmware, with the reason. Consumers surface these so a user is
 # told *why* a pin is not offered rather than finding it silently missing.
 FIXED_PINS: dict[str, str] = {
     "PIN_MICROSCOPE_TS": "microscope frame timestamp is wired to INT0; the ISR is not remappable",
-    "PIN_AUX": "AUX is Mega-only; runtime remap deferred",
 }
 
 #: How ``REACHER.update_behavioral_events`` rewrites firmware level-007 device

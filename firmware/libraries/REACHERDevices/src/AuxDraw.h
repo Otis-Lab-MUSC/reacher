@@ -63,6 +63,10 @@ struct AuxDraw {
   /// @brief Block mode: exactly blockK shocks in each block of blockN draws.
   /// Draws even when no shocks remain, so the stream length is one per reward.
   AUX_CONSTEXPR14 bool DrawBlock() {
+    if (blockN == 0) {
+      Next();
+      return false;
+    }
     if (remainingN == 0) {
       remainingK = blockK;
       remainingN = blockN;
