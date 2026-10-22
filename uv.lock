@@ -1090,7 +1090,7 @@ wheels = [
 
 [[package]]
 name = "reacher2p"
-version = "3.4.0b11"
+version = "3.4.0b12"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
