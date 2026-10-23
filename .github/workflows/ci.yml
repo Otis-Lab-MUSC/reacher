@@ -73,6 +73,14 @@ jobs:
       - name: Install (dev extra)
         run: uv sync --frozen --extra dev
 
+      # The host-compiled firmware tests (end-session outputs, golden traces)
+      # build the real sketches with the runner's c++ and need the ArduinoJson
+      # source, which is not vendored. Without it they skip, verifying nothing.
+      - name: Fetch ArduinoJson for host-compiled firmware tests
+        run: |
+          git clone --quiet --depth 1 --branch v7.4.3 https://github.com/bblanchon/ArduinoJson.git "$RUNNER_TEMP/ArduinoJson"
+          echo "ARDUINOJSON_SRC=$RUNNER_TEMP/ArduinoJson/src" >> "$GITHUB_ENV"
+
       - name: Tests
         run: uv run --frozen pytest -rs
 
