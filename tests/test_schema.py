@@ -35,7 +35,8 @@ needs_firmware = pytest.mark.skipif(
 def test_dump_has_stable_envelope():
     doc = schema.dump(REPO_ROOT)
     assert doc["schema_version"] == schema.SCHEMA_VERSION
-    assert set(doc) == {"schema_version", "generated_from", "python", "firmware", "errors", "warnings"}
+    assert set(doc) == {"schema_version", "generated_from", "python", "firmware", "firmware_surface",
+                        "errors", "warnings"}
     assert doc["errors"] == []
     assert doc["generated_from"]["root"] == str(REPO_ROOT)
 
@@ -209,6 +210,55 @@ def test_firmware_absent_reports_present_false_and_warns(tmp_path):
     assert any("UNAVAILABLE" in w for w in doc["warnings"]), (
         "consumers must be told that firmware checks cannot pass, not merely that firmware is missing"
     )
+
+
+def test_firmware_absent_falls_back_to_the_packaged_surface(tmp_path):
+    """labrynth generates tables from an installed reacher2p, which has no firmware/."""
+    (tmp_path / "src" / "reacher" / "kernel").mkdir(parents=True)
+    (tmp_path / "src" / "reacher" / "kernel" / "commands.py").write_text("")
+
+    doc = schema.dump(tmp_path)
+    surface = doc["firmware_surface"]
+    assert doc["firmware"]["present"] is False, "the packaged copy must never pose as a parsed tree"
+    assert surface["source"] == "package"
+    assert surface["pin_symbol_to_component"]["PIN_AUX"] == "aux"
+    assert "AUX_1" in surface["device_names"]["post_kernel"]
+
+
+def test_missing_packaged_surface_says_so(tmp_path, monkeypatch):
+    monkeypatch.setattr(schema, "FIRMWARE_SURFACE_PATH", tmp_path / "absent.json")
+    surface = schema.firmware_surface({"present": False})
+    assert surface["source"] is None and "no packaged firmware surface" in surface["reason"]
+
+
+@needs_firmware
+def test_packaged_firmware_surface_matches_the_source():
+    """Like the committed hex: a firmware edit must rebuild the packaged copy."""
+    live = schema.dump(REPO_ROOT)["firmware"]
+    packaged = json.loads(schema.FIRMWARE_SURFACE_PATH.read_text())
+    assert schema.surface_drift(live, packaged) == [], (
+        "src/reacher/firmware_surface.json is stale: run `python -m reacher.schema surface --write`"
+    )
+
+
+def test_surface_drift_reports_a_changed_pin():
+    """Golden-negative for the check above."""
+    packaged = json.loads(schema.FIRMWARE_SURFACE_PATH.read_text())
+    drifted = json.loads(json.dumps(packaged))
+    drifted["pins_h"]["PIN_AUX"] += 1
+    drifted["device_names"]["post_kernel"].append("BUZZER")
+    assert schema.surface_drift(drifted, packaged) == ["pins_h", "device_names"]
+
+
+def test_checkout_surface_is_read_from_the_source():
+    surface = schema.dump(REPO_ROOT)["firmware_surface"]
+    assert surface["source"] == ("checkout" if FIRMWARE.is_dir() else "package")
+
+
+def test_pin_constraints_export_mega_only():
+    by_key = {c["component_key"]: c for c in schema.dump(REPO_ROOT)["python"]["pin_constraints"]}
+    assert by_key["aux"]["mega_only"] is True
+    assert not any(c["mega_only"] for k, c in by_key.items() if k != "aux")
 
 
 def test_find_repo_root_ignores_a_bare_firmware_checkout(tmp_path):

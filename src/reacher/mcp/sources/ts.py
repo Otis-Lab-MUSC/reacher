@@ -156,9 +156,22 @@ def parse_board_type_union(source: str) -> list[str]:
     return members
 
 
+#: Where labrynth generates the pin tables from the schema dump, relative to
+#: ``web/src``. pinMeta.ts re-exports them, so the declarations live there.
+GENERATED_PIN_TABLES = Path("generated") / "pinTables.ts"
+
+
 def parse_pin_meta(path: Path) -> dict:
-    """Parse every mirrored table out of ``pinMeta.ts`` in one pass."""
+    """Parse every mirrored table out of ``pinMeta.ts`` in one pass.
+
+    The tables may be declared in pinMeta.ts itself or in the generated file it
+    re-exports from; both are read, so either layout parses and a checkout from
+    before the tables were generated still does.
+    """
     source = path.read_text()
+    generated = path.parents[2] / GENERATED_PIN_TABLES
+    if generated.is_file():
+        source = generated.read_text() + "\n" + source
     return {
         "component_union": parse_component_union(source),
         "component_keys": parse_component_keys(source),
