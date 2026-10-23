@@ -147,8 +147,8 @@ event that appears at no 007 print site.
 ### MCP Server (`src/reacher/mcp/`)
 Cross-repo change tooling for a user's own coding agent — `pip install
 "reacher2p[mcp]"`, then the `reacher-mcp` console script over stdio. Six
-read-only tools plus `run_checks`; **no file-writing tools** (the agent writes,
-under its own permission model). Never imported by `api/app.py`, so it stays out
+read-only tools plus `run_checks`, and three change-planning tools; **no
+file-writing tools** (the agent writes, under its own permission model). Never imported by `api/app.py`, so it stays out
 of the frozen bundle. See `docs/mcp-server.md`.
 
 Three invariants, each guarding a way to report success while verifying nothing:
@@ -163,6 +163,17 @@ Three invariants, each guarding a way to report success while verifying nothing:
   a `before_removing` warning. Four times during development a contract was
   modelled from a partial view of its producer and *the correct code looked
   wrong* — provenance is the guardrail against acting on that.
+
+The change flow is `describe_workspace → change_request_form → plan_change →
+edit → change_request_record → commit → check_consistency → run_checks`.
+`plan_change` turns a filled request into ordered steps (file, exact anchor,
+instruction, guard); the guides are data in `mcp/guides.py`, built from the
+commits of five past features, and `tests/test_mcp_changes.py` resolves every
+anchor against the live checkouts for every device. `change_request_record`
+renders the confirmed request as `changes/YYYY-MM-DD-<slug>.md` for the PR that
+makes the change (see `changes/README.md`). Both check tools report
+`trustworthy: false` and withhold `ok` when a checkout is behind its upstream or
+dirty.
 
 `run_checks` uses a literal argv allowlist (`shell=False`, pinned cwd,
 `clean_child_env()`). `firmware/compile.sh` is deliberately excluded: it
