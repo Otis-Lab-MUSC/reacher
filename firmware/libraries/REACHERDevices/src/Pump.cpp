@@ -28,7 +28,16 @@ void Pump::Await(uint32_t currentTimestamp) {
       Off();
       if (isTesting) isTesting = false;
     }
+  } else {
+    Off();  // a disarmed pump never holds the relay closed
   }
+}
+
+void Pump::ForceOff() {
+  Off();
+  startTimestamp = 0;
+  endTimestamp = 0;
+  isTesting = false;
 }
 
 void Pump::Test(uint32_t currentTimestamp) {

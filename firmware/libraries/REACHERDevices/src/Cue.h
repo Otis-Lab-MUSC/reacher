@@ -34,6 +34,9 @@ public:
   /// @brief Fire a test tone for configured duration (bypasses armed check).
   void Test(uint32_t currentTimestamp);
 
+  /// @brief Silence the tone and cancel its window, including a test tone.
+  void ForceOff();
+
   void SetFrequency(uint32_t frequency);
   void SetDuration(uint32_t duration);
   uint32_t Frequency() const;

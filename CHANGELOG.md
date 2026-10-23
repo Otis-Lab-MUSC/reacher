@@ -54,6 +54,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 - Block-mode shock draw with N = 0 no longer divides by zero; a 0 ms shock pulse never drives the pin
+- **Cue tone and pump relay stuck on after a session ended mid-reward.** Firmware fix in
+  `Scheduler::EndSession()`, `Cue` and `Pump`; see `firmware/CHANGELOG.md`. All nine hex files
+  rebuilt (`pavlovian` only picks up the shared library change). New
+  `tests/test_end_session_outputs.py` compiles each operant sketch for the host against a stub
+  Arduino core (`tests/native/`) and fails if an output is still driven after `END`. It needs a
+  host `c++` (or `REACHER_HOST_CXX`) and the ArduinoJson source (`ARDUINOJSON_SRC`), and skips
+  without them. **Verified on the host build only, not on a board**
 - **An Infusion limit on a pump-2 reward chain never fired.** The kernel counted only
   `PUMP`/`PUMP_1` infusions, so after `SET_ACTIVE_PUMP (221)` selected pump 2 the run went
   to its time limit. Infusions now count against the reward pump active when they arrive
