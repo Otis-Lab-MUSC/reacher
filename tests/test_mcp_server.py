@@ -22,6 +22,7 @@ from reacher.mcp.server import mcp  # noqa: E402
 EXPECTED_TOOLS = {
     "describe_workspace", "list_commands", "get_hardware_map",
     "explain_event_flow", "check_consistency", "run_checks",
+    "change_request_form", "plan_change",
 }
 
 
@@ -67,7 +68,7 @@ def test_server_instructions_warn_about_unverified_checks():
 # --- Tools never raise ----------------------------------------------------
 
 
-@pytest.mark.parametrize("name", sorted(EXPECTED_TOOLS - {"run_checks"}))
+@pytest.mark.parametrize("name", sorted(EXPECTED_TOOLS - {"run_checks", "change_request_form", "plan_change"}))
 def test_tools_return_structured_errors_for_a_bad_workspace(tmp_path, name):
     """A nonexistent workspace must degrade, not raise out of the server."""
     out = call(name, {"workspace": str(tmp_path / "nope")})
@@ -207,3 +208,38 @@ def test_free_code_suggestions_stay_inside_their_device_range():
         for code in codes:
             assert lo <= code <= hi, f"{code} suggested for {label} ({lo}-{hi})"
             assert code not in used, f"{code} is already taken but suggested as free"
+
+
+# --- Change planning --------------------------------------------------------
+
+
+def test_server_instructions_name_the_tools_that_exist():
+    """The instructions once sent agents to a plan_change that did not exist."""
+    import re
+
+    from reacher.mcp.server import INSTRUCTIONS
+    named = set(re.findall(r"`([a-z_]+)`", INSTRUCTIONS))
+    tools = {t.name for t in asyncio.run(mcp.list_tools())}
+    assert {n for n in named if n in EXPECTED_TOOLS or n.endswith("_change")} <= tools
+
+
+def test_change_request_form_tool_returns_the_form():
+    out = call("change_request_form")
+    assert out["ok"] and out["fields"] and out["decision_list"]
+
+
+def test_plan_change_tool_answers_a_runtime_setting():
+    out = call("plan_change", {"request": "use pin 24 for the shock box", "kind": "runtime_setting"})
+    assert out["outcome"] == "no_code_change"
+
+
+def test_plan_change_tool_degrades_for_a_bad_workspace(tmp_path):
+    out = call("plan_change", {"request": "x", "kind": "ui_only", "done_when": "y",
+                               "workspace": str(tmp_path / "nope")})
+    assert out["ok"] is True
+    assert all(s["anchor_status"].startswith("unchecked") for s in out["steps"])
+    assert out["workspace_warnings"]
+
+
+def test_web_tests_and_cli_parity_are_allowlisted():
+    assert {"web_tests", "cli_parity"} <= set(runner.COMMANDS)

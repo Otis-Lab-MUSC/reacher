@@ -86,6 +86,15 @@ COMMANDS: dict[str, Command] = {
         "lint", ("npm", "run", "lint"), repo="labrynth", subdir="web",
         description="Frontend lint. Reports warnings separately from errors.",
     ),
+    "web_tests": Command(
+        "web_tests", ("node", "--test"), repo="labrynth", subdir="web",
+        description="Frontend unit tests (node:test, web/tests/*.test.mjs). Needs Node >= 22.18.",
+    ),
+    "cli_parity": Command(
+        "cli_parity", ("python", "-I", "scripts/check-cli-parity.py"), repo="labrynth",
+        description="Terminal CLI presets and command tables match the web's, by value. "
+                    "Needs `npm ci` in web/ (it reuses web's esbuild).",
+    ),
     "check_tables": Command(
         "check_tables", ("npx", "tsx", "scripts/check-tables.ts", "--json"),
         repo="labrynth",
@@ -108,6 +117,19 @@ _PYTEST_TALLY_RE = re.compile(r"(\d+) passed(?:, (\d+) skipped)?")
 _ESLINT_TALLY_RE = re.compile(r"(\d+) problems? \((\d+) errors?, (\d+) warnings?\)")
 
 
+def _node_strips_types(node: Optional[str]) -> bool:
+    """Whether this node can import .ts files unflagged (22.18 and later)."""
+    if not node:
+        return False
+    try:
+        out = subprocess.run([node, "--version"], capture_output=True, text=True,
+                             timeout=10, check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    match = re.match(r"v(\d+)\.(\d+)", out.strip())
+    return bool(match) and (int(match.group(1)), int(match.group(2))) >= (22, 18)
+
+
 def _has_eslint_config(web: Path) -> bool:
     return any(
         (web / name).is_file()
@@ -128,6 +150,13 @@ def available(workspace: Workspace) -> dict[str, dict[str, Any]]:
             tool = cmd.argv[0]
             if tool != "python" and workspace.tools.get(tool) is None:
                 reason = f"{tool} not on PATH"
+            elif cmd.key == "web_tests" and not _node_strips_types(workspace.tools.get("node")):
+                reason = (
+                    "node is older than 22.18 and cannot import the .ts sources the tests "
+                    "load; every test would fail to load, which says nothing about the code"
+                )
+            elif cmd.key == "cli_parity" and not (repo.path / "web" / "node_modules" / ".bin" / "esbuild").exists():
+                reason = "web/node_modules is missing; run `npm ci` in labrynth/web first"
             elif cmd.key == "check_tables" and not (repo.path / "scripts" / "check-tables.ts").is_file():
                 reason = "scripts/check-tables.ts does not exist yet"
             elif cmd.key == "lint" and not _has_eslint_config(repo.path / "web"):

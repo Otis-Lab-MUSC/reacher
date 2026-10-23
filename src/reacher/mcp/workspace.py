@@ -11,9 +11,12 @@ Two live traps this module exists to avoid:
 * An archived ``reacher-firmware`` sibling sitting next to the real checkout. It
   contains ``Commands.h`` and looks convincing. Discovery keys on files only the
   real repos have.
-* labrynth's ``npm run lint``, which exits 0 through a pipe despite ESLint
-  finding no flat config. Any consumer must be told that up front, or an agent
-  will report "lint passed" off a no-op.
+* labrynth's ``npm run lint``, which exits 0 through a pipe if ESLint finds no
+  flat config. labrynth has one now, but the runner still checks before it
+  trusts a zero exit.
+* A checkout that is behind its upstream. The parity checks then compare
+  against old code and report failures that are not real, so discovery warns
+  with the commit count.
 """
 
 from __future__ import annotations
@@ -52,6 +55,9 @@ class RepoInfo:
     git_branch: Optional[str] = None
     git_sha: Optional[str] = None
     dirty: Optional[bool] = None
+    #: Commits the checkout is behind its upstream, as of the last fetch.
+    behind: Optional[int] = None
+    upstream: Optional[str] = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -61,6 +67,8 @@ class RepoInfo:
             "git_branch": self.git_branch,
             "git_sha": self.git_sha,
             "dirty": self.dirty,
+            "upstream": self.upstream,
+            "behind": self.behind,
         }
 
 
@@ -105,7 +113,31 @@ def _repo_info(name: str, path: Optional[Path]) -> RepoInfo:
         git_branch=_git(path, "rev-parse", "--abbrev-ref", "HEAD"),
         git_sha=_git(path, "rev-parse", "HEAD"),
         dirty=bool(_git(path, "status", "--porcelain")),
+        **_upstream_lag(path),
     )
+
+
+def _upstream_lag(path: Path) -> dict[str, Any]:
+    """How far HEAD is behind the branch it tracks, or the remote's main.
+
+    Read from local refs only, so it is as fresh as the last ``git fetch``. A
+    checkout behind its upstream makes the cross-repo checks compare against
+    old code and report failures that are not real; that cost a full debugging
+    pass more than once before this existed.
+    """
+    upstream = _git(path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    if not upstream:
+        for candidate in ("origin/main", "origin/master"):
+            if _git(path, "rev-parse", "--verify", "--quiet", candidate):
+                upstream = candidate
+                break
+    if not upstream:
+        return {}
+    count = _git(path, "rev-list", "--count", f"HEAD..{upstream}")
+    try:
+        return {"upstream": upstream, "behind": int(count)} if count is not None else {}
+    except ValueError:
+        return {}
 
 
 def _looks_like(path: Path, marker: Path) -> bool:
@@ -202,6 +234,12 @@ def discover(explicit: Optional[Path] = None) -> Workspace:
             "checks are UNAVAILABLE, not passing."
         )
     for repo in (reacher, labrynth):
+        if repo.present and repo.behind:
+            warnings.append(
+                f"{repo.name} is {repo.behind} commit(s) behind {repo.upstream} (as of the last "
+                "fetch) — cross-repo checks compare against old code and can report failures "
+                f"that are not real. Run `git -C {repo.path} fetch` and update before trusting them."
+            )
         if repo.present and repo.dirty:
             warnings.append(f"{repo.name} has uncommitted changes — checks read the working tree, not HEAD")
 
@@ -271,8 +309,19 @@ def tooling_reality(workspace: Workspace) -> dict[str, Any]:
                           "exits 0 through a pipe — an agent can report 'lint passed' off a no-op",
             },
             "tests": {
-                "status": "none",
-                "reason": "no pytest, no vitest, no test files; adding a framework requires coordination",
+                "cmd": "node --test",
+                "cwd": "web",
+                "status": "working" if labrynth_present else "unavailable",
+                "is_gate": True,
+                "scope": "pure-logic modules only (web/tests/*.test.mjs, node:test, no framework); "
+                         "components and hooks are untested",
+                "requires": "Node >= 22.18 (imports .ts sources directly)",
+            },
+            "cli_parity": {
+                "cmd": "python3 scripts/check-cli-parity.py",
+                "status": "working" if labrynth_present else "unavailable",
+                "is_gate": True,
+                "requires": "npm ci in web/ (reuses web's esbuild)",
             },
         },
     }
