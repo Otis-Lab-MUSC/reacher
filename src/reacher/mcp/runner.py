@@ -70,7 +70,8 @@ COMMANDS: dict[str, Command] = {
         "pytest_parity",
         ("python", "-m", "pytest", "-q",
          "tests/test_command_parity.py", "tests/test_firmware_parity.py",
-         "tests/test_frontend_parity.py", "tests/test_device_names.py"),
+         "tests/test_frontend_parity.py", "tests/test_device_names.py",
+         "tests/test_windows_safe_paths.py"),
         repo="reacher",
         description="Only the cross-layer parity checks.",
     ),
@@ -94,6 +95,11 @@ COMMANDS: dict[str, Command] = {
         "cli_parity", ("python", "-I", "scripts/check-cli-parity.py"), repo="labrynth",
         description="Terminal CLI presets and command tables match the web's, by value. "
                     "Needs `npm ci` in web/ (it reuses web's esbuild).",
+    ),
+    "windows_paths": Command(
+        "windows_paths", ("python", "-I", "scripts/check-windows-paths.py"), repo="labrynth",
+        description="No tracked file name is reserved on Windows (aux, con, nul, ...). "
+                    "A new device's files are the usual way one slips in.",
     ),
     "check_tables": Command(
         "check_tables", ("npx", "tsx", "scripts/check-tables.ts", "--json"),
@@ -157,6 +163,8 @@ def available(workspace: Workspace) -> dict[str, dict[str, Any]]:
                 )
             elif cmd.key == "cli_parity" and not (repo.path / "web" / "node_modules" / ".bin" / "esbuild").exists():
                 reason = "web/node_modules is missing; run `npm ci` in labrynth/web first"
+            elif cmd.key == "windows_paths" and not (repo.path / "scripts" / "check-windows-paths.py").is_file():
+                reason = "scripts/check-windows-paths.py does not exist in this labrynth checkout"
             elif cmd.key == "check_tables" and not (repo.path / "scripts" / "check-tables.ts").is_file():
                 reason = "scripts/check-tables.ts does not exist yet"
             elif cmd.key == "lint" and not _has_eslint_config(repo.path / "web"):

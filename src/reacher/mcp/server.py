@@ -33,8 +33,14 @@ INSTRUCTIONS = """\
 Tools for changing the REACHER experiment-control platform across its three
 layers: Arduino firmware, the Python kernel, and the React frontend (labrynth).
 
-Start with `describe_workspace`. Then `change_request_form` to sort the
-request and collect what is missing, and `plan_change` with the filled form.
+The flow, in order:
+
+1. `describe_workspace`: both checkouts present, up to date, clean.
+2. `change_request_form`: sort the request into a kind and collect what is missing.
+3. `plan_change` with the filled form: an ordered edit list.
+4. Make the edits with your own tools, at each step's anchor.
+5. `change_request_record`: write the record file it returns.
+6. Commit, then `check_consistency` and `run_checks`.
 
 Three things about this codebase will otherwise cost you:
 
@@ -45,7 +51,9 @@ Three things about this codebase will otherwise cost you:
    means the thing the user wants is already a runtime setting.
 3. A check that reports `UNAVAILABLE` did not run. It is not a pass. Never
    report work as verified on the strength of an unavailable check, and never
-   trust a zero exit code over the `verdict` field.
+   trust a zero exit code over the `verdict` field. A result with
+   `trustworthy: false` was read from a checkout that is behind its upstream
+   or has uncommitted changes; fix that and run it again.
 
 Resolve every `required: true` entry in `open_questions` WITH THE USER before
 making the first edit.
@@ -371,6 +379,7 @@ def plan_change(
     request: str,
     kind: Optional[str] = None,
     paradigms: Optional[list[str]] = None,
+    lite_twins: Optional[str] = None,
     boards: Optional[list[str]] = None,
     device: Optional[str] = None,
     setting: Optional[str] = None,
@@ -378,6 +387,7 @@ def plan_change(
     reaches_board: Optional[bool] = None,
     behavior: Optional[str] = None,
     done_when: Optional[str] = None,
+    commands: Optional[list[str]] = None,
     workspace: Optional[str] = None,
 ) -> dict[str, Any]:
     """Turn a change request into an ordered edit list for this checkout.
@@ -388,23 +398,17 @@ def plan_change(
     call again), or `plan`. Each step names a file, an exact anchor string to
     edit at, what to do, and the guard that catches a mistake. `guard_summary`
     counts the silent steps no tool checks; verify those by hand. A non-empty
-    `stop_and_hand_off` means a person must review before use.
+    `stop_and_hand_off` means a person must review before use. The last step
+    writes the change-request record (change_request_record).
     """
     ws = _workspace(workspace)
-    doc = None
-    if ws.reacher.present:
-        try:
-            doc = fetch(ws.reacher.path)
-        except SchemaUnavailable:
-            doc = None
     fields = {
-        "request": request, "kind": kind, "paradigms": paradigms, "boards": boards,
-        "device": device, "setting": setting, "pins": pins, "reaches_board": reaches_board,
-        "behavior": behavior, "done_when": done_when,
+        "request": request, "kind": kind, "paradigms": paradigms, "lite_twins": lite_twins,
+        "boards": boards, "device": device, "setting": setting, "pins": pins,
+        "reaches_board": reaches_board, "behavior": behavior, "done_when": done_when,
+        "commands": commands,
     }
-    roots = {"reacher": ws.reacher.path if ws.reacher.present else None,
-             "labrynth": ws.labrynth.path if ws.labrynth.present else None}
-    out = changes.plan(fields, doc=doc, roots=roots)
+    out = changes.plan(fields, doc=_schema_or_none(ws), roots=_roots(ws))
     if ws.warnings:
         out["workspace_warnings"] = ws.warnings
     return out
@@ -420,38 +424,118 @@ def check_consistency(
 
     Read `counts.unavailable` before `counts.pass`. An unavailable check did not
     run, so "12 passed" alongside "6 unavailable" is not a clean bill of health.
-    `ok` is true only when everything ran AND passed.
+    `ok` is true only when everything ran AND passed AND both checkouts are
+    fresh (`trustworthy`): not behind their upstream, no uncommitted changes.
 
     Scopes: commands, firmware, pins, boards, device_names.
     """
-    result = checks.check_workspace(_workspace(workspace), scopes=scopes)
+    ws = _workspace(workspace)
+    result = checks.check_workspace(ws, scopes=scopes)
     result.setdefault("ok", False)
-    return result
+    return _gate_on_freshness(result, ws)
 
 
 @mcp.tool()
 @tool_result
 def run_checks(names: list[str], workspace: Optional[str] = None) -> dict[str, Any]:
-    """Run allowlisted verification commands (pytest, ruff, tsc, ...).
+    """Run allowlisted verification commands (pytest, ruff, tsc, lint, web_tests, ...).
 
-    Read `verdict`, never `exit_code`. A command can exit 0 having done nothing:
-    labrynth's `npm run lint` does exactly that, and pytest reports success with
-    skipped tests that verified nothing. `verdict` accounts for both —
-    `pass_with_skips` and `UNAVAILABLE` are not passes.
+    Read `verdict`, never `exit_code`. A command can exit 0 having verified
+    nothing: pytest reports success with skipped tests, and ESLint passes with
+    warnings outstanding. `verdict` accounts for both: `pass_with_skips`,
+    `pass_with_warnings` and `UNAVAILABLE` are not passes. `ok` is also false
+    when a checkout is stale (`trustworthy: false`).
 
-    `npm run lint` and `firmware/compile.sh` are deliberately not available: the
-    first is broken, the second rewrites committed build artifacts.
+    `firmware/compile.sh` is deliberately not available: it rewrites committed
+    build artifacts.
     """
     ws = _workspace(workspace)
     results = [runner.run_command(ws, name) for name in names]
     verdicts = [r["verdict"] for r in results]
-    return {
+    out = {
         "ok": all(v == "pass" for v in verdicts),
         "all_verified": all(v == "pass" for v in verdicts),
         "results": results,
         "available": runner.available(ws),
         "caveat": "Only verdict 'pass' means verified. pass_with_skips, UNAVAILABLE and fail do not.",
     }
+    return _gate_on_freshness(out, ws)
+
+
+def _gate_on_freshness(result: dict[str, Any], ws) -> dict[str, Any]:
+    """Withhold a pass read from a stale tree.
+
+    A checkout behind its upstream is compared against old code; one with
+    uncommitted changes is checked as a tree nobody will push. Either way the
+    result describes something other than the change under review, so `ok`
+    cannot be true. The detail stays, so the checks still help while editing.
+    """
+    stale = []
+    for repo in (ws.reacher, ws.labrynth):
+        if not repo.present:
+            continue
+        if repo.behind:
+            stale.append(f"{repo.name} is {repo.behind} commit(s) behind {repo.upstream}: "
+                         f"run `git -C {repo.path} pull` (or merge {repo.upstream}), then run again")
+        if repo.dirty:
+            stale.append(f"{repo.name} has uncommitted changes: commit them on your branch "
+                         "(`git status` lists them), then run again")
+    result["trustworthy"] = not stale
+    result["stale"] = stale
+    if stale:
+        result["ok"] = False
+    return result
+
+
+@mcp.tool()
+@tool_result
+def change_request_record(
+    request: str,
+    kind: str,
+    paradigms: Optional[list[str]] = None,
+    lite_twins: Optional[str] = None,
+    boards: Optional[list[str]] = None,
+    device: Optional[str] = None,
+    setting: Optional[str] = None,
+    pins: Optional[dict[str, int]] = None,
+    reaches_board: Optional[bool] = None,
+    behavior: Optional[str] = None,
+    done_when: Optional[str] = None,
+    commands: Optional[list[str]] = None,
+    answers: Optional[list[dict[str, str]]] = None,
+    date: Optional[str] = None,
+    workspace: Optional[str] = None,
+) -> dict[str, Any]:
+    """Render the confirmed change request as the markdown file committed with the change.
+
+    Pass the same fields you gave plan_change, plus `answers`: every question
+    you asked the user and their answer. Returns `text` and `targets` (repo and
+    path, `changes/YYYY-MM-DD-<slug>.md`). This tool writes nothing: write
+    `text` to each target path yourself. Refuses with `not_confirmed` while a
+    required question is still open.
+    """
+    ws = _workspace(workspace)
+    fields = {
+        "request": request, "kind": kind, "paradigms": paradigms, "lite_twins": lite_twins,
+        "boards": boards, "device": device, "setting": setting, "pins": pins,
+        "reaches_board": reaches_board, "behavior": behavior, "done_when": done_when,
+        "commands": commands, "answers": answers,
+    }
+    return changes.record(fields, doc=_schema_or_none(ws), roots=_roots(ws), date=date)
+
+
+def _schema_or_none(ws) -> Optional[dict]:
+    if not ws.reacher.present:
+        return None
+    try:
+        return fetch(ws.reacher.path)
+    except SchemaUnavailable:
+        return None
+
+
+def _roots(ws) -> dict[str, Optional[Path]]:
+    return {"reacher": ws.reacher.path if ws.reacher.present else None,
+            "labrynth": ws.labrynth.path if ws.labrynth.present else None}
 
 
 @mcp.prompt()
@@ -479,8 +563,11 @@ Work it in this order:
 5. Make the edits yourself, with your own tools, in plan order at each step's
    anchor. Check off every silent step by hand as its `verify` says — nothing
    will catch an omission there.
-6. `check_consistency` and `run_checks` again. Report `verdict`, and state
-   plainly anything that came back UNAVAILABLE: those verified nothing.
+6. `change_request_record` with the same fields and the user's answers; write
+   its `text` to each target path.
+7. Commit on your branch in each repo, then `check_consistency` and
+   `run_checks`. Report `verdict`, and state plainly anything that came back
+   UNAVAILABLE or `trustworthy: false`: those verified nothing.
 
 Ask the user about anything genuinely ambiguous before editing, not after.
 """
@@ -491,7 +578,8 @@ def reacher_verify() -> str:
     """Run the full cross-repo consistency gate and report honestly."""
     return """\
 Run `describe_workspace`, then `check_consistency`, then
-`run_checks(["pytest_parity", "ruff", "tsc", "lint", "web_tests", "cli_parity"])`.
+`run_checks(["pytest_parity", "ruff", "tsc", "lint", "web_tests", "cli_parity",
+"windows_paths"])`.
 
 Report three separate numbers: what passed, what failed, and what could not be
 checked. Do not fold the third into the first. If anything is UNAVAILABLE, name

@@ -22,7 +22,7 @@ from reacher.mcp.server import mcp  # noqa: E402
 EXPECTED_TOOLS = {
     "describe_workspace", "list_commands", "get_hardware_map",
     "explain_event_flow", "check_consistency", "run_checks",
-    "change_request_form", "plan_change",
+    "change_request_form", "plan_change", "change_request_record",
 }
 
 
@@ -68,7 +68,8 @@ def test_server_instructions_warn_about_unverified_checks():
 # --- Tools never raise ----------------------------------------------------
 
 
-@pytest.mark.parametrize("name", sorted(EXPECTED_TOOLS - {"run_checks", "change_request_form", "plan_change"}))
+@pytest.mark.parametrize("name", sorted(EXPECTED_TOOLS - {"run_checks", "change_request_form", "plan_change",
+                                                    "change_request_record"}))
 def test_tools_return_structured_errors_for_a_bad_workspace(tmp_path, name):
     """A nonexistent workspace must degrade, not raise out of the server."""
     out = call(name, {"workspace": str(tmp_path / "nope")})
@@ -237,9 +238,75 @@ def test_plan_change_tool_degrades_for_a_bad_workspace(tmp_path):
     out = call("plan_change", {"request": "x", "kind": "ui_only", "done_when": "y",
                                "workspace": str(tmp_path / "nope")})
     assert out["ok"] is True
-    assert all(s["anchor_status"].startswith("unchecked") for s in out["steps"])
+    assert all(s["anchor_status"].startswith("unchecked") for s in out["steps"] if s["anchor"])
     assert out["workspace_warnings"]
 
 
+def test_change_request_record_tool_returns_text_and_targets():
+    out = call("change_request_record", {"request": "relabel the timeline", "kind": "ui_only",
+                                         "done_when": "the timeline reads Shock", "date": "2026-10-23"})
+    assert out["ok"] is True
+    assert out["targets"] == [{"repo": "labrynth", "path": "changes/2026-10-23-relabel-the-timeline.md"}]
+    assert out["text"].startswith("---\n")
+
+
+# --- Freshness gate -----------------------------------------------------------
+
+
+class _Repo:
+    def __init__(self, name, behind=None, dirty=False, present=True):
+        self.name, self.behind, self.dirty, self.present = name, behind, dirty, present
+        self.upstream, self.path = "origin/main", f"/x/{name}"
+
+
+class _Ws:
+    def __init__(self, reacher, labrynth):
+        self.reacher, self.labrynth = reacher, labrynth
+
+
+@pytest.mark.parametrize("reacher,labrynth", [
+    (_Repo("reacher", behind=3), _Repo("labrynth")),
+    (_Repo("reacher"), _Repo("labrynth", dirty=True)),
+])
+def test_a_pass_from_a_stale_tree_is_not_trustworthy(reacher, labrynth):
+    from reacher.mcp.server import _gate_on_freshness
+    out = _gate_on_freshness({"ok": True}, _Ws(reacher, labrynth))
+    assert out["ok"] is False and out["trustworthy"] is False
+    assert len(out["stale"]) == 1
+
+
+def test_a_fresh_tree_keeps_its_verdict():
+    from reacher.mcp.server import _gate_on_freshness
+    out = _gate_on_freshness({"ok": True}, _Ws(_Repo("reacher", behind=0), _Repo("labrynth", present=False)))
+    assert out == {"ok": True, "trustworthy": True, "stale": []}
+
+
+def test_check_consistency_refuses_a_pass_on_a_checkout_behind_upstream(tmp_path):
+    """End to end: the tool, not just the helper, withholds `ok`."""
+    from tests.test_mcp_changes import _git
+    upstream = tmp_path / "up"
+    upstream.mkdir()
+    _git(upstream, "init", "-q", "-b", "main")
+    _git(upstream, "commit", "-q", "--allow-empty", "-m", "one")
+    root = tmp_path / "ws"
+    root.mkdir()
+    _git(tmp_path, "clone", "-q", str(upstream), str(root / "reacher"))
+    (root / "reacher" / "src" / "reacher" / "kernel").mkdir(parents=True)
+    (root / "reacher" / "src" / "reacher" / "kernel" / "commands.py").write_text("")
+    _git(upstream, "commit", "-q", "--allow-empty", "-m", "two")
+    _git(root / "reacher", "fetch", "-q")
+    for tool, args in (("check_consistency", {}), ("run_checks", {"names": ["ruff"]})):
+        out = call(tool, dict(args, workspace=str(root)))
+        assert out["ok"] is False and out["trustworthy"] is False, tool
+        assert any("behind origin/main" in s for s in out["stale"]), tool
+
+
 def test_web_tests_and_cli_parity_are_allowlisted():
-    assert {"web_tests", "cli_parity"} <= set(runner.COMMANDS)
+    assert {"web_tests", "cli_parity", "windows_paths"} <= set(runner.COMMANDS)
+
+
+def test_every_device_code_range_names_a_free_codes_label():
+    from reacher.mcp.guides import DEVICES
+    from reacher.mcp.server import _free_codes
+    labels = set(_free_codes({"python": {"command_code_enum": {}}}))
+    assert {row["code_range"] for row in DEVICES.values()} <= labels
