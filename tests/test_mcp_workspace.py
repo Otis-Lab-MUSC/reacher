@@ -115,6 +115,15 @@ def test_tooling_block_reports_the_broken_lint_and_its_pipe_hazard():
         assert "exits 0" in lint["hazard"]
 
 
+def test_tooling_block_reports_the_frontend_unit_tests():
+    """labrynth has node:test unit tests; telling an agent there are none is wrong."""
+    ws = workspace.discover()
+    if not ws.labrynth.present:
+        pytest.skip("labrynth checkout not present")
+    tests = ws.as_dict()["tooling"]["labrynth"]["tests"]
+    assert tests["status"] == "working" and tests["cmd"] == "node --test"
+
+
 def test_tooling_block_names_the_silent_skip_hazards():
     hazards = workspace.discover().as_dict()["tooling"]["reacher"]["skip_hazards"]
     assert any("silently skips" in h["effect"] for h in hazards)

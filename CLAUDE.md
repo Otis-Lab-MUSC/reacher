@@ -130,6 +130,16 @@ writes. Reports `firmware.present: false` (never raises) on a wheel-only tree.
 Every parser has a sanity floor that raises rather than returning an empty
 result a comparison would read as "no drift".
 
+Firmware facts consumers need without the firmware source (`pins_h`,
+`pin_symbol_to_component`, `fixed_pins`, `device_names`) also ship as package
+data in `src/reacher/firmware_surface.json`, and the dump exposes them as
+`firmware_surface` with `source: checkout | package`. labrynth generates its pin,
+device-name and command tables from that block, from a checkout or an installed
+wheel alike. **After any `Pins.h` or device-name change run `python -m
+reacher.schema surface --write` and commit the JSON**; `test_schema.py` fails
+while it is stale. The `firmware` section's `present` flag is unaffected: the
+packaged copy never counts as a parsed tree.
+
 It also owns two registries other layers derive from: `KNOWN_FIRMWARE_GAPS`
 (commands the UI offers that firmware silently drops — **derive UI gates from
 this, never hand-write them**) and `INTENTIONALLY_UNHANDLED` (by-design cases).
@@ -147,8 +157,8 @@ event that appears at no 007 print site.
 ### MCP Server (`src/reacher/mcp/`)
 Cross-repo change tooling for a user's own coding agent — `pip install
 "reacher2p[mcp]"`, then the `reacher-mcp` console script over stdio. Six
-read-only tools plus `run_checks`; **no file-writing tools** (the agent writes,
-under its own permission model). Never imported by `api/app.py`, so it stays out
+read-only tools plus `run_checks`, and three change-planning tools; **no
+file-writing tools** (the agent writes, under its own permission model). Never imported by `api/app.py`, so it stays out
 of the frozen bundle. See `docs/mcp-server.md`.
 
 Three invariants, each guarding a way to report success while verifying nothing:
@@ -163,6 +173,17 @@ Three invariants, each guarding a way to report success while verifying nothing:
   a `before_removing` warning. Four times during development a contract was
   modelled from a partial view of its producer and *the correct code looked
   wrong* — provenance is the guardrail against acting on that.
+
+The change flow is `describe_workspace → change_request_form → plan_change →
+edit → change_request_record → commit → check_consistency → run_checks`.
+`plan_change` turns a filled request into ordered steps (file, exact anchor,
+instruction, guard); the guides are data in `mcp/guides.py`, built from the
+commits of five past features, and `tests/test_mcp_changes.py` resolves every
+anchor against the live checkouts for every device. `change_request_record`
+renders the confirmed request as `changes/YYYY-MM-DD-<slug>.md` for the PR that
+makes the change (see `changes/README.md`). Both check tools report
+`trustworthy: false` and withhold `ok` when a checkout is behind its upstream or
+dirty.
 
 `run_checks` uses a literal argv allowlist (`shell=False`, pinned cwd,
 `clean_child_env()`). `firmware/compile.sh` is deliberately excluded: it
