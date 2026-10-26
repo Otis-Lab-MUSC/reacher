@@ -75,7 +75,7 @@ reacher-mcp = "reacher.mcp.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-reacher = ["hex/**/*.hex"]
+reacher = ["hex/**/*.hex", "firmware_surface.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

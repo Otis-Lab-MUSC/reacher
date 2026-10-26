@@ -130,6 +130,16 @@ writes. Reports `firmware.present: false` (never raises) on a wheel-only tree.
 Every parser has a sanity floor that raises rather than returning an empty
 result a comparison would read as "no drift".
 
+Firmware facts consumers need without the firmware source (`pins_h`,
+`pin_symbol_to_component`, `fixed_pins`, `device_names`) also ship as package
+data in `src/reacher/firmware_surface.json`, and the dump exposes them as
+`firmware_surface` with `source: checkout | package`. labrynth generates its pin,
+device-name and command tables from that block, from a checkout or an installed
+wheel alike. **After any `Pins.h` or device-name change run `python -m
+reacher.schema surface --write` and commit the JSON**; `test_schema.py` fails
+while it is stale. The `firmware` section's `present` flag is unaffected: the
+packaged copy never counts as a parsed tree.
+
 It also owns two registries other layers derive from: `KNOWN_FIRMWARE_GAPS`
 (commands the UI offers that firmware silently drops — **derive UI gates from
 this, never hand-write them**) and `INTENTIONALLY_UNHANDLED` (by-design cases).

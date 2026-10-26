@@ -207,3 +207,48 @@ def test_labrynth_discovery_requires_pin_meta(tmp_path):
     target.mkdir(parents=True)
     (target / "pinMeta.ts").write_text(FIXTURE)
     assert ts.find_labrynth_root(tmp_path) == tmp_path / "labrynth"
+
+
+# --- Generated layout -------------------------------------------------------
+
+_INT_RECORD = """
+export const COMPONENT_REQUIRES_INT: Record<Component, boolean> = {
+  slm: false, lever_rh: false, lever_lh: false, cue: false, cue2: false,
+  pump: false, pump2: false, lick: false, laser: false, microscope_trigger: false,
+};
+"""
+
+_REEXPORTING_PIN_META = """
+export { SET_PIN_CODE, DEFAULT_PIN } from "../../generated/pinTables";
+
+export function digitalPinsFor(board: BoardType | null | undefined): readonly number[] {
+  return board === "mega" ? MEGA_DIGITAL : UNO_DIGITAL;
+}
+"""
+
+
+def _labrynth_tree(tmp_path, generated: str):
+    hardware = tmp_path / "web" / "src" / "components" / "hardware"
+    hardware.mkdir(parents=True)
+    (hardware / "pinMeta.ts").write_text(_REEXPORTING_PIN_META)
+    (tmp_path / "web" / "src" / "generated").mkdir()
+    (tmp_path / "web" / "src" / "generated" / "pinTables.ts").write_text(generated)
+    return hardware / "pinMeta.ts"
+
+
+def test_tables_generated_beside_pin_meta_are_parsed(tmp_path):
+    """labrynth generates the tables and pinMeta.ts re-exports them."""
+    meta = ts.parse_pin_meta(_labrynth_tree(tmp_path, FIXTURE + _INT_RECORD))
+    assert meta["set_pin_code"]["cue"] == 376
+    assert meta["default_pin"]["slm"] == 11
+    assert meta["pin_sets"]["mega"]["pcint0"] == [10, 11, 12, 13]
+
+
+def test_drift_in_the_generated_file_is_reported(tmp_path):
+    drifted = FIXTURE.replace("cue: 376", "cue: 377") + _INT_RECORD
+    assert ts.parse_pin_meta(_labrynth_tree(tmp_path, drifted))["set_pin_code"]["cue"] == 377
+
+
+def test_a_generated_file_missing_a_table_raises(tmp_path):
+    with pytest.raises(ts.TypeScriptParseError):
+        ts.parse_pin_meta(_labrynth_tree(tmp_path, FIXTURE))

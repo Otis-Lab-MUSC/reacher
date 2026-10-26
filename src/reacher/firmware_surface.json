@@ -1,0 +1,151 @@
+{
+  "device_names": {
+    "by_level": {
+      "000": [
+        "AUX",
+        "CONTROLLER",
+        "CUE",
+        "CUE2",
+        "LASER",
+        "LEVER_LH",
+        "LEVER_RH",
+        "LICK",
+        "MICROSCOPE",
+        "PUMP",
+        "PUMP2",
+        "SLM"
+      ],
+      "001": [
+        "AUX",
+        "AUX_1",
+        "CONTROLLER",
+        "CUE",
+        "CUE2",
+        "LASER",
+        "LEVER_LH",
+        "LEVER_RH",
+        "MICROSCOPE",
+        "PUMP",
+        "PUMP2",
+        "SLM"
+      ],
+      "006": [
+        "AUX",
+        "CONTROLLER",
+        "SLM"
+      ],
+      "007": [
+        "AUX_1",
+        "CONTROLLER",
+        "CUE",
+        "CUE_1",
+        "CUE_2",
+        "LASER",
+        "LEVER_LH",
+        "LEVER_RH",
+        "LICK_CIRCUIT",
+        "PAVLOV",
+        "PUMP",
+        "PUMP_1",
+        "PUMP_2",
+        "SWITCH_LEVER"
+      ],
+      "008": [
+        "MICROSCOPE"
+      ],
+      "009": [
+        "SLM"
+      ]
+    },
+    "config": [
+      "AUX",
+      "CONTROLLER",
+      "CUE",
+      "CUE2",
+      "LASER",
+      "LEVER_LH",
+      "LEVER_RH",
+      "LICK",
+      "MICROSCOPE",
+      "PUMP",
+      "PUMP2",
+      "SLM"
+    ],
+    "event": [
+      "AUX_1",
+      "CONTROLLER",
+      "CUE",
+      "CUE_1",
+      "CUE_2",
+      "LASER",
+      "LEVER_LH",
+      "LEVER_RH",
+      "LICK_CIRCUIT",
+      "PAVLOV",
+      "PUMP",
+      "PUMP_1",
+      "PUMP_2",
+      "SWITCH_LEVER"
+    ],
+    "param": [
+      "AUX",
+      "AUX_1",
+      "CONTROLLER",
+      "CUE",
+      "CUE2",
+      "LASER",
+      "LEVER_LH",
+      "LEVER_RH",
+      "MICROSCOPE",
+      "PUMP",
+      "PUMP2",
+      "SLM"
+    ],
+    "post_kernel": [
+      "AUX_1",
+      "CONTROLLER",
+      "CUE",
+      "CUE_1",
+      "CUE_2",
+      "LASER",
+      "LEVER_LH",
+      "LEVER_RH",
+      "LICK",
+      "PAVLOV",
+      "PUMP",
+      "PUMP_1",
+      "PUMP_2",
+      "SLM"
+    ]
+  },
+  "fixed_pins": {
+    "PIN_MICROSCOPE_TS": "microscope frame timestamp is wired to INT0; the ISR is not remappable"
+  },
+  "pin_symbol_to_component": {
+    "PIN_AUX": "aux",
+    "PIN_CUE": "cue",
+    "PIN_CUE_2": "cue2",
+    "PIN_LASER": "laser",
+    "PIN_LEVER_LH": "lever_lh",
+    "PIN_LEVER_RH": "lever_rh",
+    "PIN_LICK_CIRCUIT": "lick",
+    "PIN_MICROSCOPE_TRIG": "microscope_trigger",
+    "PIN_PUMP": "pump",
+    "PIN_PUMP_2": "pump2",
+    "PIN_SLM_TS": "slm"
+  },
+  "pins_h": {
+    "PIN_AUX": 22,
+    "PIN_CUE": 3,
+    "PIN_CUE_2": 7,
+    "PIN_LASER": 6,
+    "PIN_LEVER_LH": 13,
+    "PIN_LEVER_RH": 10,
+    "PIN_LICK_CIRCUIT": 5,
+    "PIN_MICROSCOPE_TRIG": 9,
+    "PIN_MICROSCOPE_TS": 2,
+    "PIN_PUMP": 4,
+    "PIN_PUMP_2": 8,
+    "PIN_SLM_TS": 11
+  }
+}
