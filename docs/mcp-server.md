@@ -67,8 +67,31 @@ checking it — exactly the problem this server exists to solve.
 | `list_commands` | The command registry, plus which sketches actually handle each command |
 | `get_hardware_map` | Every component's Python, firmware and frontend view side by side |
 | `explain_event_flow` | How a device's name changes as it travels from firmware to the browser |
+| `change_request_form` | The intake form, the yes/no decision list that sorts a request into a kind, worked examples |
+| `plan_change` | An ordered edit list for a filled request: file, anchor string, what to do, the guard that catches an omission |
+| `change_request_record` | The confirmed request as `changes/YYYY-MM-DD-<slug>.md`, to commit with the change |
 | `check_consistency` | The cross-layer rules |
 | `run_checks` | Allowlisted verification commands |
+
+The intended flow:
+
+```
+describe_workspace → change_request_form → plan_change → edit
+  → change_request_record → commit → check_consistency → run_checks
+```
+
+`plan_change` answers `needs_kind`, `no_code_change` (the request is already a
+runtime setting), `needs_answers` (ask the user its required open questions), or
+`plan`. Each step's `guard` is `tsc`, `compiler`, a check id (`check:C6`), a
+test, a runner key (`run:cli_parity`), or `none`; a `none` step's `verify` says
+what to look at by hand, and `guard_summary` counts them. A non-empty
+`stop_and_hand_off` (any new device or paradigm, a firmware timing change, or a
+safety output: shock, pump, laser) means a person reviews the diff and runs a
+bench check before the change is used on an animal.
+
+The guides behind `plan_change` live in `src/reacher/mcp/guides.py` as data,
+taken from the commits that built five real features. Their anchors are tested
+against the live checkouts, so a refactor that moves one fails CI.
 
 Two prompts, `reacher_change` and `reacher_verify`, surface in Claude Code as
 `/reacher:reacher_change` and `/reacher:reacher_verify`.
@@ -85,6 +108,12 @@ Three habits will save you.
 `error`. A summary reading *"12 passed, 0 failed, 6 UNAVAILABLE"* is not a clean
 bill of health — six rules did not run. `check_consistency` reports `ok: true`
 only when everything ran *and* passed.
+
+**`trustworthy: false` means the tree was stale.** `check_consistency` and
+`run_checks` withhold `ok` when either checkout is behind its upstream (as of
+the last fetch) or has uncommitted changes, and list why in `stale`. The
+results are still there to work from while editing; commit and run again for a
+pass you can report.
 
 **Read `verdict`, not `exit_code`.** A command can exit 0 having verified
 nothing: pytest reports success with skipped tests, and ESLint can pass while
