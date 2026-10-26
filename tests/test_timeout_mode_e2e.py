@@ -272,7 +272,9 @@ class TestSimulatorDefaultsMatchFirmwareDefaults:
 
 
 _PARAMS_RE = re.compile(r"^\s*(rhLever|lhLever)\s*:.*?params\s*:\s*\{([^}]*)\}", re.MULTILINE)
-_CODE_RE = re.compile(r"(\w+)\s*:\s*(\d+)")
+#: A param code is a literal (``timeout: 1074``) or, since labrynth generates its
+#: command table from reacher, a registry name (``timeout: CMD.LEVER_RH_SET_TIMEOUT``).
+_CODE_RE = re.compile(r"(\w+)\s*:\s*(?:(\d+)|CMD\.(\w+))")
 _PARADIGM_CONST_RE = re.compile(r"const\s+(\w+)\s*=\s*paradigm\s*===\s*\"(\w+)\"")
 _LEVER_SKIP_RE = re.compile(r"^\s*if\s*\((.*rhLever.*lhLever.*)\)\s*continue;", re.MULTILINE)
 _PARAM_GATE_RE = re.compile(r"PARAM_PARADIGMS[^=]*=\s*\{(.*?)\n\};", re.S)
@@ -300,7 +302,10 @@ def _lever_dispatch_codes():
     ).read_text()
     found = {}
     for lever, body in _PARAMS_RE.findall(source):
-        found[lever] = {name: int(code) for name, code in _CODE_RE.findall(body)}
+        found[lever] = {
+            name: int(code) if code else int(CommandCode[cmd_name])
+            for name, code, cmd_name in _CODE_RE.findall(body)
+        }
     # Sanity floor: a reformat that defeats the regex must fail here rather than
     # return an empty mapping the comparison below would read as "no drift".
     assert set(found) == {"rhLever", "lhLever"}, f"parsed levers: {sorted(found)}"
