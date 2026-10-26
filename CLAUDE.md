@@ -252,6 +252,7 @@ Tests use `pytest` with `asyncio_mode=auto` (configured in `pyproject.toml`). Th
 - `tests/test_device_names.py` — L8: kernel and simulator device names against the firmware namespaces, and that every `code_dict` level is classified
 - `tests/test_frontend_parity.py` — C3–C9 against the labrynth checkout; **skips loudly** when absent
 - `tests/test_mcp_*.py` — workspace discovery, the checkout-beats-wheel guarantee, the check engine's golden-negatives, and the tool surface
+- `tests/test_golden_traces.py` — one session script (presses, licks, commands, a stop) through the real sketch compiled for the host (`tests/native/trace_harness.cpp`) and through the simulator; the level-007 streams must match field for field (only the 21 ms input debounce and same-millisecond ordering are normalised), and every hardware output must be off after the stop. A real divergence goes in `DIVERGENCES` as a strict xfail, never a fix to either side. Needs `c++` and `ARDUINOJSON_SRC` (CI clones ArduinoJson 7.4.3); skips loudly without them
 - `tests/conftest.py` — autouse fixture pointing `REACHER_LOG_DIR` and `REACHER_SESSION_LOG_DIR` at `tmp_path`; **required**, or tests write to the real `~/REACHER/`
 
 **Golden-negatives are mandatory for a new check.** Every consistency rule ships
