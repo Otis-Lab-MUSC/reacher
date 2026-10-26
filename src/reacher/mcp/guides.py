@@ -237,17 +237,19 @@ GUIDES: dict[str, dict[str, Any]] = {
         "code": True,
         "small_model_ok": True,
         "bench_test": "only when the physical wiring changes",
-        "summary": "Change the default pin in firmware, the UI mirror and the two Python copies "
-                   "together. Only Pins.h and pinMeta.ts are compared by a check.",
+        "summary": "Change the default pin in firmware and the two Python copies, then regenerate the UI "
+                   "table. Only Pins.h and the generated pinTables.ts are compared by a check.",
         "steps": [
             _step("reacher", f"{_FW}/Pins.h", "constexpr int8_t {pin_symbol} ",
                   "Change the default pin constant {pin_symbol} for {device}. Pick a pin from "
                   "get_hardware_map().pin_sets for every board the device runs on; respect "
                   "requires_pwm / requires_interrupt / requires_pcint and never use fixed_pins.",
                   "check:C6", "check_consistency(scopes=['pins'])", when="board"),
-            _step("labrynth", "web/src/components/hardware/pinMeta.ts",
+            _step("labrynth", "web/src/generated/pinTables.ts",
                   "export const DEFAULT_PIN: Record<Component, number> = {",
-                  "Set {device} to the same pin as Pins.h.",
+                  "Do not edit this generated file. After the reacher change is released and "
+                  "labrynth's reacher2p pin is bumped, run `npm run gen:tables` in labrynth/web "
+                  "so {device} picks up the new pin from Pins.h.",
                   "check:C6", "check_consistency(scopes=['pins'])"),
             _step("reacher", "src/reacher/api/routers/hardware.py", "_DEFAULT_COMPONENT_PINS = {",
                   "Set {device} to the same pin as Pins.h. The pin-conflict check for the shock "
@@ -483,8 +485,11 @@ GUIDES: dict[str, dict[str, Any]] = {
                   "Simulate the device, including every firmware refusal.", "none",
                   "by hand: a simulator session shows the device's events."),
             _step("labrynth", "web/src/components/hardware/pinMeta.ts",
-                  "export const SET_PIN_CODE: Record<Component, number> = {",
-                  "Add the component to every pinMeta table.", "check:C3",
+                  "export const COMPONENT_KEYS: readonly Component[] = [",
+                  "Add the component to COMPONENT_KEYS and COMPONENT_LABEL. SET_PIN_CODE, "
+                  "DEFAULT_PIN and the role constraints are generated into "
+                  "web/src/generated/pinTables.ts: regenerate them with `npm run gen:tables` "
+                  "in labrynth/web, never by hand.", "check:C3",
                   "check_consistency(scopes=['pins'])"),
             _step("labrynth", "web/src/types/index.ts", "export interface HardwareUiState {",
                   "Add the device's UI state.", "tsc", "run_checks(['tsc'])"),
