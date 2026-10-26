@@ -144,13 +144,13 @@ def test_host_only_setting_covers_what_counted_pumps_touched(doc):
 
 
 def test_pin_or_board_guide_covers_every_copy_of_a_default_pin(doc):
-    """Default pins live in four places; only Pins.h and pinMeta.ts are compared by C6."""
+    """Default pins live in four places; only Pins.h and the generated pinTables.ts are compared by C6."""
     out = changes.plan(dict(FULL, kind="pin_or_board", device="cue2", pins={"mega": 30}), doc=doc)
     by_path = {s["path"]: s for s in out["steps"]}
     assert by_path["firmware/libraries/REACHERDevices/src/Pins.h"]["anchor"] == "constexpr int8_t PIN_CUE_2 "
     assert "CUE_2" in by_path["src/reacher/kernel/simulator.py"]["do"]
     assert by_path["src/reacher/api/routers/hardware.py"]["guard"] == "none"
-    assert by_path["web/src/components/hardware/pinMeta.ts"]["guard"] == "check:C6"
+    assert by_path["web/src/generated/pinTables.ts"]["guard"] == "check:C6"
 
 
 def test_pin_or_board_skips_the_simulator_for_a_device_it_does_not_pin(doc):
