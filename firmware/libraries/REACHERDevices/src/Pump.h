@@ -26,6 +26,9 @@ public:
   /// @brief Fire a test infusion for configured duration (bypasses armed check).
   void Test(uint32_t currentTimestamp);
 
+  /// @brief Drive the relay LOW and cancel the infusion window, including a test.
+  void ForceOff();
+
   void SetDuration(uint32_t duration);
   uint32_t Duration() const;
 

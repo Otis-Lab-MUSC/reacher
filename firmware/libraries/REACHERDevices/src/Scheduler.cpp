@@ -574,12 +574,15 @@ void Scheduler::EndSession(uint32_t now) {
     triggers[i].Reset();
   }
 
-  // Force all outputs off
-  if (cue) noTone(cue->Pin());
-  if (cue2) noTone(cue2->Pin());
-  if (pump) digitalWrite(pump->Pin(), LOW);
-  if (pump2) digitalWrite(pump2->Pin(), LOW);
+  // Force all outputs off and cancel their windows. Silencing alone is not
+  // enough: the sketches keep devices armed through the SCOPE_DRAIN_MS window,
+  // and a window still open would be re-driven on the next tick.
+  if (cue) cue->ForceOff();
+  if (cue2) cue2->ForceOff();
+  if (pump) pump->ForceOff();
+  if (pump2) pump2->ForceOff();
   if (laser) laser->SetSessionActive(false);
+  if (laser) laser->Reset();
   if (laser) digitalWrite(laser->Pin(), LOW);
 #if defined(__AVR_ATmega2560__)
   if (aux) aux->ForceOff();

@@ -50,7 +50,21 @@ void Cue::Await(uint32_t currentTimestamp) {
       pulseIsOn = false;
       if (isTesting) isTesting = false;
     }
+  } else if (playing) {
+    // Disarmed mid-tone: nothing else will ever call noTone() for it.
+    Off();
+    playing = false;
+    pulseIsOn = false;
   }
+}
+
+void Cue::ForceOff() {
+  Off();
+  startTimestamp = UINT32_MAX;
+  endTimestamp = 0;
+  playing = false;
+  pulseIsOn = false;
+  isTesting = false;
 }
 
 void Cue::Jingle() {
