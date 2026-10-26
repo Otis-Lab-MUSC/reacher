@@ -549,6 +549,7 @@ def python_section() -> dict[str, Any]:
                 "requires_pwm": c.requires_pwm,
                 "requires_interrupt": c.requires_interrupt,
                 "requires_pcint": c.requires_pcint,
+                "mega_only": c.mega_only,
             }
             for code, c in sorted(pin_overrides.PIN_CONSTRAINTS.items())
         ],
@@ -636,6 +637,38 @@ def firmware_section(root: Optional[Path]) -> dict[str, Any]:
     }
 
 
+#: The firmware facts a consumer without the firmware source still needs:
+#: labrynth generates its pin and device-name tables from them, and must be
+#: able to do so from an installed reacher2p. Shipped as package data, rebuilt
+#: by ``python -m reacher.schema surface --write``, and checked against the
+#: source by tests/test_schema.py, so a firmware edit that forgets the rebuild
+#: fails CI the way stale hex does.
+FIRMWARE_SURFACE_PATH = Path(__file__).with_name("firmware_surface.json")
+FIRMWARE_SURFACE_KEYS = ("pins_h", "pin_symbol_to_component", "fixed_pins", "device_names")
+
+
+def firmware_surface(firmware: dict[str, Any]) -> dict[str, Any]:
+    """The firmware facts, from the source tree when present, else from the package.
+
+    ``source`` says which: ``"checkout"``, ``"package"``, or ``None`` with a
+    ``reason`` when neither is available. The ``firmware`` section keeps its own
+    ``present`` flag, so checks that compare against the source never mistake
+    the packaged copy for a parsed tree.
+    """
+    if firmware.get("present"):
+        return {"source": "checkout", **{k: firmware[k] for k in FIRMWARE_SURFACE_KEYS}}
+    try:
+        packaged = json.loads(FIRMWARE_SURFACE_PATH.read_text())
+    except (OSError, ValueError) as exc:
+        return {"source": None, "reason": f"no packaged firmware surface: {exc}"}
+    return {"source": "package", **{k: packaged[k] for k in FIRMWARE_SURFACE_KEYS}}
+
+
+def surface_drift(live: dict[str, Any], packaged: dict[str, Any]) -> list[str]:
+    """Keys whose packaged value differs from the one parsed from the source."""
+    return [k for k in FIRMWARE_SURFACE_KEYS if live.get(k) != packaged.get(k)]
+
+
 def dump(root: Optional[Path] = None) -> dict[str, Any]:
     """Build the complete schema document for a checkout."""
     root = root or find_repo_root()
@@ -665,6 +698,7 @@ def dump(root: Optional[Path] = None) -> dict[str, Any]:
         "generated_from": _provenance(root),
         "python": python,
         "firmware": firmware,
+        "firmware_surface": firmware_surface(firmware),
         "errors": errors,
         "warnings": warnings,
     }
@@ -681,7 +715,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     dump_p.add_argument("--root", type=Path, default=None, help="reacher checkout to read (default: autodetect)")
     dump_p.add_argument("--indent", type=int, default=None, help="pretty-print with this indent")
 
+    surface_p = sub.add_parser("surface", help="print or rebuild the packaged firmware surface")
+    surface_p.add_argument("--write", action="store_true", help=f"write {FIRMWARE_SURFACE_PATH.name}")
+    surface_p.add_argument("--root", type=Path, default=None, help="reacher checkout to read (default: autodetect)")
+
     args = parser.parse_args(argv)
+    if args.command == "surface":
+        firmware = firmware_section(args.root or find_repo_root())
+        if not firmware.get("present"):
+            print(f"no firmware source to read: {firmware.get('reason')}", file=sys.stderr)
+            return 1
+        text = json.dumps({k: firmware[k] for k in FIRMWARE_SURFACE_KEYS}, indent=2, sort_keys=True) + "\n"
+        if args.write:
+            FIRMWARE_SURFACE_PATH.write_text(text)
+        else:
+            sys.stdout.write(text)
+        return 0
     doc = dump(args.root)
     json.dump(doc, sys.stdout, indent=args.indent, sort_keys=False)
     sys.stdout.write("\n")
