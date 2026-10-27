@@ -192,6 +192,8 @@ def _build(sketch: str, out_dir: Path) -> Path:
         f'-DSKETCH="{FIRMWARE / sketch / (sketch + ".ino")}"',
         *([MEGA] if mega else []), *(["-DHAS_AUX"] if sketch == "fr" else []),
         str(HARNESS), str(STUB / "stub.cpp"), *sorted(str(p) for p in LIB_SRC.glob("*.cpp")),
+        # Sketch-local sources (pavlovian's PavlovianScheduler.cpp); the IDE links them too.
+        *sorted(str(p) for p in (FIRMWARE / sketch).glob("*.cpp")),
         "-o", str(exe),
     ]
     subprocess.run(cmd, check=True, capture_output=True, text=True)

@@ -573,5 +573,5 @@ void PavlovianScheduler::LogPavlovianEvent(const __FlashStringHelper* event, uin
   Serial.print(pavTrialIndex);
   Serial.print(F(",\"timestamp\":"));
   Serial.print(now - sessionOffset);
-  Serial.println(F("\"}"));
+  Serial.println('}');
 }

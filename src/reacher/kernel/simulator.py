@@ -699,9 +699,7 @@ class FirmwareSimulator:
             elif cmd == 209:
                 self.pav_cs_minus_count = _clamp(cmd_data.get("count"), 0, 255)
             else:
-                # pavlovian.ino reads the key "counterbalance"; the host's
-                # CommandSpec for 212 sends "enabled", which the board reads as
-                # absent (false). Mirrored as-is so the gap shows up here too.
+                # pavlovian.ino reads the key "counterbalance", as CommandSpec 212 sends it.
                 self.pav_counterbalance = bool(cmd_data.get("counterbalance", False))
         elif cmd == 210:
             self.pav_cs_plus_freq = cmd_data.get("frequency", self.pav_cs_plus_freq)

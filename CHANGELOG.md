@@ -53,6 +53,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Shock output defaults are now duration `0` and block N `0` (unconfigured) in the firmware, UI store and simulator. Arming or test-firing is refused until duration (and N in block mode) is set. **Hex rebuilt for the Mega `fr` sketch** (`bash firmware/compile.sh`)
 
 ### Fixed
+- **Pavlovian sessions never stopped themselves on a board, and lost every trial outcome.**
+  `PavlovianScheduler::LogPavlovianEvent` closed its line with `"}` after a numeric timestamp, so
+  `TRACE_START`, `REWARD_DELIVERED`, `REWARD_OMITTED` and `ALL_TRIALS_COMPLETE` were not JSON and the host
+  dropped them; auto-stop never saw its trigger. **`pavlovian.hex` rebuilt.** New
+  `tests/test_pavlovian_firmware_trace.py` runs the real sketch on the host and parses every line it prints;
+  the golden-trace build now links sketch-local `.cpp` files, which pavlovian needs
+- **Pavlovian Counterbalance (212) did nothing on a board.** The host sent the payload key `enabled`;
+  `pavlovian.ino` reads `counterbalance`. `CommandSpec` 212 now sends `counterbalance`, and the simulator
+  no longer mirrors the gap
 - Block-mode shock draw with N = 0 no longer divides by zero; a 0 ms shock pulse never drives the pin
 - **Cue tone and pump relay stuck on after a session ended mid-reward.** Firmware fix in
   `Scheduler::EndSession()`, `Cue` and `Pump`; see `firmware/CHANGELOG.md`. All nine hex files

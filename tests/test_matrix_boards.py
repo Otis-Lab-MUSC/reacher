@@ -199,7 +199,7 @@ def test_row19_zero_counts_session_ends_at_once(sim_client):
 
 
 # ---------------------------------------------------------------------------
-# Row 20: counterbalance. The host sends the payload key "enabled"; pavlovian.ino reads "counterbalance".
+# Row 20: counterbalance. The host's payload key for 212 is the one pavlovian.ino reads, "counterbalance".
 # ---------------------------------------------------------------------------
 
 
@@ -225,10 +225,6 @@ def test_row20_counterbalance_firmware_key_swaps_cues():
     assert devices and set(devices) == {"CUE_2"}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="CommandSpec 212 sends 'enabled' but pavlovian.ino reads 'counterbalance'; counterbalance is silently off",
-)
 def test_row20_counterbalance_from_host_swaps_cues():
     msgs = stepped_sim(
         "pavlovian",
