@@ -74,7 +74,7 @@ class TestGetCommandsForParadigm:
         labrynth Pavlovian panel branches on (bool vs int)."""
         cmds = get_commands_for_paradigm("pavlovian")
         expected = {
-            212: ("enabled", "bool"),
+            212: ("counterbalance", "bool"),
             215: ("duration", "int"),
             219: ("config", "int"),
         }

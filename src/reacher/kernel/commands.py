@@ -320,7 +320,7 @@ COMMAND_REGISTRY: Dict[int, CommandSpec] = {
     212: CommandSpec(
         CommandCode.PAV_COUNTERBALANCE, "PAV_COUNTERBALANCE",
         "Enable/disable counterbalancing",
-        payload_key="enabled", payload_type="bool",
+        payload_key="counterbalance", payload_type="bool",
         paradigms=["pavlovian"],
     ),
     213: CommandSpec(

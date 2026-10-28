@@ -552,15 +552,13 @@ class TestPavlovian:
             assert tones[trial["timestamp"]] == expected
 
     def test_counterbalance_swaps_which_cue_is_cs_plus(self):
-        """pavlovian.ino reads the key "counterbalance"; the host's CommandSpec sends "enabled"
-        (a firmware/host mismatch — reported in the findings), so only the former takes effect."""
-        swapped = pav([{"cmd": 212, "counterbalance": True}])
+        """pavlovian.ino reads the key "counterbalance", and CommandSpec 212 sends it."""
+        from reacher.kernel.commands import build_command_payload
+        swapped = pav([build_command_payload(212, True)])
         tones = {m["start_timestamp"]: m["device"] for m in ev(swapped, ("CUE", "CUE_2"), "TONE")}
+        assert trials(swapped)
         for trial in trials(swapped):
             assert tones[trial["timestamp"]] == ("CUE_2" if trial["trial_type"] == "CS_PLUS" else "CUE")
-        as_the_host_sends_it = pav([{"cmd": 212, "enabled": True}])
-        assert run.sim.pav_counterbalance is False
-        assert as_the_host_sends_it
 
     @pytest.mark.parametrize("plus,minus", [(100, 0), (0, 100), (50, 50)])
     def test_reward_probability_per_cs(self, plus, minus):
