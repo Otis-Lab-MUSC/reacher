@@ -35,6 +35,9 @@ jobs:
       - name: Ruff lint
         run: uv run --frozen ruff check .
 
+      - name: Style ratchet
+        run: uv run --frozen python scripts/style-baseline.py
+
       - name: Shellcheck install script
         run: shellcheck -S warning scripts/install.sh
 
