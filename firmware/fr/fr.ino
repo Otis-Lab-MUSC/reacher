@@ -98,7 +98,7 @@ void onLeverRelease(DeviceType source) {
 }
 
 void SendIdentification() {
-  Serial.println(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"sketch\":\"fr.ino\",\"version\":\"v3.4.0-beta.14\",\"baud_rate\":115200,\"schedule\":\"FIXED_RATIO\",\"caps\":\"aux\"}"));
+  Serial.println(F("{\"level\":\"000\",\"device\":\"CONTROLLER\",\"sketch\":\"fr.ino\",\"version\":\"v3.4.0-beta.15\",\"baud_rate\":115200,\"schedule\":\"FIXED_RATIO\",\"caps\":\"aux\"}"));
 }
 
 void setup() {
