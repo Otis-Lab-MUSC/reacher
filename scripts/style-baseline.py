@@ -48,6 +48,7 @@ FUNCTION_NODE_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 MYPY_METRIC = "mypy_strict_errors"
 MYPY_ERROR_MARKER = ": error: "
+MYPY_COUNTABLE_EXIT_CODES = (0, 1)
 
 
 def list_source_files() -> list[Path]:
@@ -76,6 +77,10 @@ def count_mypy_errors() -> dict[str, int]:
     """Count errors reported by a clean, non-incremental `mypy --strict` run."""
     command = [sys.executable, "-m", "mypy", "--no-incremental"]
     completed = subprocess.run(command, capture_output=True, text=True, cwd=REPO_ROOT)
+    # mypy exits 1 when it finds errors; any other non-zero code means it did not check, and
+    # counting its empty output would record zero errors and pass the ratchet.
+    if completed.returncode not in MYPY_COUNTABLE_EXIT_CODES:
+        raise RuntimeError(f"mypy exited {completed.returncode} without checking:\n{completed.stderr}")
     return {MYPY_METRIC: completed.stdout.count(MYPY_ERROR_MARKER)}
 
 
