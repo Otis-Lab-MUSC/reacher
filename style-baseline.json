@@ -1,0 +1,18 @@
+{
+  "any_uses": 87,
+  "except_exception_sites": 122,
+  "files_over_300_lines": 20,
+  "functions_over_50_lines": 48,
+  "history_comments": 110,
+  "mypy_strict_errors": 403,
+  "ruff_ANN": 150,
+  "ruff_BLE": 93,
+  "ruff_C901": 30,
+  "ruff_D1": 131,
+  "ruff_ERA": 0,
+  "ruff_PLR0912": 18,
+  "ruff_PLR0915": 14,
+  "ruff_PLR2004": 104,
+  "ruff_S110": 25,
+  "ruff_T20": 17
+}

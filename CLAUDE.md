@@ -57,6 +57,27 @@ python -m build
 | `REACHER_SIM_UPLOAD_FAIL` | unset | Any non-empty value makes a simulated flash fail like a non-zero avrdude exit (the value is the stderr text; `1` = generic). For exercising the UI error path. |
 | `REACHER_GITHUB_OWNER` | `Otis-Lab-MUSC` | GitHub org/user that owns the target issue repos. Used to build the pre-filled "New Issue" link. |
 
+## Code style
+
+Rules for all new and changed code under `src/`:
+
+- Readable by a newcomer: small single-purpose files and functions (split past ~300 lines), early returns, at most two levels of nesting.
+- Catch narrowly. No broad `except Exception` outside a short allowlist of top-level boundaries, each marked `# noqa: BLE001` with a reason.
+- Full annotations, strict mypy, no `Any`. Prefer dataclasses or pydantic over loose dicts.
+- Verb-noun names, no abbreviations. Every function gets a short plain-English docstring; few inline comments.
+- No history comments ("Fix 4.9", issue/PR numbers, "legacy", "no longer", "previously"); git holds history.
+- No magic values: named constants, tunables in config. Use structured logging, not `print`, for diagnostics (a script's result output may stay `print`).
+- Stdlib and existing dependencies first; justify any new one.
+
+Existing violations are tracked by a ratchet, not fixed in bulk:
+
+```bash
+uv run --frozen python scripts/style-baseline.py            # check; CI runs this in the lint job
+uv run --frozen python scripts/style-baseline.py --update   # after a PR lowers counts; commit style-baseline.json
+```
+
+`style-baseline.json` holds one count per metric (ruff rule families, `mypy --strict` errors, broad excepts, `Any`, history comments, long files and functions). The check fails if any count rises above its baseline. Never raise a count; `--update` refuses to unless `--allow-increase` is passed, which needs a reviewer's explicit sign-off.
+
 ## Architecture
 
 The system is organized in four layers:
