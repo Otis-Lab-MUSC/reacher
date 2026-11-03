@@ -47,7 +47,7 @@ async def connect_serial(session_id: str, request: Request):
         instance.set_COM_port(info.port, info.paradigm)
         instance.open_serial()
     except ValueError as e:
-        # Fix: PY-002 — Surface validation errors without leaking internals
+        # Surface validation errors without leaking internals
         raise HTTPException(status_code=400, detail=str(e))
     except PermissionError:
         logger.warning("Permission denied opening serial port for session %s", session_id)
@@ -60,12 +60,12 @@ async def connect_serial(session_id: str, request: Request):
             ),
         )
     except Exception:
-        # Fix: PY-002 — Generic message; details logged server-side
+        # Generic message; details logged server-side
         logger.exception("Serial connect failed for session %s", session_id)
         raise HTTPException(status_code=500, detail="Failed to open serial connection")
 
     # --- Non-fatal firmware detection probe ---
-    # Fix: LAZ-001 — Wait for IDENTIFY response (firmware readiness gate)
+    # Wait for IDENTIFY response (firmware readiness gate)
     # Don't transition to "connected" until bootloader exits and firmware acks IDENTIFY.
     # This prevents commands from being silently dropped during the ~1.5–2s bootloader window.
     detected_paradigm = None
@@ -204,7 +204,7 @@ async def disconnect_serial(session_id: str, request: Request):
     try:
         info.instance.close_serial()
     except Exception:
-        # Fix: PY-002 — Generic message; details logged server-side
+        # Generic message; details logged server-side
         logger.exception("Serial disconnect failed for session %s", session_id)
         raise HTTPException(status_code=500, detail="Failed to close serial connection")
 

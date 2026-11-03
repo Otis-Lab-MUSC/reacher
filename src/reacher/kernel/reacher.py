@@ -129,7 +129,7 @@ _COMMAND_STATE_MAP: dict[int, tuple[str, str, object]] = {
     # LEVER_LH fields recorded two values the board cannot hold — a GUI that sent
     # RH then LH showed RH = N while the board ran LH's value. One
     # scheduler-scoped field each, exactly as 201/1075/1375 share CONTROLLER.ratio.
-    # 1077/1377 were previously unmodelled on the host entirely.
+    # 1077/1377 are modelled on the host.
     1074: ("CONTROLLER", "timeout", _USE_VALUE),
     1374: ("CONTROLLER", "timeout", _USE_VALUE),
     1077: ("CONTROLLER", "timeout_mode", _USE_VALUE),
@@ -208,10 +208,10 @@ class REACHER:
         # drains the bootloader with reset_input_buffer(), which slices the
         # identification line setup() prints; the piece is not a frame.
         self._rx_fragment: bytes = b""
-        # Fix: F-003 — Configurable serial reconnection parameters
+        # Configurable serial reconnection parameters
         self._SERIAL_RECONNECT_RETRIES: int = 3
         self._SERIAL_RECONNECT_DELAY: int = 3  # seconds between retry attempts
-        # Fix 2.6: count queue-overflow drops and throttle WS-warning emission.
+        # Count queue-overflow drops and throttle WS-warning emission.
         # Without visibility, an overflowed queue silently drops serial lines
         # while the frontend still shows "connected". The counter is cumulative;
         # the throttle keeps an overflow storm from flooding the WS queue in
@@ -220,20 +220,20 @@ class REACHER:
         self._queue_overflow_count: int = 0
         self._last_queue_overflow_emit: float = float("-inf")
 
-        # Fix: #33 — Surface log-write failures to the operator via WS warning.
+        # Surface log-write failures to the operator via WS warning.
         # Throttle per log_type (1 s) and accumulate a consecutive-failure count
         # so a ENOSPC storm emits one event/sec with the run total, not one per write.
         self._last_log_failure_emit: Dict[str, float] = {}
         self._log_failure_counts: Dict[str, int] = {"event_log": 0, "controller_log": 0}
 
-        # Fix 7.4: track cumulative event_callback failures so the API layer
+        # Track cumulative event_callback failures so the API layer
         # can surface degraded WS/observer health without risking recursion
         # (a broken callback is the one channel we can't use to self-report).
         self._emit_failure_count: int = 0
 
         # Thread variables
-        # Fix: PY-007 — Threads created here but started lazily in open_serial()
-        # Fix 7.1: wrap each target in a resilient shim so an unhandled
+        # Threads created here but started lazily in open_serial()
+        # Wrap each target in a resilient shim so an unhandled
         # exception in read_serial/handle_queue/monitor_time_limit does not
         # silently kill the daemon. See _resilient().
         self.serial_thread: threading.Thread = self._make_thread(self.read_serial, "read_serial")
@@ -256,7 +256,7 @@ class REACHER:
         self.serial_flag.set()
         self.program_flag.set()
         self.time_check_flag.set()
-        # Fix: LAZ-001 — Event gate for firmware readiness (IDENTIFY response)
+        # Event gate for firmware readiness (IDENTIFY response)
         # Set when firmware_information is populated (IDENTIFY ack received),
         # used to delay "connected" state transition until bootloader exits and
         # firmware is truly ready to process commands.
@@ -269,7 +269,7 @@ class REACHER:
         self.behavior_data: List[Dict[str, Union[str, int]]] = []
         self.frame_data: List[int] = []
         self.slm_data: List[int] = []
-        # Config/state change trail for the session summary (issue #12): every
+        # Config/state change trail for the session summary: every
         # level-000 (config) and level-001 (arm/disarm, state) event, in
         # arrival order. Host-stamped with `received_at` because firmware
         # carries no onboard clock for these frames (unlike level-007 events,
@@ -289,7 +289,7 @@ class REACHER:
         # matching what the UI displays.
         self._press_count: int = 0
         self._trial_count: int = 0
-        # Fix: F-002 — Memory warning thresholds for unbounded data lists
+        # Memory warning thresholds for unbounded data lists
         self._DATA_WARNING_THRESHOLD = 100_000  # Warn when lists exceed this size
         self._data_warning_emitted: bool = False
 
@@ -353,13 +353,13 @@ class REACHER:
             sh = logging.StreamHandler()
             sh.setFormatter(formatter)
             self.logger.addHandler(sh)
-        # Fix: F-010 — Persistent file handle for event log (avoids open/close per event)
+        # Persistent file handle for event log (avoids open/close per event)
         self._event_log_path = os.path.join(self.reacher_log_path, "event_log.jsonl")
         self._event_log_file: Optional[io.TextIOWrapper] = None
         self._event_log_write_count: int = 0
         self._EVENT_LOG_FSYNC_INTERVAL: int = 50  # fsync every N writes
 
-        # Fix 4.9: mirror the event-log pattern — keep controller_log.json open
+        # Mirror the event-log pattern — keep controller_log.json open
         # across writes and batch fsyncs instead of open/close/fsync per line.
         self._controller_log_file: Optional[io.TextIOWrapper] = None
         self._controller_log_write_count: int = 0
@@ -403,10 +403,10 @@ class REACHER:
         self.slm_data = []
         self._infusion_count = 0
         self._infusions_by_pump = {"PUMP_1": 0, "PUMP_2": 0}
-        self._data_warning_emitted = False  # Fix: F-002 — Reset warning flag
-        self._event_log_write_count = 0  # Fix: F-010 — Reset write counter
-        self._controller_log_write_count = 0  # Fix 4.9 — Reset write counter
-        # reacher#12 fix: _session_changes is NOT cleared here — session_summary.json
+        self._data_warning_emitted = False  # Reset warning flag
+        self._event_log_write_count = 0  # Reset write counter
+        self._controller_log_write_count = 0  # Reset write counter
+        # _session_changes is NOT cleared here — session_summary.json
         # is documented (see _write_session_summary) to span the full log-directory
         # lifetime, same as controller_log.json, which stays open across reset().
         # Clearing this list here silently dropped pre-reset history from the summary
@@ -433,7 +433,7 @@ class REACHER:
             self.ser.port = self._simulated_port
         else:
             self.ser = serial.Serial(baudrate=115200, timeout=1)
-        self.queue = queue.Queue(maxsize=5000)  # Fix: F-006 — Match __init__ maxsize
+        self.queue = queue.Queue(maxsize=5000)  # Match __init__ maxsize
         self._rx_fragment = b""
 
         # Old threads must be gone before the flags flip back: a surviving read_serial
@@ -508,7 +508,7 @@ class REACHER:
             self._is_simulated = False
             self._simulated_paradigm = None
         else:
-            # Fix: SER-003 — Raise on invalid port instead of silently ignoring
+            # Raise on invalid port instead of silently ignoring
             raise ValueError(f"Port {port!r} is not available")
 
         self.logger.info(f"Set COM port to {port}")
@@ -540,7 +540,7 @@ class REACHER:
             self.logger.info("--> Starting queue thread")
             self.queue_thread = self._make_thread(self.handle_queue, "handle_queue")
             self.queue_thread.start()
-        # Fix: PY-007 — Start time-check thread on connection (deferred from __init__)
+        # Start time-check thread on connection (deferred from __init__)
         if not self.time_check_thread.is_alive():
             self.logger.info("--> Starting time check thread")
             self.time_check_thread = self._make_thread(
@@ -612,7 +612,7 @@ class REACHER:
             self.logger.error(f"Error during closure: {e}")
         finally:
             self._close_event_log()
-            self._close_controller_log()  # Fix 4.9
+            self._close_controller_log()
             self.logger.info("--> Cleanup complete")
 
     def shutdown(self, timeout: float = 20.0) -> None:
@@ -664,7 +664,7 @@ class REACHER:
             self.logger.warning("Threads still alive after %.1fs: %s", timeout, still_alive)
 
     def _resilient(self, target, name: str):
-        """Fix 7.1: wrap a thread body so an unhandled exception does not
+        """Wrap a thread body so an unhandled exception does not
         silently kill the daemon.
 
         Catches exceptions from ``target``, logs a traceback, emits a
@@ -708,7 +708,7 @@ class REACHER:
         return wrapped
 
     def _make_thread(self, target, name: str) -> threading.Thread:
-        """Fix 7.1: build a resilient daemon thread using ``_resilient``."""
+        """Build a resilient daemon thread using ``_resilient``."""
         return threading.Thread(
             target=self._resilient(target, name),
             daemon=True,
@@ -751,11 +751,11 @@ class REACHER:
         while not self.serial_flag.is_set():
             try:
                 if self.ser.is_open and self.ser.in_waiting > 0:
-                    # Fix: SER-004 — Read outside lock, only queue inside lock
+                    # Read outside lock, only queue inside lock
                     frame = self._assemble_rx_frame(self.ser.readline())
                     if frame is None:
                         continue
-                    # Fix: SER-001 — Strict UTF-8 decode; discard corrupt lines
+                    # Strict UTF-8 decode; discard corrupt lines
                     try:
                         decoded = frame.decode(encoding='utf-8', errors='strict').strip()
                     except UnicodeDecodeError:
@@ -782,11 +782,11 @@ class REACHER:
                         session_id=self.session_id,
                         line=decoded,
                     )
-                    # Fix: F-003 — Discard if queue is full; prevents OOM on I/O lag
+                    # Discard if queue is full; prevents OOM on I/O lag
                     try:
                         self.queue.put_nowait(decoded)
                     except queue.Full:
-                        # Fix 2.6: surface overflow to the frontend so a silent
+                        # Surface overflow to the frontend so a silent
                         # data-loss window is visible. Throttle to one emission
                         # per second so an overflow storm doesn't itself flood
                         # the WS queue.
@@ -802,7 +802,7 @@ class REACHER:
                 else:
                     time.sleep(0.1)
             except (serial.SerialException, OSError) as e:
-                # Fix: F-003 — Attempt serial reconnection before giving up
+                # Attempt serial reconnection before giving up
                 self.logger.error("Serial disconnect detected: %s", e)
                 self._emit("disconnect", {"reason": str(e), "reconnecting": True})
 
@@ -889,14 +889,14 @@ class REACHER:
 
             self._write_controller_log(data)
 
-            # Fix: F-004 — Use .get() so a missing 'level' key doesn't KeyError
+            # Use .get() so a missing 'level' key doesn't KeyError
             level = data.get('level')
             if level is None:
                 self.logger.warning("Firmware event missing 'level': %s", data)
                 return
 
             if level in ("000", "001"):
-                with self.thread_lock:  # Fix: F-009 — guard cross-thread list access
+                with self.thread_lock:  # guard cross-thread list access
                     self._session_changes.append({"received_at": time.time(), **data})
             handler = self.code_dict.get(level)
             if handler is not None:
@@ -907,7 +907,7 @@ class REACHER:
         except json.JSONDecodeError as e:
             self.logger.error(f"Failed to parse JSON: {e}. Raw data: {line}")
         except Exception as e:
-            # Fix: F-006 — Notify frontend of processing failures so events aren't silently dropped
+            # Notify frontend of processing failures so events aren't silently dropped
             self.logger.error(f"Error processing data: {e}. Raw line: {line}")
             self._emit("kernel_error", {"reason": str(e), "raw": line})
 
@@ -928,7 +928,7 @@ class REACHER:
         Args:
             event: Parsed JSON event dict from firmware containing 'desc' key.
         """
-        # Fix: XL-002 — Log error_code when present
+        # Log error_code when present
         error_code = event.get("error_code", "UNKNOWN")
         desc = event.get("desc", "Unknown")
         # Firmware names the offending code on an unrecognised command. Resolve
@@ -953,7 +953,7 @@ class REACHER:
                 self._update_hardware_setting("AUX", {"pin": previous})
         self._emit("error", event)
 
-    # Fix: XL-001 — Minimum firmware version check
+    # Minimum firmware version check
     MIN_FIRMWARE_VERSION = "v2.0.0"
 
     @staticmethod
@@ -992,7 +992,7 @@ class REACHER:
             return
         param_row = self._normalise_param_change(event)
         if event["device"] == "CONTROLLER":
-            with self.thread_lock:  # Fix: F-009 — guard cross-thread dict access
+            with self.thread_lock:  # guard cross-thread dict access
                 # An IDN line replaces the capability set: firmware reflashed to
                 # an older build must not inherit the previous build's caps.
                 if "sketch" in event and "caps" not in event:
@@ -1004,10 +1004,10 @@ class REACHER:
             if "sketch" in event and self._has_aux(event):
                 # IDENTIFY disarms every device on the board.
                 self._update_hardware_setting("AUX", {"armed": False})
-            # Fix: LAZ-001 — Signal firmware readiness (IDENTIFY ack received)
+            # Signal firmware readiness (IDENTIFY ack received)
             # Unblock any waiting connect/post-upload flow so state transitions to "connected"
             self._firmware_ready.set()
-            # Fix: XL-001 — Warn on firmware version mismatch
+            # Warn on firmware version mismatch
             fw_version = event.get("version", "")
             if fw_version:
                 try:
@@ -1049,7 +1049,7 @@ class REACHER:
                 baud_rate=event.get("baud_rate"),
                 version_mismatch=_mismatch,
             )
-            # Fix: SER-002 — Verify baud rate matches after firmware identification
+            # Verify baud rate matches after firmware identification
             fw_baud = event.get("baud_rate")
             if fw_baud is not None and self.ser.is_open:
                 if int(fw_baud) != self.ser.baudrate:
@@ -1066,7 +1066,7 @@ class REACHER:
             self._emit("config", event)
         else:
             device = event.get("device")
-            with self.thread_lock:  # Fix: F-009 — guard cross-thread list access
+            with self.thread_lock:  # guard cross-thread list access
                 if param_row is not None:
                     self._merge_hardware_row(param_row)
                 else:
@@ -1092,7 +1092,7 @@ class REACHER:
 
     def _update_hardware_setting(self, device: str, updates: dict) -> None:
         """Update a device entry in hardware_settings in-place and emit a config event."""
-        with self.thread_lock:  # Fix: F-009 — guard cross-thread list access
+        with self.thread_lock:  # guard cross-thread list access
             for entry in self.hardware_settings:
                 if entry.get("device") == device:
                     entry.update(updates)
@@ -1215,7 +1215,7 @@ class REACHER:
                 entry_dict['start_timestamp'] = event.get('start_timestamp')
                 entry_dict['end_timestamp'] = event.get('end_timestamp')
             case "SWITCH_LEVER":
-                # Legacy firmware (pre-v2.4.x): orientation field holds "RH" or "LH"
+                # Firmware before v2.4.x: orientation field holds "RH" or "LH"
                 entry_dict['device'] = "LEVER_" + event.get('orientation', '')
                 entry_dict['event'] = f"{event.get('class')}_{event.get('event')}"
                 entry_dict['start_timestamp'] = event.get('start_timestamp')
@@ -1278,7 +1278,7 @@ class REACHER:
                         self._press_count += 1
                     elif entry_dict.get('device') == 'PAVLOV' and entry_dict.get('event') == 'TRIAL_START':
                         self._trial_count += 1
-                    # Fix: F-002 — Warn when data lists grow dangerously large
+                    # Warn when data lists grow dangerously large
                     total = len(self.behavior_data) + len(self.frame_data) + len(self.slm_data)
             if not stale:
                 if total >= self._DATA_WARNING_THRESHOLD and not self._data_warning_emitted:
@@ -1421,7 +1421,7 @@ class REACHER:
     def _emit(self, event_type: str, data: dict) -> None:
         """Broadcast an event via the registered callback (if any).
 
-        Fix 7.4: increment a failure counter rather than re-emitting a warning
+        Increments a failure counter rather than re-emitting a warning
         through the same callback (which would recurse if the callback is the
         broken channel). The counter is surfaced via /api/sessions/{sid}.
         """
@@ -1443,7 +1443,7 @@ class REACHER:
     def _write_event_log(self, entry: dict) -> None:
         """Append a JSON line to the append-only event log.
 
-        Fix: F-010 — Keeps the file handle open for the session lifetime and
+        Keeps the file handle open for the session lifetime and
         batches fsync calls (every _EVENT_LOG_FSYNC_INTERVAL writes) to reduce
         I/O overhead at high event rates while maintaining durability.
         """
@@ -1481,7 +1481,7 @@ class REACHER:
                 self._emit("warning", {"reason": "log_close_failure", "log_type": "event_log"})
 
     def _write_controller_log(self, data: dict) -> None:
-        """Append a JSON line to controller_log.json (Fix 4.9).
+        """Append a JSON line to controller_log.json.
 
         Mirrors _write_event_log: persistent handle, flush every write, fsync
         every _CONTROLLER_LOG_FSYNC_INTERVAL writes. Avoids the syscall storm
@@ -1604,14 +1604,14 @@ class REACHER:
                 export_parts.append("slm_timestamps.csv")
             self.logger.info("Auto-export complete: %s", " + ".join(export_parts))
         except Exception as e:
-            # Fix: F-005 — Surface export failures to the frontend in real time
+            # Surface export failures to the frontend in real time
             self.logger.warning("Auto-export failed", exc_info=True)
             self._emit("export_failed", {"reason": str(e)})
 
     def _build_session_summary(self) -> Dict:
         """Distill level-000/001 events into initial config, ordered changes, and final state.
 
-        reacher#12: config/arm-disarm frames carry no onboard clock (unlike
+        Config/arm-disarm frames carry no onboard clock (unlike
         level-007 events, which come with their own start/end millis), so
         `received_at` on each change is the host's wall-clock time at serial
         receipt, not a firmware timestamp. `final_state` reuses
@@ -1619,7 +1619,7 @@ class REACHER:
         replaying `changes`, since those dicts are already maintained as the
         latest-value-per-device view by `update_firmware_information`.
         """
-        with self.thread_lock:  # Fix: F-009 — snapshot under lock
+        with self.thread_lock:  # snapshot under lock
             changes = [dict(entry) for entry in self._session_changes]
             firmware_information = dict(self.firmware_information)
             hardware_settings = [dict(entry) for entry in self.hardware_settings]
@@ -1667,7 +1667,7 @@ class REACHER:
         }
 
     def get_session_summary(self) -> Dict:
-        """Thread-safe accessor for the distilled session change-tracking summary (reacher#12)."""
+        """Thread-safe accessor for the distilled session change-tracking summary."""
         return self._build_session_summary()
 
     def _write_session_summary(self) -> None:
@@ -1875,9 +1875,9 @@ class REACHER:
             self.logger.warning("close_serial failed; continuing with export", exc_info=True)
         self.program_end_time = time.time()
         self._write_event_log({"type": "SESSION_END", "timestamp": self.program_end_time})
-        self._close_event_log()  # Fix: F-010 — Ensure all events flushed before export
+        self._close_event_log()  # Ensure all events flushed before export
         self._auto_export()
-        self._write_session_summary()  # reacher#12
+        self._write_session_summary()
         self.logger.info(f"Program ended at {self.get_time()}")
 
     def pause_program(self) -> None:
@@ -1898,7 +1898,7 @@ class REACHER:
         - Resumes the experiment and calculates total paused time.
         - Sends SESSION_PAUSE(false) to firmware to resume processing.
         """
-        # Fix: F-007 — Guard against calling resume when not paused (paused_start_time is None)
+        # Guard against calling resume when not paused (paused_start_time is None)
         if self.paused_start_time is None:
             self.logger.warning("resume_program() called but paused_start_time is None — ignoring")
             return
@@ -2306,7 +2306,7 @@ class REACHER:
         **Returns:**
         - `Dict`: The configuration dictionary.
         """
-        with self.thread_lock:  # Fix: F-009 — snapshot under lock
+        with self.thread_lock:  # snapshot under lock
             return dict(self.firmware_information)
 
     def get_firmware_caps(self) -> set:
@@ -2318,7 +2318,7 @@ class REACHER:
         return {c.strip() for c in caps.split(",") if c.strip()}
 
     def get_hardware_settings(self) -> List:
-        with self.thread_lock:  # Fix: F-009 — snapshot under lock
+        with self.thread_lock:  # snapshot under lock
             return list(self.hardware_settings)
     
     def get_box_name(self) -> Optional[str]:
@@ -2370,8 +2370,6 @@ class REACHER:
     @staticmethod
     def prune_logs(days: int = 30) -> int:
         """Remove log directories older than *days* from ~/REACHER/LOG.
-
-        Fix: PY-006 — CLI maintenance command support.
 
         Returns:
             Number of directories removed.

@@ -100,7 +100,7 @@ FIXED_PINS: dict[str, str] = {
 #:   raw namespaces  -> validate reacher against firmware
 #:   post_kernel     -> validate anything downstream against reacher
 POST_KERNEL_EVENT_REWRITES: dict[str, tuple[str, ...]] = {
-    # Legacy pre-v2.4.x firmware sends one SWITCH_LEVER with an orientation
+    # Firmware before v2.4.x sends one SWITCH_LEVER with an orientation
     # field; the kernel splits it into the two modern names.
     "SWITCH_LEVER": ("LEVER_RH", "LEVER_LH"),
     # Level 007 spells the lick circuit LICK_CIRCUIT; level 000 spells it LICK.

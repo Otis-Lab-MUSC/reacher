@@ -313,7 +313,7 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
             ),
         )
 
-        # session_summary.json — distilled level-000/001 config/arm-disarm trail (reacher#12)
+        # session_summary.json — distilled level-000/001 config/arm-disarm trail
         try:
             session_summary = instance.get_session_summary()
             zf.writestr("session_summary.json", json.dumps(session_summary, indent=2))
@@ -389,7 +389,7 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
     with open(zip_path, "wb") as f:
         f.write(buf.getvalue())
 
-    # Issue labrynth#22: releases this session from the extended
+    # Releases this session from the extended
     # unexported-stopped orphan-cleanup window now that its data is safe on disk.
     sm.mark_exported(session_id)
 
@@ -398,7 +398,7 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
 
 @router.get("/{session_id}/export/download")
 async def download_export(session_id: str, path: str = Query(...), request: Request = None):
-    """Return a previously exported ZIP as a binary download to the browser."""
+    """Return an exported ZIP as a binary download to the browser."""
     sm = request.app.state.session_manager
     try:
         sm.get_session(session_id)

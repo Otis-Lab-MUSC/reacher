@@ -210,7 +210,7 @@ class FirmwareUploader:
         candidates = [
             # Package data (pip-installed with hex files as package data) — CANONICAL
             ("package-data", pkg_hex),
-            # CWD-relative (legacy layout: running from a checkout that keeps
+            # CWD-relative (running from a checkout that keeps
             # hex under firmware/hex)
             ("cwd/firmware/hex", os.path.join(os.getcwd(), "firmware", "hex")),
             # Home directory fallback
@@ -526,7 +526,7 @@ class FirmwareUploader:
                     if progress_callback:
                         progress_callback(percent, stage)
 
-        # Fix: F-002 — avrdude can hang indefinitely on a bad USB connection; enforce timeout
+        # Avrdude can hang indefinitely on a bad USB connection; enforce timeout
         try:
             await asyncio.wait_for(proc.wait(), timeout=120.0)
         except asyncio.TimeoutError:

@@ -126,7 +126,7 @@ class TimeoutWindow:
       ``Scheduler::ClassifyPress`` turns an in-window press on the reinforced
       lever into ``TIMEOUT``. A ``TIMEOUT`` press is logged but never reaches
       ``Trigger::OnInputEvent``, so it does not advance the ratio.
-    * mode 0 (legacy default) arms the window on *every* ACTIVE press,
+    * mode 0 (the default) arms the window on *every* ACTIVE press,
     * mode 1 arms it only on an ACTIVE press that fired a reward chain.
 
     An interval of 0 arms nothing: firmware would write ``ts + 0``, which only
@@ -969,7 +969,7 @@ class FirmwareSimulator:
         }
 
     def _restore_arm_state(self, snap: dict):
-        """Restore previously captured arm states."""
+        """Restore captured arm states."""
         self.lever_rh_armed = snap.get("lever_rh_armed", self.lever_rh_armed)
         self.lever_lh_armed = snap.get("lever_lh_armed", self.lever_lh_armed)
         self.cue_armed = snap.get("cue_armed", self.cue_armed)
@@ -1069,7 +1069,7 @@ class FirmwareSimulator:
 
     def stop(self):
         if self._self_ended:
-            # pavlovian.ino EndSession() returns early once the session is no longer active: no second END.
+            # pavlovian.ino EndSession() returns early while the session is inactive: no second END.
             self._stop_event.set()
             if self._thread and self._thread.is_alive() and self._thread is not threading.current_thread():
                 self._thread.join(timeout=3)

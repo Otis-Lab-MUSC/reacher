@@ -28,7 +28,7 @@ _connections: Dict[str, Set[WebSocket]] = defaultdict(set)
 _EVENT_QUEUE_MAX = 10000
 _event_queue: queue.Queue = queue.Queue(maxsize=_EVENT_QUEUE_MAX)
 
-# Fix: PY-004 — Thread-safe dropped event counter
+# Thread-safe dropped event counter
 _dropped_events_lock = threading.Lock()
 _dropped_events: int = 0
 
@@ -124,8 +124,7 @@ def had_connections() -> bool:
 def _any_session_active() -> bool:
     """Return True if any session is in 'running', 'paused' or 'uploading' state.
 
-    Fix: F-001 (#30) — mid-acquisition guard; F-002 (#36) — mid-flash guard.
-    Prevents watchdog and shutdown beacon from killing the process while an
+    Guards against mid-acquisition and mid-flash shutdown. Prevents watchdog and shutdown beacon from killing the process while an
     experiment is recording OR while avrdude is flashing firmware.
     """
     if _app_ref is None:
@@ -143,7 +142,7 @@ def _any_session_active() -> bool:
 async def _watchdog():
     """Poll for 0 connections; auto-shutdown if no clients for WATCHDOG_TIMEOUT seconds.
 
-    Fix: F-001 — Defers shutdown while any session is running or paused, using the
+    Defers shutdown while any session is running or paused, using the
     orphan cleanup's extended timeout (600s) instead of the default 120s.
     """
     while True:
@@ -217,7 +216,7 @@ def enqueue_event(session_id: str, event_type: str, data: dict):
 async def _broadcast_worker():
     """Background task that drains the event queue and sends to connected clients.
 
-    Fix: F-004 — Periodically checks for dropped events and broadcasts a warning
+    Periodically checks for dropped events and broadcasts a warning
     to all connected clients so they know data may be missing.
     """
     global _notify
@@ -238,7 +237,7 @@ async def _broadcast_worker():
             session_id = msg.get("session_id", "")
             payload = json.dumps(msg)
 
-            # Fix #15 (diagnostic): a fanout with 0 subscribers means the event
+            # A fanout with 0 subscribers means the event
             # is dropped on the floor — the signature of the proxy late-connect
             # race. Gated behind DEBUG so it is silent in normal operation.
             logger.debug(
@@ -257,7 +256,7 @@ async def _broadcast_worker():
             if dead:
                 _connections[session_id] -= dead
 
-        # Fix: F-004 — Warn all connected clients when events are being dropped
+        # Warn all connected clients when events are being dropped
         current_drops = dropped_events()
         if current_drops > _last_warned_drops:
             _diag_log("ws.events_dropped", tier=_TIER_API, lvl="warn",
@@ -301,7 +300,7 @@ def _ensure_broadcast_worker():
 _session_disconnect_times: Dict[str, float] = {}
 _SESSION_ORPHAN_TIMEOUT = 60  # seconds with 0 WS clients before destroying a session
 _SESSION_ORPHAN_TIMEOUT_ACTIVE = 600  # extended timeout for running/paused/uploading sessions
-# Issue labrynth#22: a "stopped" session still holds data the user has not
+# A "stopped" session still holds data the user has not
 # exported yet. destroy_session() drops the REACHER instance the export
 # endpoints read from, so reaping it on the short default timeout turns a
 # closed laptop lid or a flaky network into permanent, silent data loss.
@@ -351,9 +350,9 @@ async def _orphan_cleanup():
                     # We'll use the global _app_ref set during first WS connect
                     if _app_ref is not None:
                         sm: SessionManager = _app_ref.state.session_manager
-                        # Fix: F-001 — destroy_session is blocking; run off the event loop
+                        # destroy_session is blocking; run off the event loop
                         await asyncio.get_event_loop().run_in_executor(None, sm.destroy_session, sid)
-                        # Fix: F-008 — clean up rate-limit timestamps
+                        # Clean up rate-limit timestamps
                         release_session(sid)
                         logger.info("Orphan cleanup: destroyed session %s", sid)
                 except Exception:
@@ -397,7 +396,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
               connections=total_connections(),
               client=getattr(websocket.client, "host", None))
 
-    # Fix #15: snapshot the current session state to this just-connected client.
+    # Snapshot the current session state to this just-connected client.
     # State transitions (idle->uploading->connected->running) are broadcast as
     # they happen; a client that connects *after* a transition never sees it. In
     # proxy/IoT mode the WS relay always connects late (after an async ws-token

@@ -124,7 +124,7 @@ def c14_declaration_handler_parity(ctx: CheckContext) -> Result:
 
     KNOWN_FIRMWARE_GAPS entries carry a "failure_mode" discriminator (see
     schema.py) that this check must honor, not just tolerate:
-    - "code_rejected" (the default/legacy shape): firmware has no handler, so
+    - "code_rejected" (the default shape): firmware has no handler, so
       an entry naming a paradigm with no handler is exactly what's expected —
       exempt it.
     - "wrong_value_accepted": the handler DOES exist and runs (it just silently

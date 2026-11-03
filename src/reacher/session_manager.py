@@ -86,7 +86,7 @@ class SessionManager:
             def _on_program_stopped():
                 self.set_state(session_id, "stopped")
 
-            # Fix: XL-003 — Wrap event callback to intercept disconnect events
+            # Wrap event callback to intercept disconnect events
             def _event_callback_wrapper(sid: str, event_type: str, data: dict):
                 if event_type == "disconnect":
                     self.handle_disconnect(sid, data.get("reason", "unknown"))
@@ -158,7 +158,7 @@ class SessionManager:
         except Exception:
             logger.warning("Error during session %s cleanup", session_id, exc_info=True)
         finally:
-            # Fix: F-007 — Ensure serial port is released even if stop_program() raises
+            # Ensure serial port is released even if stop_program() raises
             try:
                 if info.instance.ser.is_open:
                     info.instance.ser.close()
@@ -191,7 +191,7 @@ class SessionManager:
     def list_sessions(self) -> List[dict]:
         """Return a serialisable summary of all sessions.
 
-        Fix: F-008 — Acquire lock to prevent inconsistent snapshots during
+        Acquires the lock to prevent inconsistent snapshots during
         concurrent create/destroy operations.
         """
         with self._lock:
@@ -211,7 +211,7 @@ class SessionManager:
     # ------------------------------------------------------------------
 
     def set_state(self, session_id: str, state: str) -> None:
-        # Fix: F-008 — Lock protects _sessions access
+        # Lock protects _sessions access
         with self._lock:
             info = self._sessions.get(session_id)
         if info is None:
@@ -220,7 +220,7 @@ class SessionManager:
         info.state = state
         # Any state transition invalidates a prior export flag — a fresh
         # "stopped" holds not-yet-exported data, and leaving "stopped" (e.g.
-        # via reset) means the flag no longer describes the current run.
+        # via reset) means the flag does not describe the current run.
         info.exported = False
         if previous != state:
             _diag_log(
@@ -249,7 +249,7 @@ class SessionManager:
                 info.exported = True
 
     def set_paradigm(self, session_id: str, paradigm: str) -> None:
-        # Fix: F-008 — Lock protects _sessions access
+        # Lock protects _sessions access
         with self._lock:
             info = self._sessions.get(session_id)
         if info is None:
@@ -257,7 +257,7 @@ class SessionManager:
         info.paradigm = paradigm
 
     def set_board(self, session_id: str, board: str) -> None:
-        # Fix: F-008 — Lock protects _sessions access
+        # Lock protects _sessions access
         with self._lock:
             info = self._sessions.get(session_id)
         if info is None:
@@ -276,7 +276,7 @@ class SessionManager:
     def handle_disconnect(self, session_id: str, reason: str) -> None:
         """Handle a serial disconnect event from the kernel.
 
-        Fix: XL-003 — Transition session to 'disconnected' state and broadcast.
+        Transitions the session to 'disconnected' state and broadcast.
         """
         info = self._sessions.get(session_id)
         if info is None:

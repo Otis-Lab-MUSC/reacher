@@ -199,7 +199,7 @@ def _pin_owner(info, pin: int, exclude: str) -> Optional[str]:
 
 
 def release_session(session_id: str) -> None:
-    """Fix: F-008 — Remove rate-limit state for a destroyed session to prevent memory leak."""
+    """Remove rate-limit state for a destroyed session to prevent memory leak."""
     _command_timestamps.pop(session_id, None)
 
 

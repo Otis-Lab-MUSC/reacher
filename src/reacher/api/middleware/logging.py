@@ -89,7 +89,7 @@ class RequestLoggingMiddleware:
                 # bridge.py's scrub_message() is not on this path) and redact()
                 # only matches by key, so a credentialed URL embedded in an
                 # exception (e.g. websockets.InvalidURI) would otherwise pass
-                # through unscrubbed (Fix: F5 neighbor audit).
+                # through unscrubbed.
                 self._record(
                     method, path, scope, 500, started, body_chunks,
                     error=scrub_message(f"{type(exc).__name__}: {exc}"),
