@@ -130,7 +130,7 @@ class CommandCode(IntEnum):
     LEVER_RH_SET_TIMEOUT = 1074
     LEVER_RH_SET_RATIO = 1075
     LEVER_RH_SET_PIN = 1076
-    # 0 = every active press starts the timeout (legacy), 1 = reward-triggering
+    # 0 = every active press starts the timeout, 1 = reward-triggering
     # press only. Scheduler-wide: 1077 and 1377 write the same flag, exactly as
     # 1074/1374 both write the one timeout interval.
     LEVER_RH_SET_TIMEOUT_MODE = 1077

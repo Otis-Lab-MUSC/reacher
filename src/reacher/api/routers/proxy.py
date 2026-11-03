@@ -80,13 +80,13 @@ async def ws_relay(ws: WebSocket, device_id: str, session_id: str):
         # ping_interval=None: rely on uvicorn's server-side keepalive on the Pi
         # rather than running a second, independent library-level ping on the
         # relay's upstream socket — the two ping layers can race and silently
-        # tear down the upstream under load (Fix #15, secondary hardening).
+        # tear down the upstream under load (secondary hardening).
         upstream = await websockets.connect(upstream_url, open_timeout=10, ping_interval=None)
     except Exception as exc:
         # Log the sanitized target, never upstream_url (carries machine['api_key']
         # as a query param).  `exc` itself may still embed the full credentialed
         # URL (e.g. websockets.InvalidURI on a malformed upstream url) — that is
-        # scrubbed as a backstop in diagnostics/bridge.py (Fix: F5).
+        # scrubbed as a backstop in diagnostics/bridge.py.
         logger.error(
             "WS relay upstream connect failed for %s/%s url=%s: %s",
             device_id[:8], session_id, upstream_target, exc, exc_info=True,

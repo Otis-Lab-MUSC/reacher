@@ -5,7 +5,7 @@ POST   /api/discovery/manual        — store a manually-supplied API key
 POST   /api/discovery/pair-by-code  — pair with any discovered device using just a pairing code
 POST   /api/discovery/pair-by-url   — pair with a device at a known URL using a pairing code
 POST   /api/discovery/{id}/pair     — pair with a specific mDNS-discovered device using a pairing code
-DELETE /api/discovery/{id}          — unpair and remove a previously paired machine
+DELETE /api/discovery/{id}          — unpair and remove a paired machine
 """
 
 import asyncio
@@ -83,7 +83,7 @@ async def register_device(body: RegisterRequest, request: Request) -> dict:
 
 @router.get("")
 async def list_discovered(request: Request) -> dict:
-    """Return all REACHER devices: mDNS-visible peers and previously-paired machines."""
+    """Return all REACHER devices: mDNS-visible peers and paired machines."""
     peers = discovery.get_peers()
     paired = machines.get_all()
     devices = []
@@ -103,7 +103,7 @@ async def list_discovered(request: Request) -> dict:
             "name": paired[device_id].get("name", peer["hostname"]) if is_paired else peer["hostname"],
         })
 
-    # Paired machines not currently visible via mDNS (e.g. offline but previously paired)
+    # Paired machines not currently visible via mDNS (e.g. offline but paired)
     for device_id, info in paired.items():
         if device_id not in seen:
             devices.append({
@@ -321,7 +321,7 @@ async def pair_device(device_id: str, body: PairRequest, request: Request) -> di
 
 @router.delete("/{device_id}")
 async def remove_machine(device_id: str, request: Request) -> dict:
-    """Unpair and remove a previously paired machine.
+    """Unpair and remove a paired machine.
 
     Best-effort notifies the remote device to clear its paired state so it
     can accept new pairing attempts.  If the remote device is unreachable the

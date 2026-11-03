@@ -49,7 +49,7 @@ def _open_browser(url: str) -> None:
     private-mode flags in order; falls back to ``webbrowser.open`` if none are
     on PATH.
 
-    Fix: F-browser — ``REACHER_NO_BROWSER`` short-circuits both branches
+    ``REACHER_NO_BROWSER`` short-circuits both branches
     below, checked before either.  Every caller of this function goes through
     it (the lifespan's first-launch open and ``main()``'s already-running
     surface-the-UI open alike), so a single gate here covers both call sites
@@ -224,7 +224,7 @@ async def lifespan(app: FastAPI):
     http_client = httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0))
     app.state.http_client = http_client
 
-    # Load previously paired machines from disk
+    # Load paired machines from disk
     machines.load()
 
     # Load persisted per-port Arduino pin overrides
@@ -301,7 +301,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Fix: PY-008 — Allow additional CORS origins via env var
+    # Allow additional CORS origins via env var
     cors_origins = [f"http://localhost:{PORT}", f"http://127.0.0.1:{PORT}"]
     extra_origins = os.getenv("REACHER_CORS_ORIGINS", "")
     if extra_origins:
@@ -339,12 +339,12 @@ def create_app() -> FastAPI:
             "logging": _log_health(),
         }
 
-    # Fix: PY-001 — Restrict token endpoint to same-origin requests
+    # Restrict token endpoint to same-origin requests
     _allowed_origins = set(cors_origins)
 
     @app.get("/api/auth/token", tags=["auth"])
     async def get_auth_token(request: Request):
-        # Fix: F1 (2026-09-18 pressure test) — a same-origin browser GET carries
+        # A same-origin browser GET carries
         # no Origin header at all, so the check above never rejected a request
         # with no Origin — including curl, scripts, and SSRF gadgets. Two extra
         # layers close that:

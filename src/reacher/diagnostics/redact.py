@@ -96,7 +96,7 @@ def redact(value: Any, _depth: int = 0) -> Any:
         # Cheap containment check before the regex passes in scrub_message —
         # field values are logged verbatim by design and this is a hot path,
         # so every string should not pay for two regex scans on the offchance
-        # it holds a credential (Fix: F5, redact() string-value gap).
+        # it holds a credential.
         if "=" in text or "earer" in text:
             text = scrub_message(text)
         return text if len(text) <= MAX_STR else text[:MAX_STR] + f"…[+{len(text) - MAX_STR}]"
@@ -149,7 +149,7 @@ def scrub_message(text: str) -> str:
     A value interpolated into a message string (``f"... url=... {exc}"``) has
     no key for `redact()` to match — this is the backstop for that case, e.g.
     a `websockets.InvalidURI` whose ``str()``/traceback embeds the full
-    connect URI, query string included (Fix: F5).
+    connect URI, query string included.
     """
     if not text:
         return text

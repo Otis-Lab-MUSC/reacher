@@ -73,7 +73,7 @@ class SinkHandler(logging.Handler):
                 # InvalidURI) is repeated in full by the traceback.  Scrubbed
                 # below via redact(data) — not here directly — because "exc"
                 # is a plain dict value and redact()'s string branch already
-                # runs scrub_message() on it (Fix: F5); scrubbing it twice is
+                # runs scrub_message() on it; scrubbing it twice is
                 # not idempotent (a matched value ending in "]" loses its
                 # closing bracket to the first pass's exclusion, and the
                 # second pass's replacement re-adds one, e.g. "[redacted]]").

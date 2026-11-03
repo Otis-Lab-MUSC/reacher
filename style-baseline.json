@@ -3,7 +3,7 @@
   "except_exception_sites": 122,
   "files_over_300_lines": 20,
   "functions_over_50_lines": 48,
-  "history_comments": 110,
+  "history_comments": 0,
   "mypy_strict_errors": 403,
   "ruff_ANN": 150,
   "ruff_BLE": 93,

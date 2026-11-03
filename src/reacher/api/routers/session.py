@@ -95,8 +95,8 @@ async def destroy_session(session_id: str, request: Request):
         sm.get_session(session_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
-    # Fix: F-001 — destroy_session calls stop_program (blocking); run off the event loop
-    # Fix: F-008 — clean up rate-limit timestamps for this session
+    # destroy_session calls stop_program (blocking); run off the event loop
+    # Clean up rate-limit timestamps for this session
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, sm.destroy_session, session_id)
     from .hardware import release_session

@@ -175,7 +175,7 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
         # board is now physically running the new hex and says so at IDENTIFY.
         instance.set_COM_port(info.port, body.paradigm)
         instance.open_serial()
-        # Fix: [PERSON_NAME] — Wait for IDENTIFY response (firmware readiness gate)
+        # Wait for IDENTIFY response (firmware readiness gate)
         # Boot process: 1.5–2s bootloader → firmware starts → responds to IDENTIFY
         # Don't set "connected" until firmware is ready, to prevent command loss.
         instance._firmware_ready.clear()
@@ -197,7 +197,7 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
             _logger.debug("close after mid-upload delete failed for %s", session_id, exc_info=True)
         raise _gone_response()
 
-    # Fix: [PERSON_NAME] — Wait for IDENTIFY response before transitioning to "connected"
+    # Wait for IDENTIFY response before transitioning to "connected"
     # This ensures bootloader has exited and firmware is ready to process commands.
     try:
         if instance._firmware_ready.wait(timeout=2.0):
