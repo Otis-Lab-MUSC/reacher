@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from ...kernel.commands import COMMAND_REGISTRY, CommandCode, get_commands_for_paradigm
+from ...kernel.errors import SerialPortClosedError
 from ... import pin_overrides, pump_target
 
 router = APIRouter()
@@ -122,9 +123,9 @@ async def send_command(session_id: str, body: CommandRequest, request: Request):
 
     try:
         info.instance.send_command(body.code, body.value)
-    except Exception as exc:
-        if "serial port is not open" in str(exc).lower():
-            raise HTTPException(status_code=409, detail="Session not connected — connect to a serial port first")
+    except SerialPortClosedError:
+        raise HTTPException(status_code=409, detail="Session not connected — connect to a serial port first")
+    except Exception:
         logger.error("Command %s failed", spec.name, exc_info=True)
         raise HTTPException(status_code=500, detail="Command failed")
 
