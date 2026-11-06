@@ -1373,6 +1373,7 @@ name = "reacher2p"
 version = "3.4.0b15"
 source = { editable = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "openpyxl" },
@@ -1403,6 +1404,7 @@ tray = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = "==50.0.1" },
     { name = "fastapi", specifier = ">=0.110,<1.0" },
     { name = "httpx", specifier = ">=0.27,<1.0" },
     { name = "mcp", marker = "extra == 'dev'", specifier = ">=2.0,<3.0" },
