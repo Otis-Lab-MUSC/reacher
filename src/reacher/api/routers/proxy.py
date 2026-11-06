@@ -54,7 +54,7 @@ class _WsToken(TypedDict):
     ws_url: str
 
 
-@router.get("/{device_id}/ws-token")
+@router.get("/{device_id}/ws-token", response_model=None)
 async def get_ws_token(device_id: str, request: Request) -> _WsToken:
     """Return the local API key and relay WebSocket base URL for a paired machine.
 

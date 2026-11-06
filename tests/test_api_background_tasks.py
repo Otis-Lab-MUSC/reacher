@@ -47,6 +47,8 @@ def test_broadcast_worker_ends_on_a_bug_and_restarts_on_the_next_connect():
     """A TypeError inside the fan-out ends the worker; _ensure_broadcast_worker starts a new one."""
 
     async def scenario():
+        while not ws._event_queue.empty():
+            ws._event_queue.get_nowait()
         ws._broadcast_task = ws._watchdog_task = None
         ws._ensure_broadcast_worker()
         first = ws._broadcast_task
@@ -68,14 +70,53 @@ def test_broadcast_worker_ends_on_a_bug_and_restarts_on_the_next_connect():
             ws._event_queue.put_nowait(dict(EVENT))
             ws._notify.set()
             for _ in range(50):
-                if delivered.await_count:
+                if any(call.args[0] == "s1" for call in delivered.await_args_list):
                     break
                 await asyncio.sleep(0.01)
         await _cancel(second, ws._watchdog_task)
         return delivered
 
     delivered = asyncio.run(scenario())
-    assert delivered.await_count == 1
+    assert [c.args[0] for c in delivered.await_args_list].count("s1") == 1
+
+
+def test_a_background_task_that_dies_leaves_an_error_in_the_log(caplog):
+    """A task that ends on a bug is logged when it ends, not only when the next connect replaces it."""
+
+    async def scenario():
+        while not ws._event_queue.empty():
+            ws._event_queue.get_nowait()
+        ws._broadcast_task = ws._watchdog_task = None
+        ws._ensure_broadcast_worker()
+        worker = ws._broadcast_task
+        await asyncio.sleep(0)
+        with patch.object(ws, "_send_to_session", AsyncMock(side_effect=TypeError("bug in fan-out"))):
+            ws._event_queue.put_nowait(dict(EVENT))
+            ws._notify.set()
+            await asyncio.gather(worker, return_exceptions=True)
+            await asyncio.sleep(0)
+        await _cancel(ws._watchdog_task)
+
+    with caplog.at_level("ERROR", logger=ws.logger.name):
+        asyncio.run(scenario())
+    died = [r for r in caplog.records if r.levelname == "ERROR" and "ended on an unexpected error" in r.getMessage()]
+    assert len(died) == 1 and died[0].exc_info is not None
+    assert isinstance(died[0].exc_info[1], TypeError)
+
+
+def test_a_cancelled_background_task_is_not_logged_as_an_error(caplog):
+    """Shutdown cancels the tasks; that is not a failure."""
+
+    async def scenario():
+        ws._broadcast_task = ws._watchdog_task = None
+        ws._ensure_broadcast_worker()
+        await asyncio.sleep(0)
+        await _cancel(ws._broadcast_task, ws._watchdog_task)
+        await asyncio.sleep(0)
+
+    with caplog.at_level("ERROR", logger=ws.logger.name):
+        asyncio.run(scenario())
+    assert not [r for r in caplog.records if "ended on an unexpected error" in r.getMessage()]
 
 
 def test_orphan_reaper_ends_on_a_bug_but_survives_an_expected_failure():

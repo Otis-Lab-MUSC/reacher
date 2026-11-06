@@ -54,6 +54,29 @@ class UploadRequest(BaseModel):
 
 @router.post("/upload/{session_id}", response_model=None)
 async def upload_firmware(session_id: str, body: UploadRequest, request: Request) -> dict[str, JsonValue]:
+    """Flash the board for *session_id* and reconnect it, leaving the session idle on any failure."""
+    sm = request.app.state.session_manager
+    finished = False
+    try:
+        result = await _flash_and_reconnect(session_id, body, request)
+        finished = True
+        return result
+    except HTTPException:
+        finished = True  # every rejection sets the state it needs; a gate refusal must not touch a running upload
+        raise
+    finally:
+        if not finished:
+            # An unexpected error (or a cancelled request) must not leave the session in "uploading",
+            # because that state refuses every later upload. Only this request can have set it here.
+            try:
+                if sm.get_session(session_id).state == "uploading":
+                    sm.set_state(session_id, "idle")
+            except KeyError:
+                _logger.debug("Session %s was deleted during its firmware upload", session_id)
+
+
+async def _flash_and_reconnect(session_id: str, body: UploadRequest, request: Request) -> dict[str, JsonValue]:
+    """Validate the request, run avrdude against the session's port, and reopen the serial link."""
     sm = request.app.state.session_manager
 
     # Same gate as POST /api/sessions. body.paradigm becomes the session's

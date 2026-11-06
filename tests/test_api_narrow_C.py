@@ -78,6 +78,64 @@ def test_probe_bug_surfaces(client, path, payload, headers):
         client.post(path, json=payload, headers=headers)
 
 
+def _healthy(hostname):
+    """A reachable REACHER /health reply whose hostname is *hostname*."""
+    reply = Mock()
+    reply.json.return_value = {"service": "reacher", "device_id": "dev-9", "hostname": hostname}
+    return reply
+
+
+@pytest.mark.parametrize("path,payload,headers", _PROBES[:2])
+def test_a_peer_without_a_string_hostname_is_still_stored_and_answered(
+    client, tmp_path, monkeypatch, path, payload, headers
+):
+    """A /health reply with a null hostname stays a 200 (the response is not schema-validated)."""
+    monkeypatch.setattr(machines, "_FILE", str(tmp_path / "machines.json"))
+    monkeypatch.setattr(machines, "_DIR", str(tmp_path))
+    monkeypatch.setattr(machines, "_cache", {})
+    client.app.state.http_client.get = AsyncMock(return_value=_healthy(None))
+    claimed = Mock(status_code=200)
+    claimed.json.return_value = {"api_key": "remote-key"}
+    client.app.state.http_client.post = AsyncMock(return_value=claimed)
+    resp = client.post(path, json=payload, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["device_id"] == "dev-9"
+
+
+def test_a_deeply_nested_health_body_is_a_400(client):
+    """json() raises RecursionError on a hostile, deeply nested reply; /register is unauthenticated."""
+    reply = Mock()
+    reply.json.side_effect = RecursionError("maximum recursion depth exceeded")
+    client.app.state.http_client.get = AsyncMock(return_value=reply)
+    resp = client.post("/api/discovery/register", json=_PROBES[2][1], headers={})
+    assert resp.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "status,expected",
+    [(429, 429), (409, 409), (401, 401), (500, 401)],
+)
+def test_claim_key_maps_the_remote_status(client, status, expected):
+    """The pairing code is forwarded and each remote status keeps its own answer."""
+    client.app.state.http_client.get = AsyncMock(return_value=_healthy("pi"))
+    client.app.state.http_client.post = AsyncMock(return_value=Mock(status_code=status))
+    path, payload, headers = _PROBES[1]
+    assert client.post(path, json=payload, headers=headers).status_code == expected
+
+
+@pytest.mark.parametrize(
+    "failure,expected",
+    [(httpx.ConnectError("refused"), 400), (httpx.ReadTimeout("slow"), 504)],
+    ids=["connect", "timeout"],
+)
+def test_claim_key_maps_a_network_failure(client, failure, expected):
+    """An unreachable device is a 400 and a slow one is a 504."""
+    client.app.state.http_client.get = AsyncMock(return_value=_healthy("pi"))
+    client.app.state.http_client.post = AsyncMock(side_effect=failure)
+    path, payload, headers = _PROBES[1]
+    assert client.post(path, json=payload, headers=headers).status_code == expected
+
+
 # --------------------------------------------------------------------------- #
 # discovery: /pair-by-code best-effort per-peer claim
 # --------------------------------------------------------------------------- #
@@ -298,3 +356,16 @@ def test_validate_rule_engine_bug_surfaces(client):
     with patch("reacher.api.routers.validate.run_validation", side_effect=RuntimeError("bug")):
         with pytest.raises(RuntimeError, match="bug"):
             client.post("/api/validate/config", json={}, headers=AUTH)
+
+
+def test_validate_oversized_integers_return_empty_warnings(client):
+    """Two 4300-digit numbers parse, then fail when a rule formats their 4301-digit sum."""
+    big = "9" * 4300
+    text = (
+        '{"hardwareUi":{"primaryCue":{"armed":true,"duration":%s,"contingency":{"delay":%s,"leverFilter":"rh"}},'
+        '"rhLever":{"armed":true,"timeout":5}},'
+        '"limitSettings":{"limitType":"Time","timeLimit":10}}' % (big, big)
+    )
+    resp = client.post("/api/validate/config", content=text, headers={**AUTH, "Content-Type": "application/json"})
+    assert resp.status_code == 200
+    assert resp.json()["warnings"] == []

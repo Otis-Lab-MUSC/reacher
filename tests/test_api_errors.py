@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import httpx
+import pytest
 import serial
 
 from reacher.api import errors
@@ -34,3 +35,16 @@ def test_groups_do_not_swallow_programming_errors() -> None:
     for group in (errors.HTTP_ERRORS, errors.KERNEL_ERRORS, errors.PERSIST_ERRORS, errors.WS_SEND_ERRORS):
         for bug in (KeyError, AttributeError, TypeError):
             assert not issubclass(bug, group)
+
+
+def test_kernel_group_catches_a_termios_failure_when_a_board_is_unplugged() -> None:
+    """pyserial's flush and buffer reset raise termios.error, which is not an OSError."""
+    termios = pytest.importorskip("termios")
+    assert not issubclass(termios.error, OSError)
+    assert issubclass(termios.error, errors.KERNEL_ERRORS)
+
+
+def test_http_group_catches_a_hostile_deeply_nested_body() -> None:
+    """json() on a deeply nested reply raises RecursionError, which is not a ValueError."""
+    assert not issubclass(RecursionError, ValueError)
+    assert issubclass(RecursionError, errors.HTTP_ERRORS)

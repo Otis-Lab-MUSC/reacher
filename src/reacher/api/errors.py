@@ -14,9 +14,19 @@ from fastapi import WebSocketDisconnect
 from ..kernel.errors import SerialPortClosedError
 
 # A request to another REACHER device or to the broker: connection and
-# timeout failures (``httpx.HTTPError``) and a body that is not valid JSON
-# (``ValueError``).
-HTTP_ERRORS: tuple[type[Exception], ...] = (httpx.HTTPError, ValueError)
+# timeout failures (``httpx.HTTPError``), a body that is not valid JSON (``ValueError``), and a
+# hostile, deeply nested body that makes ``json()`` run out of stack (``RecursionError``).
+HTTP_ERRORS: tuple[type[Exception], ...] = (httpx.HTTPError, ValueError, RecursionError)
+
+# pyserial's flush and buffer reset call termios directly, and ``termios.error`` is not an
+# ``OSError``; it is how an unplugged board surfaces on POSIX.  Windows has no termios module.
+_TERMIOS_ERRORS: tuple[type[Exception], ...]
+try:
+    import termios
+
+    _TERMIOS_ERRORS = (termios.error,)
+except ImportError:
+    _TERMIOS_ERRORS = ()
 
 # A call into the kernel that talks to the board: a closed port, a serial or
 # OS-level I/O failure, or a rejected argument.
@@ -26,6 +36,7 @@ KERNEL_ERRORS: tuple[type[Exception], ...] = (
     OSError,
     ValueError,
     RuntimeError,
+    *_TERMIOS_ERRORS,
 )
 
 # Reading or writing a small persisted file (pin overrides, pump target).

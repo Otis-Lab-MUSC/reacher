@@ -179,6 +179,10 @@ class TestFirmwareUpload:
         with patch("reacher.api.routers.firmware.asyncio.sleep", new=AsyncMock()):
             return sid, api.post(f"/api/firmware/upload/{sid}", json={"paradigm": "fr", **body}, headers=AUTH)
 
+    def _post(self, api, sid):
+        with patch("reacher.api.routers.firmware.asyncio.sleep", new=AsyncMock()):
+            return api.post(f"/api/firmware/upload/{sid}", json={"paradigm": "fr"}, headers=AUTH)
+
     def _state(self, api, sid):
         return api.app.state.session_manager.get_session(sid).state
 
@@ -196,10 +200,12 @@ class TestFirmwareUpload:
         assert resp.status_code == 500
         assert self._state(api, sid) == "idle"
 
-    def test_uploader_programming_error_surfaces(self, api):
+    def test_uploader_programming_error_surfaces_and_session_returns_to_idle(self, api):
+        sid = _session(api)
         with patch("reacher.api.routers.firmware._uploader.upload", new=AsyncMock(side_effect=TypeError("bug"))):
             with pytest.raises(TypeError):
-                self._upload(api)
+                self._post(api, sid)
+        assert self._state(api, sid) == "idle"
 
     def test_reconnect_failure_is_500_and_session_returns_to_idle(self, api):
         api.instance.open_serial.side_effect = serial.SerialException("busy")
@@ -208,8 +214,24 @@ class TestFirmwareUpload:
         assert resp.status_code == 500
         assert self._state(api, sid) == "idle"
 
-    def test_reconnect_programming_error_surfaces(self, api):
+    def test_reconnect_programming_error_surfaces_and_session_returns_to_idle(self, api):
+        sid = _session(api)
         api.instance.open_serial.side_effect = TypeError("bug")
         with patch("reacher.api.routers.firmware._uploader.upload", new=AsyncMock(return_value=True)):
             with pytest.raises(TypeError):
-                self._upload(api)
+                self._post(api, sid)
+        assert self._state(api, sid) == "idle"
+
+    def test_reconnect_termios_failure_is_500_and_session_returns_to_idle(self, api):
+        termios = pytest.importorskip("termios")
+        api.instance.open_serial.side_effect = termios.error(5, "Input/output error")
+        with patch("reacher.api.routers.firmware._uploader.upload", new=AsyncMock(return_value=True)):
+            sid, resp = self._upload(api)
+        assert resp.status_code == 500
+        assert self._state(api, sid) == "idle"
+
+    def test_a_second_upload_is_refused_without_disturbing_the_first(self, api):
+        sid = _session(api, "uploading")
+        resp = self._post(api, sid)
+        assert resp.status_code == 409
+        assert self._state(api, sid) == "uploading"

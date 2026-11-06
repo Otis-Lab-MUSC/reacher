@@ -148,7 +148,7 @@ async def list_discovered(request: Request) -> dict[str, list[dict[str, str | bo
     return {"devices": [d for d in devices if d["device_id"] != LOCAL_DEVICE_ID]}
 
 
-@router.post("/manual")
+@router.post("/manual", response_model=None)
 async def manual_pair(body: ManualPairRequest, request: Request) -> dict[str, str]:
     """Store a manually-supplied machine URL and API key server-side.
 
@@ -176,7 +176,7 @@ async def manual_pair(body: ManualPairRequest, request: Request) -> dict[str, st
     return {"device_id": device_id, "hostname": hostname, "url": url, "name": name}
 
 
-@router.post("/pair-by-url")
+@router.post("/pair-by-url", response_model=None)
 async def pair_by_url(body: PairByUrlRequest, request: Request) -> dict[str, str]:
     """Pair with a REACHER device at a known URL using its pairing code.
 

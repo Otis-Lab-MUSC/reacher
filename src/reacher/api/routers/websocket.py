@@ -277,15 +277,26 @@ _broadcast_task: asyncio.Task[None] | None = None
 _watchdog_task: asyncio.Task[None] | None = None
 
 
+def _log_task_exit(task: asyncio.Task[None]) -> None:
+    """Log a background task that ended on an unexpected error; a cancel at shutdown is normal."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("Background task %s ended on an unexpected error", task.get_name(), exc_info=exc)
+
+
 def _ensure_broadcast_worker() -> None:
     """Start the broadcast worker and the watchdog on the running loop if either has stopped."""
     global _broadcast_task, _watchdog_task, _loop
     loop = asyncio.get_running_loop()
     if _broadcast_task is None or _broadcast_task.done():
         _loop = loop
-        _broadcast_task = loop.create_task(_broadcast_worker())
+        _broadcast_task = loop.create_task(_broadcast_worker(), name="ws-broadcast")
+        _broadcast_task.add_done_callback(_log_task_exit)
     if _watchdog_task is None or _watchdog_task.done():
-        _watchdog_task = loop.create_task(_watchdog())
+        _watchdog_task = loop.create_task(_watchdog(), name="ws-watchdog")
+        _watchdog_task.add_done_callback(_log_task_exit)
 
 
 # Per-session last-disconnect timestamps for orphan cleanup
@@ -404,7 +415,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
         logger.info("WS reconnect from %s — clearing orphaned state", session_id)
     _ensure_broadcast_worker()
     if _orphan_task is None or _orphan_task.done():
-        _orphan_task = asyncio.get_running_loop().create_task(_orphan_cleanup())
+        _orphan_task = asyncio.get_running_loop().create_task(_orphan_cleanup(), name="ws-orphan-reaper")
+        _orphan_task.add_done_callback(_log_task_exit)
     logger.info("WebSocket connected for session %s", session_id)
     client = getattr(websocket.client, "host", None)
     conns = total_connections()

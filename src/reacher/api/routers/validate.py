@@ -11,8 +11,9 @@ logger = logging.getLogger(__name__)
 
 # The rule engine reads client-supplied JSON typed ``dict[str, Any]``, so a malformed value fails by
 # attribute access on a non-dict (AttributeError), a comparison or sum across types (TypeError), or a
-# float sum overflowing (OverflowError).
-_RULE_DATA_ERRORS: tuple[type[Exception], ...] = (AttributeError, TypeError, OverflowError)
+# float sum overflowing (OverflowError), or an integer past Python's 4300-digit string limit when a
+# rule formats it into a warning (ValueError).
+_RULE_DATA_ERRORS: tuple[type[Exception], ...] = (AttributeError, TypeError, OverflowError, ValueError)
 
 
 @router.post("/config", response_model=ValidateConfigResponse)
