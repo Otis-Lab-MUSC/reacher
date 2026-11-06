@@ -135,3 +135,15 @@ async def test_fetch_wraps_invalid_json():
     async with _client(lambda request: httpx.Response(200, content=b"<html>")) as client:
         with pytest.raises(ReleaseFetchError):
             await fetch_releases(client)
+
+
+async def test_fetch_can_target_another_release_list():
+    seen = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json=[])
+
+    async with _client(handler) as client:
+        await fetch_releases(client, "http://127.0.0.1:9/releases")
+    assert seen["url"].startswith("http://127.0.0.1:9/releases")
