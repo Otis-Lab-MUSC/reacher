@@ -10,10 +10,11 @@ import sys
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from ...uploader.boards import DEFAULT_BOARD, SUPPORTED_BOARDS
 from ...uploader.uploader import PARADIGMS, AvrdudeNotFoundError, FirmwareUploader
+from ..errors import KERNEL_ERRORS
 from . import websocket as ws_mod
 
 _MAX_HEX_SIZE = 200 * 1024  # 200 KB — hex files are typically 15-40 KB
@@ -23,14 +24,19 @@ diagnostics_router = APIRouter()
 _logger = logging.getLogger(__name__)
 _uploader = FirmwareUploader()
 
+# What the uploader can raise besides the missing-tool and RuntimeError cases handled before it:
+# an unknown paradigm or board (ValueError) and a failure spawning avrdude or reading the hex (OSError).
+_UPLOAD_ERRORS: tuple[type[Exception], ...] = (OSError, ValueError)
+_JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
 
-@router.get("/boards")
-async def list_boards():
+
+@router.get("/boards", response_model=None)
+async def list_boards() -> dict[str, list[dict[str, str]]]:
     return {"boards": _uploader.list_boards()}
 
 
-@router.get("/paradigms")
-async def list_paradigms(board: str = Query(DEFAULT_BOARD)):
+@router.get("/paradigms", response_model=None)
+async def list_paradigms(board: str = Query(DEFAULT_BOARD)) -> dict[str, list[str]]:
     if board.lower() not in SUPPORTED_BOARDS:
         raise HTTPException(
             status_code=400,
@@ -46,8 +52,34 @@ class UploadRequest(BaseModel):
     hex_data: Optional[str] = None  # base64-encoded Intel HEX file content
 
 
-@router.post("/upload/{session_id}")
-async def upload_firmware(session_id: str, body: UploadRequest, request: Request):
+@router.post("/upload/{session_id}", response_model=None)
+async def upload_firmware(session_id: str, body: UploadRequest, request: Request) -> dict[str, JsonValue]:
+    """Flash the board for *session_id* and reconnect it, leaving the session idle on any failure."""
+    sm = request.app.state.session_manager
+    finished = False
+    try:
+        result = await _flash_and_reconnect(session_id, body, request)
+        finished = True
+        return result
+    except HTTPException:
+        finished = True  # every rejection sets the state it needs; a gate refusal must not touch a running upload
+        raise
+    except asyncio.CancelledError:
+        finished = True  # avrdude is not killed on cancel, so the session stays "uploading" and keeps the port locked
+        raise
+    finally:
+        if not finished:
+            # An unexpected error must not leave the session in "uploading", because that state refuses
+            # every later upload. Only this request can have set it here.
+            try:
+                if sm.get_session(session_id).state == "uploading":
+                    sm.set_state(session_id, "idle")
+            except KeyError:
+                _logger.debug("Session %s was deleted during its firmware upload", session_id)
+
+
+async def _flash_and_reconnect(session_id: str, body: UploadRequest, request: Request) -> dict[str, JsonValue]:
+    """Validate the request, run avrdude against the session's port, and reopen the serial link."""
     sm = request.app.state.session_manager
 
     # Same gate as POST /api/sessions. body.paradigm becomes the session's
@@ -109,18 +141,22 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
 
     sm.set_state(session_id, "uploading")
 
-    def progress_cb(percent: int, stage: str):
-        ws_mod.enqueue_event(session_id, "upload_progress", {
-            "percent": percent,
-            "stage": stage,
-        })
+    def progress_cb(percent: int, stage: str) -> None:
+        ws_mod.enqueue_event(
+            session_id,
+            "upload_progress",
+            {
+                "percent": percent,
+                "stage": stage,
+            },
+        )
 
     # If the client supplied inline hex data, decode, validate, and cache it.
     cached_hex_path = None
     if body.hex_data:
         try:
             raw = base64.b64decode(body.hex_data, validate=True)
-        except Exception:
+        except ValueError:  # binascii.Error is a ValueError; a non-ASCII str raises ValueError too
             sm.set_state(session_id, "idle")
             raise HTTPException(status_code=400, detail="Invalid base64 in hex_data")
         if len(raw) > _MAX_HEX_SIZE:
@@ -149,7 +185,7 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
         _logger.error("Upload tool error for session %s: %s", session_id, e)
         sm.set_state(session_id, "idle")
         raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
+    except _UPLOAD_ERRORS as e:
         _logger.error("Firmware upload failed for session %s: %s", session_id, e, exc_info=True)
         sm.set_state(session_id, "idle")
         raise HTTPException(status_code=500, detail="Firmware upload failed")
@@ -180,7 +216,7 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
         # Don't set "connected" until firmware is ready, to prevent command loss.
         instance._firmware_ready.clear()
         instance.send_command(102)  # IDENTIFY
-    except Exception as e:
+    except KERNEL_ERRORS as e:
         _logger.error("Post-upload reconnect failed for session %s: %s", session_id, e, exc_info=True)
         sm.set_state(session_id, "idle")
         raise HTTPException(status_code=500, detail="Post-upload reconnect failed")
@@ -193,19 +229,16 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
         # finish between the check above and open_serial). Close what we just reopened.
         try:
             instance.close_serial()
-        except Exception:
+        except KERNEL_ERRORS:
             _logger.debug("close after mid-upload delete failed for %s", session_id, exc_info=True)
         raise _gone_response()
 
     # Wait for IDENTIFY response before transitioning to "connected"
     # This ensures bootloader has exited and firmware is ready to process commands.
-    try:
-        if instance._firmware_ready.wait(timeout=2.0):
-            _logger.info("Post-upload firmware identified for session %s", session_id)
-        else:
-            _logger.warning("Post-upload IDENTIFY timeout (bootloader slow?) for session %s", session_id)
-    except Exception as e:
-        _logger.warning("Post-upload IDENTIFY wait failed for session %s: %s", session_id, e)
+    if instance._firmware_ready.wait(timeout=2.0):
+        _logger.info("Post-upload firmware identified for session %s", session_id)
+    else:
+        _logger.warning("Post-upload IDENTIFY timeout (bootloader slow?) for session %s", session_id)
 
     sm.set_state(session_id, "connected")
 
@@ -217,8 +250,8 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
     }
 
 
-@diagnostics_router.get("/diagnostics")
-async def firmware_diagnostics(board: str = Query(DEFAULT_BOARD)):
+@diagnostics_router.get("/diagnostics", response_model=None)
+async def firmware_diagnostics(board: str = Query(DEFAULT_BOARD)) -> dict[str, JsonValue]:
     """Return diagnostic information about hex file resolution for debugging."""
     if board.lower() not in SUPPORTED_BOARDS:
         raise HTTPException(
@@ -229,15 +262,16 @@ async def firmware_diagnostics(board: str = Query(DEFAULT_BOARD)):
     _is_abs = os.path.isabs(_avrdude_path)
 
     # List files in the avrdude directory to verify companion DLLs were bundled
-    avrdude_dir_contents = None
+    avrdude_dir_contents: list[JsonValue] | None = None
     if _is_abs:
         avrdude_dir = os.path.dirname(_avrdude_path)
         try:
-            avrdude_dir_contents = sorted(os.listdir(avrdude_dir))
+            avrdude_dir_contents = [*sorted(os.listdir(avrdude_dir))]
         except OSError:
             avrdude_dir_contents = None
 
-    result: dict = {
+    paradigms: dict[str, JsonValue] = {}
+    result: dict[str, JsonValue] = {
         "frozen": getattr(sys, "frozen", False),
         "meipass": getattr(sys, "_MEIPASS", None),
         "resolved_hex_dir": _uploader.hex_dir,
@@ -247,11 +281,11 @@ async def firmware_diagnostics(board: str = Query(DEFAULT_BOARD)):
         # A null avrdude_conf is correct in development mode and a packaging
         # defect in a frozen bundle. Ship the provenance alongside it so the
         # two are distinguishable from a single request.
-        "avrdude_conf_resolution": _uploader.avrdude_conf_provenance,
+        "avrdude_conf_resolution": _JSON_OBJECT.validate_python(_uploader.avrdude_conf_provenance),
         "avrdude_dir_contents": avrdude_dir_contents,
         "last_upload_error": _uploader.last_error or None,
         "board": board,
-        "paradigms": {},
+        "paradigms": paradigms,
     }
     for p in PARADIGMS:
         try:
@@ -259,7 +293,7 @@ async def firmware_diagnostics(board: str = Query(DEFAULT_BOARD)):
             size = os.path.getsize(path)
             with open(path, "rb") as f:
                 sha = hashlib.sha256(f.read()).hexdigest()[:16]
-            result["paradigms"][p] = {"path": path, "size": size, "sha256_prefix": sha}
+            paradigms[p] = {"path": path, "size": size, "sha256_prefix": sha}
         except (FileNotFoundError, ValueError) as exc:
-            result["paradigms"][p] = {"error": str(exc)}
+            paradigms[p] = {"error": str(exc)}
     return result
