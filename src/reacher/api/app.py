@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import webbrowser
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx
@@ -20,12 +21,14 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import Response
 
 from .. import __version__, diagnostics, discovery, machines, pairing, pin_overrides, pump_target
 from ..child_env import clean_child_env, clean_environ
 from ..device_id import DEVICE_ID
 from ..session_manager import SessionManager
+from .errors import HTTP_ERRORS
 from .middleware.auth import require_api_key, API_KEY
 from .middleware.logging import RequestLoggingMiddleware
 from .routers import data, file, firmware, hardware, lifecycle, logs as logs_router, program, serial, session, websocket
@@ -39,6 +42,9 @@ PORT = int(os.getenv("REACHER_PORT", "6229"))
 HOST = os.getenv("REACHER_HOST", "127.0.0.1")
 WS_PING_INTERVAL = int(os.getenv("REACHER_WS_PING_INTERVAL", "20"))
 WS_PING_TIMEOUT = int(os.getenv("REACHER_WS_PING_TIMEOUT", "60"))
+
+# Broker POST: the shared HTTP failures plus httpx.InvalidURL (a malformed REACHER_BROKER_URL; not an HTTPError).
+_BROKER_ERRORS: tuple[type[Exception], ...] = (*HTTP_ERRORS, httpx.InvalidURL)
 
 
 def _open_browser(url: str) -> None:
@@ -107,9 +113,7 @@ async def _post_broker_registration(
     registered URL will be unreachable from the primary; combine
     ``REACHER_BROKER_URL`` with ``REACHER_HOST=0.0.0.0`` for LAN access.
     """
-    from .. import discovery as _discovery
-
-    local_ip = _discovery._get_local_ip() or "127.0.0.1"
+    local_ip = discovery._get_local_ip() or "127.0.0.1"
     url = f"http://{local_ip}:{port}"
     try:
         await http_client.post(
@@ -123,20 +127,18 @@ async def _post_broker_registration(
             timeout=10.0,
         )
         logger.info("Registered with broker at %s", broker_url)
-    except Exception as exc:
+    except _BROKER_ERRORS as exc:
         logger.warning("Could not register with broker %s: %s", broker_url, exc)
 
 
 def _is_already_running() -> bool:
     """Check if a REACHER server is already listening on PORT."""
-    import socket
-
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(1)
         return s.connect_ex(("127.0.0.1", PORT)) == 0
 
 
-def _resolve_static_dir():
+def _resolve_static_dir() -> str | None:
     """Return the path to the built React frontend, or None."""
     base = getattr(sys, "_MEIPASS", None)
     if base:
@@ -161,7 +163,7 @@ def _is_loopback_host(host: str | None) -> bool:
         return False
 
 
-def _log_health() -> dict | None:
+def _log_health() -> dict[str, str | int] | None:
     """Non-sensitive subset of the log sink's counters for /health."""
     sink = diagnostics.get_sink()
     if sink is None:
@@ -170,7 +172,7 @@ def _log_health() -> dict | None:
     return {k: stats[k] for k in ("run_id", "queued", "dropped", "write_failures") if k in stats}
 
 
-def broadcast_event(session_id: str, event_type: str, data: dict):
+def broadcast_event(session_id: str, event_type: str, data: websocket.EventData) -> None:
     """Enqueue an event for WebSocket delivery.
 
     Called from REACHER instances (running in background threads) via the
@@ -188,11 +190,9 @@ class _HealthCORSMiddleware(BaseHTTPMiddleware):
     wildcard access is safe for LAN deployments.
     """
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         if request.url.path == "/health":
             if request.method == "OPTIONS":
-                from starlette.responses import Response
-
                 return Response(
                     status_code=200,
                     headers={
@@ -208,7 +208,7 @@ class _HealthCORSMiddleware(BaseHTTPMiddleware):
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage application startup/shutdown."""
     # Idempotent: main() already configured logging for the normal entry points,
     # but TestClient and embedded uses reach lifespan without going through it.
@@ -321,7 +321,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestLoggingMiddleware)
 
     @app.get("/health", tags=["health"])
-    async def health_check():
+    async def health_check() -> dict[str, str | int | dict[str, str | int] | None]:
         sm = app.state.session_manager
         sessions = sm.list_sessions()
         return {
@@ -343,7 +343,7 @@ def create_app() -> FastAPI:
     _allowed_origins = set(cors_origins)
 
     @app.get("/api/auth/token", tags=["auth"])
-    async def get_auth_token(request: Request):
+    async def get_auth_token(request: Request) -> dict[str, str]:
         # A same-origin browser GET carries
         # no Origin header at all, so the check above never rejected a request
         # with no Origin — including curl, scripts, and SSRF gadgets. Two extra
@@ -415,7 +415,7 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
-def main():
+def main() -> None:
     """CLI entry-point (``reacher`` command)."""
     if "--version" in sys.argv[1:] or "-V" in sys.argv[1:]:
         print(__version__)

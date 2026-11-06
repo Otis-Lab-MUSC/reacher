@@ -11,6 +11,7 @@ the 6-digit code space.
 import logging
 import time
 from collections import defaultdict, deque
+from typing import TypedDict
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -24,15 +25,21 @@ logger = logging.getLogger(__name__)
 # Sliding-window rate limiter: 5 attempts / IP / 60 s
 _RATE_LIMIT = 5
 _RATE_WINDOW = 60.0
-_attempt_timestamps: dict[str, deque] = defaultdict(deque)
+_attempt_timestamps: dict[str, deque[float]] = defaultdict(deque)
 
 
 class ClaimRequest(BaseModel):
     code: str
 
 
+class _PairingStatus(TypedDict):
+    paired: bool
+    code: str
+    seconds_until_rotation: float
+
+
 @router.post("/claim")
-async def claim_pairing_code(body: ClaimRequest, request: Request) -> dict:
+async def claim_pairing_code(body: ClaimRequest, request: Request) -> dict[str, str]:
     """Exchange a pairing code for this device's API key.
 
     Called by a remote REACHER server's /api/discovery/{id}/pair handler
@@ -67,8 +74,8 @@ async def claim_pairing_code(body: ClaimRequest, request: Request) -> dict:
     return {"api_key": API_KEY}
 
 
-@router.get("/status", dependencies=[Depends(require_api_key)])
-async def pairing_status() -> dict:
+@router.get("/status", dependencies=[Depends(require_api_key)], response_model=None)
+async def pairing_status() -> _PairingStatus:
     """Return the current pairing state, code, and seconds until rotation.
 
     Intended for local monitoring tools (e.g. reacher-monitor) running on the
@@ -83,7 +90,7 @@ async def pairing_status() -> dict:
 
 
 @router.post("/unpair", dependencies=[Depends(require_api_key)])
-async def unpair(request: Request) -> dict:
+async def unpair(request: Request) -> dict[str, str]:
     """Clear the paired state, allowing new pairing attempts.
 
     Requires Bearer authentication — only the paired controller (which holds

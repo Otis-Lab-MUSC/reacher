@@ -15,6 +15,7 @@ import asyncio
 import base64
 import json
 import logging
+from typing import TypedDict
 
 import httpx
 import websockets
@@ -22,6 +23,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, WebSocket, WebS
 
 from ... import machines
 from ...uploader.uploader import FirmwareUploader
+from ..errors import WS_SEND_ERRORS
 from ..middleware.auth import API_KEY, verify_ws_token
 
 router = APIRouter()
@@ -31,9 +33,29 @@ router = APIRouter()
 ws_router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# Opening the upstream socket: refused/unreachable/reset (OSError), the open timeout
+# (TimeoutError), a malformed machine URL (ValueError) and every protocol-level handshake
+# or URI rejection (websockets.WebSocketException).
+_UPSTREAM_CONNECT_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    TimeoutError,
+    ValueError,
+    websockets.WebSocketException,
+)
+
+# Closing a relay socket that may already be closed or reset.
+_UPSTREAM_CLOSE_ERRORS: tuple[type[Exception], ...] = (OSError, RuntimeError, websockets.WebSocketException)
+
+
+class _WsToken(TypedDict):
+    """Response body of the ws-token endpoint."""
+
+    token: str
+    ws_url: str
+
 
 @router.get("/{device_id}/ws-token")
-async def get_ws_token(device_id: str, request: Request) -> dict:
+async def get_ws_token(device_id: str, request: Request) -> _WsToken:
     """Return the local API key and relay WebSocket base URL for a paired machine.
 
     The browser uses this to connect to the local WS relay at
@@ -53,7 +75,7 @@ async def get_ws_token(device_id: str, request: Request) -> dict:
 
 
 @ws_router.websocket("/{device_id}/ws/{session_id}")
-async def ws_relay(ws: WebSocket, device_id: str, session_id: str):
+async def ws_relay(ws: WebSocket, device_id: str, session_id: str) -> None:
     """Relay WebSocket messages between the browser and a remote REACHER device.
 
     Browser → local server (this endpoint) → Pi REACHER WebSocket.
@@ -82,14 +104,18 @@ async def ws_relay(ws: WebSocket, device_id: str, session_id: str):
         # relay's upstream socket — the two ping layers can race and silently
         # tear down the upstream under load (secondary hardening).
         upstream = await websockets.connect(upstream_url, open_timeout=10, ping_interval=None)
-    except Exception as exc:
+    except _UPSTREAM_CONNECT_ERRORS as exc:
         # Log the sanitized target, never upstream_url (carries machine['api_key']
         # as a query param).  `exc` itself may still embed the full credentialed
         # URL (e.g. websockets.InvalidURI on a malformed upstream url) — that is
         # scrubbed as a backstop in diagnostics/bridge.py.
         logger.error(
             "WS relay upstream connect failed for %s/%s url=%s: %s",
-            device_id[:8], session_id, upstream_target, exc, exc_info=True,
+            device_id[:8],
+            session_id,
+            upstream_target,
+            exc,
+            exc_info=True,
         )
         await ws.close(code=1011, reason=f"upstream {type(exc).__name__}")
         return
@@ -97,7 +123,8 @@ async def ws_relay(ws: WebSocket, device_id: str, session_id: str):
     await ws.accept()
 
     try:
-        async def browser_to_pi():
+
+        async def browser_to_pi() -> None:
             try:
                 while True:
                     data = await ws.receive_text()
@@ -105,7 +132,7 @@ async def ws_relay(ws: WebSocket, device_id: str, session_id: str):
             except (WebSocketDisconnect, websockets.ConnectionClosed):
                 pass
 
-        async def pi_to_browser():
+        async def pi_to_browser() -> None:
             try:
                 async for data in upstream:
                     if isinstance(data, str):
@@ -125,12 +152,12 @@ async def ws_relay(ws: WebSocket, device_id: str, session_id: str):
     finally:
         try:
             await upstream.close()
-        except Exception:
-            pass
+        except _UPSTREAM_CLOSE_ERRORS:
+            logger.debug("Relay upstream close failed for %s/%s", device_id[:8], session_id, exc_info=True)
         try:
             await ws.close()
-        except Exception:
-            pass
+        except WS_SEND_ERRORS:
+            logger.debug("Relay browser close failed for %s/%s", device_id[:8], session_id, exc_info=True)
 
 
 @router.api_route("/{device_id}/{rest_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
@@ -176,12 +203,15 @@ async def proxy_request(device_id: str, rest_path: str, request: Request) -> Res
                 except FileNotFoundError:
                     logger.warning(
                         "Proxy hex enrichment skipped for %s/%s — hex file not found locally",
-                        board, paradigm,
+                        board,
+                        paradigm,
                     )
                 except ValueError as exc:
                     logger.warning(
                         "Proxy hex enrichment skipped for %s/%s — %s",
-                        board, paradigm, exc,
+                        board,
+                        paradigm,
+                        exc,
                     )
         except (json.JSONDecodeError, KeyError):
             pass  # not JSON or unexpected shape — forward as-is

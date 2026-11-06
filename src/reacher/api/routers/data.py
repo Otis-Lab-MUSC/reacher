@@ -1,18 +1,34 @@
 """Data retrieval endpoints (behavior, frames, slm)."""
 
+from typing import Optional, TypedDict
+
 from fastapi import APIRouter, HTTPException, Request
-from typing import Optional
 
 router = APIRouter()
 
 
-@router.get("/{session_id}/behavior")
+class _BehaviorPage(TypedDict):
+    data: list[dict[str, str | int]]
+    total: int
+
+
+class _FramePage(TypedDict):
+    frames: list[int]
+    count: int
+
+
+class _SlmPage(TypedDict):
+    slm: list[int]
+    count: int
+
+
+@router.get("/{session_id}/behavior", response_model=None)
 async def get_behavior(
     session_id: str,
     request: Request,
     since: Optional[int] = None,
     limit: Optional[int] = None,
-):
+) -> _BehaviorPage:
     sm = request.app.state.session_manager
     try:
         info = sm.get_session(session_id)
@@ -30,12 +46,12 @@ async def get_behavior(
     return {"data": data, "total": len(info.instance.get_behavior_data())}
 
 
-@router.get("/{session_id}/frames")
+@router.get("/{session_id}/frames", response_model=None)
 async def get_frames(
     session_id: str,
     request: Request,
     limit: Optional[int] = None,
-):
+) -> _FramePage:
     sm = request.app.state.session_manager
     try:
         info = sm.get_session(session_id)
@@ -54,12 +70,12 @@ async def get_frames(
     }
 
 
-@router.get("/{session_id}/slm")
+@router.get("/{session_id}/slm", response_model=None)
 async def get_slm(
     session_id: str,
     request: Request,
     limit: Optional[int] = None,
-):
+) -> _SlmPage:
     sm = request.app.state.session_manager
     try:
         info = sm.get_session(session_id)

@@ -9,24 +9,40 @@ import signal
 import threading
 import time
 from collections import defaultdict
-from typing import Dict, Set
+from collections.abc import Mapping
+from typing import TypedDict
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect
+from pydantic import JsonValue
 
+from ..errors import KERNEL_ERRORS, WS_SEND_ERRORS
 from ..middleware.auth import verify_ws_token
 from reacher import pairing
 from ...diagnostics.schema import TIER_API as _TIER_API
 from ...diagnostics.setup import log as _diag_log
+from ...session_manager import SessionManager
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # Per-session connected WebSocket clients
-_connections: Dict[str, Set[WebSocket]] = defaultdict(set)
+_connections: defaultdict[str, set[WebSocket]] = defaultdict(set)
+
+#: Payload of a session event: JSON-serialisable keyed fields.
+EventData = Mapping[str, JsonValue]
+
+
+class _Event(TypedDict):
+    """One queued session event, as sent to WebSocket clients."""
+
+    type: str
+    session_id: str
+    data: EventData
+
 
 # Thread-safe stdlib queue (safe to call from background REACHER threads)
 _EVENT_QUEUE_MAX = 10000
-_event_queue: queue.Queue = queue.Queue(maxsize=_EVENT_QUEUE_MAX)
+_event_queue: queue.Queue[_Event] = queue.Queue(maxsize=_EVENT_QUEUE_MAX)
 
 # Thread-safe dropped event counter
 _dropped_events_lock = threading.Lock()
@@ -43,8 +59,19 @@ _last_connection_time: float = 0.0
 _WATCHDOG_INTERVAL = 10  # seconds between polls
 _WATCHDOG_TIMEOUT = 300  # 5 minutes idle → soft suspend
 _WATCHDOG_HARD_KILL_TIMEOUT = 3300  # 55 min more → hard kill (total: 60 min from last connection)
+_HARD_KILL = _WATCHDOG_HARD_KILL_TIMEOUT  # short alias for the event payloads below
 _server_suspended = False
 _session_orphaned = False
+_ACTIVE_STATES = ("running", "paused", "uploading")
+# Orphan reaper: no session manager on the app (AttributeError), or destroy_session failing.
+_REAP_ERRORS: tuple[type[Exception], ...] = (AttributeError, *KERNEL_ERRORS)
+# Snapshot on connect: no session manager on the app (AttributeError), or the client already left.
+_SNAPSHOT_ERRORS: tuple[type[Exception], ...] = (AttributeError, *WS_SEND_ERRORS)
+
+
+def _diag(evt: str, msg: str, lvl: str = "info", session_id: str | None = None, **fields: str | int | None) -> None:
+    """Emit a structured API-tier record from this module."""
+    _diag_log(evt, tier=_TIER_API, lvl=lvl, msg=msg, src="reacher.api.websocket", session_id=session_id, **fields)
 
 
 def total_connections() -> int:
@@ -58,7 +85,7 @@ def dropped_events() -> int:
         return _dropped_events
 
 
-def _trigger_shutdown():
+def _trigger_shutdown() -> None:
     """Send SIGINT to self to initiate uvicorn's graceful shutdown. Idempotent."""
     global _shutdown_scheduled
     if _shutdown_scheduled:
@@ -66,30 +93,23 @@ def _trigger_shutdown():
     _shutdown_scheduled = True
     logger.info("Triggering graceful shutdown (SIGINT to self)")
     # Without this the watchdog's self-SIGINT looks like a spontaneous death.
-    _diag_log("ws.watchdog_shutdown", tier=_TIER_API, lvl="warn",
-              msg="Watchdog triggering graceful shutdown (SIGINT to self)",
-              src="reacher.api.websocket")
+    _diag("ws.watchdog_shutdown", "Watchdog triggering graceful shutdown (SIGINT to self)", "warn")
     os.kill(os.getpid(), signal.SIGINT)
 
 
-def _trigger_suspend():
+def _trigger_suspend() -> None:
     """Soft-suspend: broadcast timeout signal to connected clients; keep process alive."""
     global _server_suspended
     if _server_suspended:
         return
     _server_suspended = True
     logger.info("Watchdog: soft-suspending (no connections for %ds)", _WATCHDOG_TIMEOUT)
-    _diag_log("ws.suspend", tier=_TIER_API, lvl="warn",
-              msg=f"Soft-suspending after {_WATCHDOG_TIMEOUT}s with no connections",
-              src="reacher.api.websocket", idle_s=_WATCHDOG_TIMEOUT)
+    _diag("ws.suspend", f"Soft-suspending after {_WATCHDOG_TIMEOUT}s idle", "warn", idle_s=_WATCHDOG_TIMEOUT)
     for sid in list(_connections.keys()):
-        enqueue_event(sid, "server_suspended", {
-            "reason": "watchdog_timeout",
-            "hard_kill_in": _WATCHDOG_HARD_KILL_TIMEOUT,
-        })
+        enqueue_event(sid, "server_suspended", {"reason": "watchdog_timeout", "hard_kill_in": _HARD_KILL})
 
 
-def _notify_orphaned():
+def _notify_orphaned() -> None:
     """Notify clients that a session has been orphaned without marking the server as suspended.
 
     Sent when an active session has had no WS clients for _SESSION_ORPHAN_TIMEOUT_ACTIVE
@@ -105,10 +125,7 @@ def _notify_orphaned():
         _SESSION_ORPHAN_TIMEOUT_ACTIVE,
     )
     for sid in list(_connections.keys()):
-        enqueue_event(sid, "session_orphaned", {
-            "reason": "no_clients",
-            "hard_kill_in": _WATCHDOG_HARD_KILL_TIMEOUT,
-        })
+        enqueue_event(sid, "session_orphaned", {"reason": "no_clients", "hard_kill_in": _HARD_KILL})
 
 
 def is_suspended() -> bool:
@@ -130,16 +147,16 @@ def _any_session_active() -> bool:
     if _app_ref is None:
         return False
     try:
-        sm = _app_ref.state.session_manager
-        for info in sm._sessions.values():
-            if info.state in ("running", "paused", "uploading"):
-                return True
-    except Exception:
-        pass
-    return False
+        sm: SessionManager = _app_ref.state.session_manager
+        return any(info.state in _ACTIVE_STATES for info in sm._sessions.values())
+    except (AttributeError, RuntimeError):
+        # AttributeError: no session manager on the app yet.
+        # RuntimeError: another thread resized the session dict mid-iteration.
+        logger.debug("Active-session check failed; treating as inactive", exc_info=True)
+        return False
 
 
-async def _watchdog():
+async def _watchdog() -> None:
     """Poll for 0 connections; auto-shutdown if no clients for WATCHDOG_TIMEOUT seconds.
 
     Defers shutdown while any session is running or paused, using the
@@ -152,27 +169,17 @@ async def _watchdog():
             if _any_session_active():
                 if idle >= _SESSION_ORPHAN_TIMEOUT_ACTIVE:
                     if not _session_orphaned:
-                        logger.info(
-                            "Watchdog: no connections for %.0fs with active sessions — notifying orphan", idle
-                        )
+                        logger.info("Watchdog: no connections for %.0fs with active sessions — notifying orphan", idle)
                         _notify_orphaned()
                     elif idle >= _SESSION_ORPHAN_TIMEOUT_ACTIVE + _WATCHDOG_HARD_KILL_TIMEOUT:
-                        logger.info(
-                            "Watchdog: hard-kill timeout reached with active sessions — shutting down",
-                        )
+                        logger.info("Watchdog: hard-kill timeout reached with active sessions — shutting down")
                         _trigger_shutdown()
                         return
                 elif idle >= _WATCHDOG_TIMEOUT:
-                    logger.info(
-                        "Watchdog: no connections for %.0fs but sessions still active — deferring",
-                        idle,
-                    )
+                    logger.info("Watchdog: no connections for %.0fs but sessions still active — deferring", idle)
             elif idle >= _WATCHDOG_TIMEOUT:
                 if pairing.is_active_pairing():
-                    logger.info(
-                        "Watchdog: no connections for %.0fs but device is actively paired — deferring",
-                        idle,
-                    )
+                    logger.info("Watchdog: no connections for %.0fs but device is actively paired — deferring", idle)
                 elif not _server_suspended:
                     logger.info("Watchdog: no connections for %.0fs — suspending", idle)
                     _trigger_suspend()
@@ -182,18 +189,14 @@ async def _watchdog():
                     return
 
 
-def enqueue_event(session_id: str, event_type: str, data: dict):
+def enqueue_event(session_id: str, event_type: str, data: EventData) -> None:
     """Thread-safe: push an event into the queue.
 
     Called from REACHER background threads via the event_callback.
     Uses loop.call_soon_threadsafe to wake the async broadcast worker.
     Drops oldest event if the queue is full to prevent unbounded memory growth.
     """
-    msg = {
-        "type": event_type,
-        "session_id": session_id,
-        "data": data,
-    }
+    msg: _Event = {"type": event_type, "session_id": session_id, "data": data}
     global _dropped_events
     try:
         _event_queue.put_nowait(msg)
@@ -204,16 +207,28 @@ def enqueue_event(session_id: str, event_type: str, data: dict):
         try:
             _event_queue.get_nowait()
         except queue.Empty:
-            pass
+            logger.debug("Event queue emptied by another thread while making room", exc_info=True)
         try:
             _event_queue.put_nowait(msg)
         except queue.Full:
-            pass
+            logger.debug("Event queue refilled by another thread; dropping event", exc_info=True)
     if _loop is not None and _notify is not None:
         _loop.call_soon_threadsafe(_notify.set)
 
 
-async def _broadcast_worker():
+async def _send_to_session(session_id: str, payload: str) -> None:
+    """Send *payload* to every client of *session_id*, forgetting the ones that have gone away."""
+    dead: set[WebSocket] = set()
+    for client in list(_connections.get(session_id, ())):
+        try:
+            await client.send_text(payload)
+        except WS_SEND_ERRORS:
+            dead.add(client)
+    if dead and session_id in _connections:
+        _connections[session_id] -= dead
+
+
+async def _broadcast_worker() -> None:
     """Background task that drains the event queue and sends to connected clients.
 
     Periodically checks for dropped events and broadcasts a warning
@@ -234,70 +249,47 @@ async def _broadcast_worker():
             except queue.Empty:
                 break
 
-            session_id = msg.get("session_id", "")
+            session_id = msg["session_id"]
             payload = json.dumps(msg)
 
             # A fanout with 0 subscribers means the event
             # is dropped on the floor — the signature of the proxy late-connect
             # race. Gated behind DEBUG so it is silent in normal operation.
-            logger.debug(
-                "WS fanout sid=%s type=%s subscribers=%d",
-                session_id, msg.get("type"), len(_connections.get(session_id, set())),
-            )
-
-            dead: Set[WebSocket] = set()
-            for ws in _connections.get(session_id, set()):
-                try:
-                    await ws.send_text(payload)
-                except Exception:
-                    dead.add(ws)
-
-            # Clean up disconnected clients
-            if dead:
-                _connections[session_id] -= dead
+            subscribers = len(_connections.get(session_id, ()))
+            logger.debug("WS fanout sid=%s type=%s subscribers=%d", session_id, msg["type"], subscribers)
+            await _send_to_session(session_id, payload)
 
         # Warn all connected clients when events are being dropped
         current_drops = dropped_events()
         if current_drops > _last_warned_drops:
-            _diag_log("ws.events_dropped", tier=_TIER_API, lvl="warn",
-                      msg=f"WebSocket event queue overflow: {current_drops} dropped",
-                      src="reacher.api.websocket", dropped=current_drops,
-                      since_last=current_drops - _last_warned_drops)
+            overflow = f"WebSocket event queue overflow: {current_drops} dropped"
+            since = current_drops - _last_warned_drops
+            _diag("ws.events_dropped", overflow, "warn", dropped=current_drops, since_last=since)
             _last_warned_drops = current_drops
-            warning_msg = json.dumps({
-                "type": "warning",
-                "data": {
-                    "message": "Events are being dropped due to queue overflow",
-                    "dropped_count": current_drops,
-                },
-            })
-            for session_id, ws_set in _connections.items():
-                dead: Set[WebSocket] = set()
-                for ws in ws_set:
-                    try:
-                        await ws.send_text(warning_msg)
-                    except Exception:
-                        dead.add(ws)
-                if dead:
-                    _connections[session_id] -= dead
+            warning = {"message": "Events are being dropped due to queue overflow", "dropped_count": current_drops}
+            warning_msg = json.dumps({"type": "warning", "data": warning})
+            for session_id in list(_connections):
+                await _send_to_session(session_id, warning_msg)
 
 
 # Start the broadcast worker as a background task
-_broadcast_task = None
-_watchdog_task = None
+_broadcast_task: asyncio.Task[None] | None = None
+_watchdog_task: asyncio.Task[None] | None = None
 
 
-def _ensure_broadcast_worker():
+def _ensure_broadcast_worker() -> None:
+    """Start the broadcast worker and the watchdog on the running loop if either has stopped."""
     global _broadcast_task, _watchdog_task, _loop
+    loop = asyncio.get_running_loop()
     if _broadcast_task is None or _broadcast_task.done():
-        _loop = asyncio.get_running_loop()
-        _broadcast_task = _loop.create_task(_broadcast_worker())
+        _loop = loop
+        _broadcast_task = loop.create_task(_broadcast_worker())
     if _watchdog_task is None or _watchdog_task.done():
-        _watchdog_task = _loop.create_task(_watchdog())
+        _watchdog_task = loop.create_task(_watchdog())
 
 
 # Per-session last-disconnect timestamps for orphan cleanup
-_session_disconnect_times: Dict[str, float] = {}
+_session_disconnect_times: dict[str, float] = {}
 _SESSION_ORPHAN_TIMEOUT = 60  # seconds with 0 WS clients before destroying a session
 _SESSION_ORPHAN_TIMEOUT_ACTIVE = 600  # extended timeout for running/paused/uploading sessions
 # A "stopped" session still holds data the user has not
@@ -310,67 +302,92 @@ _SESSION_ORPHAN_TIMEOUT_ACTIVE = 600  # extended timeout for running/paused/uplo
 # session that never gets exported is still bounded — just generously, since
 # the alternative is destroying data the user came back for.
 _SESSION_ORPHAN_TIMEOUT_STOPPED_UNEXPORTED = 86400  # 24h
-_orphan_task = None
+_orphan_task: asyncio.Task[None] | None = None
 
 
-async def _orphan_cleanup():
+def _orphan_timeout(sid: str) -> int:
+    """Return how long session *sid* may stay without WebSocket clients before it is destroyed."""
+    if _app_ref is None:
+        return _SESSION_ORPHAN_TIMEOUT
+    try:
+        info = _app_ref.state.session_manager._sessions.get(sid)
+    except AttributeError:
+        logger.debug("Orphan timeout lookup failed for %s", sid, exc_info=True)
+        return _SESSION_ORPHAN_TIMEOUT
+    if info is None:
+        return _SESSION_ORPHAN_TIMEOUT
+    if info.state in _ACTIVE_STATES:
+        return _SESSION_ORPHAN_TIMEOUT_ACTIVE
+    if info.state == "stopped" and not info.exported:
+        return _SESSION_ORPHAN_TIMEOUT_STOPPED_UNEXPORTED
+    if info.state == "disconnected" and info.instance.program_running:
+        # A serial drop mid-run holds unexported data a client may still come back for.
+        return _SESSION_ORPHAN_TIMEOUT_ACTIVE
+    return _SESSION_ORPHAN_TIMEOUT
+
+
+async def _destroy_orphan(sid: str) -> None:
+    """Destroy session *sid* off the event loop and drop its rate-limit state."""
+    from .hardware import release_session  # imported here: hardware imports this module
+
+    if _app_ref is None:
+        return
+    try:
+        sm: SessionManager = _app_ref.state.session_manager
+        # destroy_session is blocking; run off the event loop
+        await asyncio.get_running_loop().run_in_executor(None, sm.destroy_session, sid)
+        release_session(sid)
+        logger.info("Orphan cleanup: destroyed session %s", sid)
+    except _REAP_ERRORS:
+        # AttributeError: no session manager on the app.
+        logger.debug("Orphan cleanup failed for %s", sid, exc_info=True)
+
+
+async def _orphan_cleanup() -> None:
     """Periodically destroy sessions that have had no WebSocket clients for ORPHAN_TIMEOUT."""
     while True:
         await asyncio.sleep(15)
         now = time.monotonic()
-        orphans = []
-        for sid, ts in list(_session_disconnect_times.items()):
-            if sid in _connections:
-                continue
-            # Use extended timeout for running/paused/uploading sessions
-            timeout = _SESSION_ORPHAN_TIMEOUT
-            if _app_ref is not None:
-                try:
-                    sm = _app_ref.state.session_manager
-                    info = sm._sessions.get(sid)
-                    if info and info.state in ("running", "paused", "uploading"):
-                        timeout = _SESSION_ORPHAN_TIMEOUT_ACTIVE
-                    elif info and info.state == "stopped" and not info.exported:
-                        timeout = _SESSION_ORPHAN_TIMEOUT_STOPPED_UNEXPORTED
-                    elif info and info.state == "disconnected" and getattr(info.instance, "program_running", False):
-                        # A serial drop mid-run holds unexported data a client may still come back for.
-                        timeout = _SESSION_ORPHAN_TIMEOUT_ACTIVE
-                except Exception:
-                    pass
-            if (now - ts) >= timeout:
-                orphans.append(sid)
+        orphans = [
+            sid
+            for sid, ts in list(_session_disconnect_times.items())
+            if sid not in _connections and (now - ts) >= _orphan_timeout(sid)
+        ]
         for sid in orphans:
             _session_disconnect_times.pop(sid, None)
-            # Access session manager via the app state if available
             if _loop is not None:
-                try:
-                    from ...session_manager import SessionManager
-                    from .hardware import release_session
-                    # The app reference is stored in the websocket router's state
-                    # We'll use the global _app_ref set during first WS connect
-                    if _app_ref is not None:
-                        sm: SessionManager = _app_ref.state.session_manager
-                        # destroy_session is blocking; run off the event loop
-                        await asyncio.get_event_loop().run_in_executor(None, sm.destroy_session, sid)
-                        # Clean up rate-limit timestamps
-                        release_session(sid)
-                        logger.info("Orphan cleanup: destroyed session %s", sid)
-                except Exception:
-                    logger.debug("Orphan cleanup failed for %s", sid, exc_info=True)
+                await _destroy_orphan(sid)
 
 
-_app_ref = None
+_app_ref: FastAPI | None = None
+
+
+async def _send_state_snapshot(websocket: WebSocket, session_id: str) -> None:
+    """Send the live state of *session_id* to a client that has just connected.
+
+    Transitions are broadcast as they happen, so a client that connects after one never sees
+    it. In proxy mode the relay always connects late, leaving the browser session "idle" and
+    every later event dropped; replaying the live state on connect fixes that.
+    """
+    try:
+        sm: SessionManager = websocket.app.state.session_manager
+        info = sm._sessions.get(session_id)
+        if info is not None:
+            snapshot: _Event = {"type": "session_state", "session_id": session_id, "data": {"state": info.state}}
+            await websocket.send_text(json.dumps(snapshot))
+    except _SNAPSHOT_ERRORS:
+        # AttributeError: the app has no session manager; the send errors: the client already left.
+        logger.debug("session_state snapshot on connect failed for %s", session_id, exc_info=True)
 
 
 @router.websocket("/ws/{session_id}")
-async def websocket_endpoint(websocket: WebSocket, session_id: str):
-    global _had_connections, _last_connection_time, _app_ref, _orphan_task
+async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
+    """Stream session events to one client and answer its keep-alive pings."""
+    global _had_connections, _last_connection_time, _app_ref, _orphan_task, _server_suspended, _session_orphaned
 
     if not verify_ws_token(websocket):
-        _diag_log("ws.auth_failed", tier=_TIER_API, lvl="warn",
-                  msg=f"Rejected WebSocket for session {session_id}: bad token",
-                  src="reacher.api.websocket", session_id=session_id,
-                  client=getattr(websocket.client, "host", None))
+        client = getattr(websocket.client, "host", None)
+        _diag("ws.auth_failed", f"Rejected WebSocket for {session_id}: bad token", "warn", session_id, client=client)
         await websocket.close(code=4001, reason="Unauthorized")
         return
     await websocket.accept()
@@ -379,7 +396,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     _last_connection_time = time.monotonic()
     _session_disconnect_times.pop(session_id, None)
     _app_ref = websocket.app
-    global _server_suspended, _session_orphaned
     if _server_suspended:
         _server_suspended = False
         logger.info("WS reconnect from %s — clearing suspended state", session_id)
@@ -390,33 +406,18 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     if _orphan_task is None or _orphan_task.done():
         _orphan_task = asyncio.get_running_loop().create_task(_orphan_cleanup())
     logger.info("WebSocket connected for session %s", session_id)
-    _diag_log("ws.connect", tier=_TIER_API,
-              msg=f"WebSocket connected for session {session_id}",
-              src="reacher.api.websocket", session_id=session_id,
-              connections=total_connections(),
-              client=getattr(websocket.client, "host", None))
-
-    # Snapshot the current session state to this just-connected client.
-    # State transitions (idle->uploading->connected->running) are broadcast as
-    # they happen; a client that connects *after* a transition never sees it. In
-    # proxy/IoT mode the WS relay always connects late (after an async ws-token
-    # fetch), so the Pi fans those transitions to an empty client set and the
-    # browser session stays "idle" — pushEvent then silently drops every event.
-    # Replaying the live state on connect lets any client (relay, direct browser,
-    # or a reconnect) immediately learn the real state.
-    try:
-        sm = websocket.app.state.session_manager
-        info = sm._sessions.get(session_id)
-        if info is not None:
-            await websocket.send_text(json.dumps({
-                "type": "session_state",
-                "session_id": session_id,
-                "data": {"state": info.state},
-            }))
-    except Exception:
-        logger.debug("session_state snapshot on connect failed for %s", session_id, exc_info=True)
+    client = getattr(websocket.client, "host", None)
+    conns = total_connections()
+    _diag(
+        "ws.connect",
+        f"WebSocket connected for session {session_id}",
+        session_id=session_id,
+        client=client,
+        connections=conns,
+    )
 
     try:
+        await _send_state_snapshot(websocket, session_id)
         while True:
             # Keep the connection alive; validate input
             data = await websocket.receive_text()
@@ -442,7 +443,5 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             _session_disconnect_times[session_id] = time.monotonic()
         _last_connection_time = time.monotonic()
         logger.info("WebSocket disconnected for session %s", session_id)
-        _diag_log("ws.disconnect", tier=_TIER_API,
-                  msg=f"WebSocket disconnected for session {session_id}",
-                  src="reacher.api.websocket", session_id=session_id,
-                  connections=total_connections())
+        conns = total_connections()
+        _diag("ws.disconnect", f"WebSocket disconnected for {session_id}", session_id=session_id, connections=conns)
