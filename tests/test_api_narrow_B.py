@@ -5,6 +5,7 @@ for a programming error: it must reach the server's error handling instead of be
 ordinary failed request or swallowed.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -235,3 +236,36 @@ class TestFirmwareUpload:
         resp = self._post(api, sid)
         assert resp.status_code == 409
         assert self._state(api, sid) == "uploading"
+
+
+def test_a_cancelled_upload_keeps_the_session_locked_while_avrdude_may_still_run():
+    """Cancelling the request does not stop avrdude, so the 409 gate must stay shut.
+
+    Resetting to idle here would let a retry start a second avrdude on the same port.
+    """
+    from reacher.api.routers import firmware
+
+    sm = Mock()
+    sm.get_session.return_value = Mock(state="uploading")
+    request = Mock()
+    request.app.state.session_manager = sm
+    body = firmware.UploadRequest(paradigm="fr")
+    with patch.object(firmware, "_flash_and_reconnect", AsyncMock(side_effect=asyncio.CancelledError())):
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(firmware.upload_firmware("s1", body, request))
+    sm.set_state.assert_not_called()
+
+
+def test_an_unexpected_upload_error_resets_a_session_it_left_uploading():
+    """The counterpart: a bug mid-upload still frees the session."""
+    from reacher.api.routers import firmware
+
+    sm = Mock()
+    sm.get_session.return_value = Mock(state="uploading")
+    request = Mock()
+    request.app.state.session_manager = sm
+    body = firmware.UploadRequest(paradigm="fr")
+    with patch.object(firmware, "_flash_and_reconnect", AsyncMock(side_effect=TypeError("bug"))):
+        with pytest.raises(TypeError):
+            asyncio.run(firmware.upload_firmware("s1", body, request))
+    sm.set_state.assert_called_once_with("s1", "idle")

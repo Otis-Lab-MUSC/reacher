@@ -358,14 +358,30 @@ def test_validate_rule_engine_bug_surfaces(client):
             client.post("/api/validate/config", json={}, headers=AUTH)
 
 
-def test_validate_oversized_integers_return_empty_warnings(client):
-    """Two 4300-digit numbers parse, then fail when a rule formats their 4301-digit sum."""
-    big = "9" * 4300
-    text = (
+def _cue_overlap_config(number: str) -> str:
+    """A config whose primary cue and contingency delay both use *number* (an integer literal)."""
+    return (
         '{"hardwareUi":{"primaryCue":{"armed":true,"duration":%s,"contingency":{"delay":%s,"leverFilter":"rh"}},'
         '"rhLever":{"armed":true,"timeout":5}},'
-        '"limitSettings":{"limitType":"Time","timeLimit":10}}' % (big, big)
+        '"limitSettings":{"limitType":"Time","timeLimit":10}}' % (number, number)
     )
-    resp = client.post("/api/validate/config", content=text, headers={**AUTH, "Content-Type": "application/json"})
+
+
+def _validate(client, text):
+    return client.post("/api/validate/config", content=text, headers={**AUTH, "Content-Type": "application/json"})
+
+
+def test_validate_oversized_integers_return_empty_warnings(client):
+    """Two 4300-digit numbers parse, then fail when a rule formats their 4301-digit sum."""
+    resp = _validate(client, _cue_overlap_config("9" * 4300))
     assert resp.status_code == 200
     assert resp.json()["warnings"] == []
+
+
+def test_validate_the_same_rule_fires_for_small_integers(client):
+    """Guards the test above: it only exercises the ValueError path while this rule still produces a warning."""
+    resp = _validate(client, _cue_overlap_config("9"))
+    assert resp.status_code == 200
+    assert resp.json()["warnings"], (
+        "the cue/contingency rule no longer fires, so the oversized-integer test proves nothing"
+    )

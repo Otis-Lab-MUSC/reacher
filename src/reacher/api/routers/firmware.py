@@ -64,10 +64,13 @@ async def upload_firmware(session_id: str, body: UploadRequest, request: Request
     except HTTPException:
         finished = True  # every rejection sets the state it needs; a gate refusal must not touch a running upload
         raise
+    except asyncio.CancelledError:
+        finished = True  # avrdude is not killed on cancel, so the session stays "uploading" and keeps the port locked
+        raise
     finally:
         if not finished:
-            # An unexpected error (or a cancelled request) must not leave the session in "uploading",
-            # because that state refuses every later upload. Only this request can have set it here.
+            # An unexpected error must not leave the session in "uploading", because that state refuses
+            # every later upload. Only this request can have set it here.
             try:
                 if sm.get_session(session_id).state == "uploading":
                     sm.set_state(session_id, "idle")
