@@ -1,6 +1,6 @@
 {
   "any_uses": 85,
-  "except_exception_sites": 78,
+  "except_exception_sites": 75,
   "files_over_300_lines": 20,
   "functions_over_50_lines": 47,
   "history_comments": 0,

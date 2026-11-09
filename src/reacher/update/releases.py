@@ -96,11 +96,11 @@ def pick_latest(releases: list[Release], channel: Channel) -> Release | None:
     return max(allowed, key=lambda release: release.version, default=None)
 
 
-async def fetch_releases(client: httpx.AsyncClient) -> list[Release]:
-    """Fetch and parse the most recent releases from GitHub."""
+async def fetch_releases(client: httpx.AsyncClient, url: str = RELEASES_URL) -> list[Release]:
+    """Fetch and parse the most recent releases from url, GitHub's by default."""
     try:
         response = await client.get(
-            RELEASES_URL,
+            url,
             params={"per_page": RELEASES_PER_PAGE},
             timeout=FETCH_TIMEOUT_SECONDS,
             headers={"Accept": GITHUB_ACCEPT_HEADER},
