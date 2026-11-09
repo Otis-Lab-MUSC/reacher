@@ -7,6 +7,8 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, field_validator, model_validator
 from typing import List, Literal, Optional
 
+from ...session_manager import SessionInfo
+from ..errors import KERNEL_ERRORS
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -55,13 +57,19 @@ class LimitRequest(BaseModel):
         return self
 
 
-@router.post("/{session_id}/start")
-async def start_program(session_id: str, request: Request):
-    sm = request.app.state.session_manager
+def _session_or_404(request: Request, session_id: str) -> SessionInfo:
+    """Return the session for *session_id*, or raise a 404 HTTPException."""
     try:
-        info = sm.get_session(session_id)
+        info: SessionInfo = request.app.state.session_manager.get_session(session_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
+    return info
+
+
+@router.post("/{session_id}/start", response_model=None)
+async def start_program(session_id: str, request: Request) -> dict[str, str]:
+    sm = request.app.state.session_manager
+    info = _session_or_404(request, session_id)
 
     # A second /start while already running or paused would silently wipe
     # the buffered behavior data (start_program() resets buffers) with a
@@ -83,7 +91,7 @@ async def start_program(session_id: str, request: Request):
 
     try:
         info.instance.start_program()
-    except Exception:
+    except KERNEL_ERRORS:
         logger.error("start_program failed for session %s", session_id, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to start program")
 
@@ -91,13 +99,9 @@ async def start_program(session_id: str, request: Request):
     return {"status": "started"}
 
 
-@router.post("/{session_id}/stop")
-async def stop_program(session_id: str, request: Request):
-    sm = request.app.state.session_manager
-    try:
-        info = sm.get_session(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Session not found")
+@router.post("/{session_id}/stop", response_model=None)
+async def stop_program(session_id: str, request: Request) -> dict[str, str]:
+    info = _session_or_404(request, session_id)
 
     if not info.instance.program_running and info.state not in ("running", "paused"):
         return {"status": "not_running"}
@@ -106,20 +110,17 @@ async def stop_program(session_id: str, request: Request):
         # Use run_in_executor so time.sleep(2) in stop_program() doesn't block the event loop
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, info.instance.stop_program)
-    except Exception:
+    except KERNEL_ERRORS:
         logger.error("stop_program failed for session %s", session_id, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to stop program")
 
     return {"status": "stopped"}
 
 
-@router.post("/{session_id}/pause")
-async def pause_program(session_id: str, request: Request):
+@router.post("/{session_id}/pause", response_model=None)
+async def pause_program(session_id: str, request: Request) -> dict[str, str]:
     sm = request.app.state.session_manager
-    try:
-        info = sm.get_session(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Session not found")
+    info = _session_or_404(request, session_id)
 
     # Only allow pause/resume when session is running or paused
     if info.state not in ("running", "paused"):
@@ -139,14 +140,10 @@ async def pause_program(session_id: str, request: Request):
         return {"status": "resumed"}
 
 
-@router.post("/{session_id}/limit")
-async def set_limit(session_id: str, body: LimitRequest, request: Request):
+@router.post("/{session_id}/limit", response_model=None)
+async def set_limit(session_id: str, body: LimitRequest, request: Request) -> dict[str, str]:
     """Set the session's time/infusion limits."""
-    sm = request.app.state.session_manager
-    try:
-        info = sm.get_session(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Session not found")
+    info = _session_or_404(request, session_id)
 
     instance = info.instance
     if body.type not in ("Time", "Infusion", "Both", "Trials"):
@@ -155,7 +152,8 @@ async def set_limit(session_id: str, body: LimitRequest, request: Request):
         if body.counted_pumps == [] and body.type in ("Infusion", "Both"):
             raise HTTPException(status_code=400, detail="counted_pumps cannot be empty for an Infusion or Both limit")
         try:
-            instance.set_counted_pumps(body.counted_pumps)
+            pumps: list[str] | None = None if body.counted_pumps is None else [*body.counted_pumps]
+            instance.set_counted_pumps(pumps)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
@@ -170,13 +168,9 @@ async def set_limit(session_id: str, body: LimitRequest, request: Request):
     return {"status": "limits_set", "type": body.type}
 
 
-@router.post("/{session_id}/split")
-async def split_segment(session_id: str, request: Request):
-    sm = request.app.state.session_manager
-    try:
-        info = sm.get_session(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Session not found")
+@router.post("/{session_id}/split", response_model=None)
+async def split_segment(session_id: str, request: Request) -> dict[str, str | int]:
+    info = _session_or_404(request, session_id)
 
     if info.state not in ("running", "paused"):
         raise HTTPException(
@@ -186,20 +180,17 @@ async def split_segment(session_id: str, request: Request):
 
     try:
         result = info.instance.split_segment()
-    except Exception:
+    except KERNEL_ERRORS:
         logger.error("split_segment failed for session %s", session_id, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to split segment")
 
     return {"status": "split", **result}
 
 
-@router.post("/{session_id}/restart")
-async def restart_program(session_id: str, request: Request):
+@router.post("/{session_id}/restart", response_model=None)
+async def restart_program(session_id: str, request: Request) -> dict[str, str]:
     sm = request.app.state.session_manager
-    try:
-        info = sm.get_session(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Session not found")
+    info = _session_or_404(request, session_id)
 
     if info.state not in ("running", "paused"):
         raise HTTPException(
@@ -210,7 +201,7 @@ async def restart_program(session_id: str, request: Request):
     try:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, info.instance.restart_program)
-    except Exception:
+    except KERNEL_ERRORS:
         logger.error("restart_program failed for session %s", session_id, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to restart program")
 

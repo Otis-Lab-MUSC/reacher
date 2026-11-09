@@ -12,15 +12,23 @@ import time
 import zipfile
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
+from openpyxl.utils.exceptions import IllegalCharacterError
 from pydantic import BaseModel
 from typing import Optional
 
 from ...child_env import clean_child_env
 from ...export_xlsx import build_behavior_workbook, rows_from_csv
+from ...session_manager import SessionInfo
+from ..errors import PERSIST_ERRORS
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# A best-effort ZIP member read off the instance: a stub missing the accessor (AttributeError), an
+# unreadable file or path (OSError, TypeError), or a summary json cannot encode (ValueError).
+_MEMBER_ERRORS: tuple[type[Exception], ...] = (AttributeError, OSError, TypeError, ValueError)
+# The behavior_events.xlsx workbook: unreadable segment CSV, bad CSV or cell text, an out-of-range timestamp.
+_XLSX_ERRORS: tuple[type[Exception], ...] = (OSError, ValueError, OverflowError, csv.Error, IllegalCharacterError)
 
 _ARCHIVE_SUFFIXES = (".tar.gz", ".tgz", ".zip", ".tar", ".gz")
 
@@ -46,15 +54,11 @@ def _sanitize_for_path(name: str) -> str:
 
 def _find_frame_index(frame_timestamps: list[int], event_ts: int) -> int | None:
     """Return the index of the last frame at or before *event_ts*, or None."""
-    if not frame_timestamps:
-        return None
     idx = bisect.bisect_right(frame_timestamps, event_ts) - 1
-    if idx < 0:
-        return None
-    return idx
+    return idx if idx >= 0 else None
 
 
-def _build_behavior_csv(behavior: list, frame_timestamps: list[int]) -> str:
+def _build_behavior_csv(behavior: list[dict[str, str | int]], frame_timestamps: list[int]) -> str:
     """Serialise a behavior event list to CSV matching the on-disk segment format."""
     csv_buf = io.StringIO()
     fieldnames = ["device", "event", "start_timestamp", "end_timestamp", "start_frame_index", "end_frame_index"]
@@ -72,13 +76,36 @@ def _build_behavior_csv(behavior: list, frame_timestamps: list[int]) -> str:
     return csv_buf.getvalue()
 
 
+def _clock(epoch_ms: float | None, fmt: str) -> str | None:
+    """Format an epoch-milliseconds stamp in local time, or None when it is unset."""
+    return None if epoch_ms is None else time.strftime(fmt, time.localtime(epoch_ms / 1000))
+
+
+def _index_csv(columns: tuple[str, str], timestamps: list[int]) -> str:
+    """Serialise *timestamps* as rows of (position, timestamp) under *columns*."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(columns)
+    writer.writerows(enumerate(timestamps))
+    return buf.getvalue()
+
+
+def _get_info(request: Request, session_id: str) -> SessionInfo:
+    """Return the session's info, or raise a 404 when it does not exist."""
+    try:
+        info: SessionInfo = request.app.state.session_manager.get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return info
+
+
 class FileConfigRequest(BaseModel):
     filename: Optional[str] = None
     destination: Optional[str] = None
 
 
 @router.get("/browse")
-async def browse_folder():
+async def browse_folder() -> dict[str, str | None]:
     """Open a native OS folder picker; returns null if cancelled or no display."""
     if sys.platform.startswith("linux"):
         try:
@@ -97,12 +124,16 @@ async def browse_folder():
                 return {"path": None}
             # Other return codes fall through to tkinter
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-            pass  # zenity unavailable — fall through to tkinter
+            logger.debug("zenity unavailable, falling back to tkinter", exc_info=True)
 
     try:
         import tkinter as tk
         from tkinter import filedialog
+    except ImportError:
+        logger.warning("browse_folder unavailable: tkinter is not installed")
+        return {"path": None}
 
+    try:
         root = tk.Tk()
         root.geometry("1x1+0+0")
         root.withdraw()
@@ -110,18 +141,14 @@ async def browse_folder():
         folder = filedialog.askdirectory(title="Select Destination Folder", parent=root)
         root.destroy()
         return {"path": folder or None}
-    except Exception as exc:
+    except (tk.TclError, RuntimeError) as exc:
         logger.warning("browse_folder unavailable: %s", exc)
         return {"path": None}
 
 
 @router.post("/{session_id}/config")
-async def set_file_config(session_id: str, body: FileConfigRequest, request: Request):
-    sm = request.app.state.session_manager
-    try:
-        info = sm.get_session(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Session not found")
+async def set_file_config(session_id: str, body: FileConfigRequest, request: Request) -> dict[str, str | None]:
+    info = _get_info(request, session_id)
 
     instance = info.instance
 
@@ -144,16 +171,12 @@ async def set_file_config(session_id: str, body: FileConfigRequest, request: Req
 
 
 @router.post("/{session_id}/create_folder")
-async def create_folder(session_id: str, request: Request):
-    sm = request.app.state.session_manager
-    try:
-        info = sm.get_session(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Session not found")
+async def create_folder(session_id: str, request: Request) -> dict[str, str]:
+    info = _get_info(request, session_id)
 
     try:
         folder = info.instance.make_destination_folder()
-    except Exception:
+    except PERSIST_ERRORS:
         logger.error("Folder creation failed for session %s", session_id, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to create folder")
 
@@ -170,12 +193,8 @@ class ZipExportRequest(BaseModel):
 
 
 @router.post("/{session_id}/export/zip")
-async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
-    sm = request.app.state.session_manager
-    try:
-        info = sm.get_session(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Session not found")
+async def export_zip(session_id: str, body: ZipExportRequest, request: Request) -> dict[str, str]:
+    info = _get_info(request, session_id)
 
     instance = info.instance
     filename = _strip_archive_suffix(instance.get_filename() or "")
@@ -261,7 +280,7 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
         # than failing an export the user is waiting on.
         try:
             segment_rows = []
-            for seg_path in segment_exports if segment_exports else []:
+            for seg_path in segment_exports:
                 if os.path.isfile(seg_path):
                     with open(seg_path, newline="") as f:
                         segment_rows.append(rows_from_csv(f.read()))
@@ -273,8 +292,7 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
                 ("Paradigm", info.paradigm),
                 ("Firmware", f"{firmware_info.get('sketch', 'unknown.ino')} {firmware_info.get('version', 'unknown')}"),
                 ("Exported", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())),
-                ("Program start", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(body.program_start_time / 1000))
-                 if body.program_start_time is not None else None),
+                ("Program start", _clock(body.program_start_time, "%Y-%m-%d %H:%M:%S")),
                 ("Segments", segment_count),
                 ("Infusions", infusion_count),
                 ("Lever presses", press_count),
@@ -283,26 +301,16 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
                 ("SLM events", len(slm_timestamps)),
             ]
             zf.writestr("behavior_events.xlsx", build_behavior_workbook(segment_rows, facts))
-        except Exception:
+        except _XLSX_ERRORS:
             logger.warning("Failed to include behavior_events.xlsx for session %s", session_id, exc_info=True)
 
         # frame_timestamps.csv — only when microscope data was captured
         if frame_timestamps:
-            ft_buf = io.StringIO()
-            ft_writer = csv.DictWriter(ft_buf, fieldnames=["frame_index", "timestamp_ms"])
-            ft_writer.writeheader()
-            for i, ts in enumerate(frame_timestamps):
-                ft_writer.writerow({"frame_index": i, "timestamp_ms": ts})
-            zf.writestr("frame_timestamps.csv", ft_buf.getvalue())
+            zf.writestr("frame_timestamps.csv", _index_csv(("frame_index", "timestamp_ms"), frame_timestamps))
 
         # slm_timestamps.csv — only when SLM data was captured
         if slm_timestamps:
-            st_buf = io.StringIO()
-            st_writer = csv.DictWriter(st_buf, fieldnames=["event_index", "timestamp_ms"])
-            st_writer.writeheader()
-            for i, ts in enumerate(slm_timestamps):
-                st_writer.writerow({"event_index": i, "timestamp_ms": ts})
-            zf.writestr("slm_timestamps.csv", st_buf.getvalue())
+            zf.writestr("slm_timestamps.csv", _index_csv(("event_index", "timestamp_ms"), slm_timestamps))
 
         # arduino_config.json
         zf.writestr(
@@ -317,10 +325,10 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
         try:
             session_summary = instance.get_session_summary()
             zf.writestr("session_summary.json", json.dumps(session_summary, indent=2))
-        except Exception:
+        except _MEMBER_ERRORS:
             # Mirrors event_log.jsonl below: omit rather than fail an export the
             # user is waiting on, whether the cause is a stub/mock instance
-            # missing the accessor or a genuine runtime error building it.
+            # missing the accessor or a summary that cannot be encoded.
             logger.warning("Failed to include session_summary.json for session %s", session_id, exc_info=True)
 
         # event_log.jsonl — authoritative cross-segment record of lifecycle, events, frames
@@ -332,19 +340,14 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
                     zf.writestr("event_log.jsonl", f.read())
             else:
                 logger.info("event_log.jsonl not present for session %s — skipping", session_id)
-        except Exception:
+        except _MEMBER_ERRORS:
             logger.warning("Failed to include event_log.jsonl for session %s", session_id, exc_info=True)
 
         # metadata.json
         now = time.time()
         export_date = time.strftime("%Y-%m-%d", time.localtime(now))
         export_time = time.strftime("%H:%M:%S", time.localtime(now))
-        program_start_str = None
-        if body.program_start_time is not None:
-            program_start_str = time.strftime(
-                "%H:%M:%S",
-                time.localtime(body.program_start_time / 1000),
-            )
+        program_start_str = _clock(body.program_start_time, "%H:%M:%S")
         zf.writestr(
             "metadata.json",
             json.dumps(
@@ -391,19 +394,15 @@ async def export_zip(session_id: str, body: ZipExportRequest, request: Request):
 
     # Releases this session from the extended
     # unexported-stopped orphan-cleanup window now that its data is safe on disk.
-    sm.mark_exported(session_id)
+    request.app.state.session_manager.mark_exported(session_id)
 
     return {"file_path": zip_path, "folder_path": folder_path}
 
 
 @router.get("/{session_id}/export/download")
-async def download_export(session_id: str, path: str = Query(...), request: Request = None):
+async def download_export(request: Request, session_id: str, path: str = Query(...)) -> FileResponse:
     """Return an exported ZIP as a binary download to the browser."""
-    sm = request.app.state.session_manager
-    try:
-        sm.get_session(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Session not found")
+    _get_info(request, session_id)
 
     resolved = os.path.realpath(path)
     home = os.path.realpath(os.path.expanduser("~"))

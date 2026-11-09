@@ -114,15 +114,15 @@ def test_device_setting_guide_covers_every_file_timeout_mode_touched(doc):
         "src/reacher/kernel/simulator.py",
         "src/reacher/api/routers/hardware.py",
         "web/src/types/index.ts",
-        "web/src/store/useSessionStore.ts",
+        "web/src/store/sessionDefaults.ts",
         "web/src/components/hardware/LeverControl.tsx",
         "web/src/components/program/devicePresets.ts",
         "web/src/components/program/presets/frSaPresets.ts",
         "web/src/components/monitor/hardwareSummary.ts",
         "web/src/components/monitor/SessionStartModal.tsx",
         "web/src/components/tutorial/help/content.ts",
-        "cli/presets.py",
-        "cli/app.py",
+        "cli/preset_tables.py",
+        "cli/constants.py",
     ):
         assert needed in paths, needed
 
@@ -172,7 +172,7 @@ def test_new_device_guide_covers_the_aux_layers(doc):
         "src/reacher/kernel/reacher.py", "src/reacher/kernel/simulator.py",
         "src/reacher/api/routers/hardware.py",
         "web/src/components/hardware/pinMeta.ts", "web/src/types/index.ts",
-        "web/src/store/useSessionStore.ts", "web/src/hooks/useSessionWebSockets.ts",
+        "web/src/store/sessionDefaults.ts", "web/src/hooks/useSessionWebSockets.ts",
         "web/src/components/monitor/EventTimeline.tsx",
         "web/src/components/monitor/SessionStartModal.tsx",
         "web/src/components/hardware/usePinOverridesHydration.ts",

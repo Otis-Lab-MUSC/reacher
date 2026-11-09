@@ -222,12 +222,12 @@ GUIDES: dict[str, dict[str, Any]] = {
                   "Import the new const and add it to SESSION_PRESETS in the position the user wants.",
                   "none", "by hand: the preset appears in Program > presets in the running app "
                   "(`npm run dev` in labrynth/web)."),
-            _step("labrynth", "cli/presets.py", "SESSION_PRESETS: list[dict] = [",
+            _step("labrynth", "cli/preset_catalog.py", "SESSION_PRESETS: list[Preset] = [",
                   "Add the same preset as a dict with identical id, name and values, at the same "
                   "position as in the parity script's list (next step).",
                   "run:cli_parity", "run_checks(['cli_parity'])"),
             _step("labrynth", "scripts/check-cli-parity.py", "const presets = [",
-                  "Add the new const to this list at the same position as in cli/presets.py. "
+                  "Add the new const to this list at the same position as in cli/preset_catalog.py. "
                   "The script compares the two id lists in order.",
                   "run:cli_parity", "run_checks(['cli_parity'])"),
         ],
@@ -336,7 +336,7 @@ GUIDES: dict[str, dict[str, Any]] = {
                   "{ui_state} does not exist yet, create `export interface {ui_state} extends "
                   "DeviceArmState {}` above HardwareUiState and use it for `{ui_key}` there.",
                   "tsc", "run_checks(['tsc'])"),
-            _step("labrynth", "web/src/store/useSessionStore.ts",
+            _step("labrynth", "web/src/store/sessionDefaults.ts",
                   "export const defaultHardwareUiState = (): HardwareUiState => ({",
                   "Give `{ui_key}.{camel_setting}` a default that matches the firmware default.",
                   "tsc", "run_checks(['tsc'])"),
@@ -350,8 +350,8 @@ GUIDES: dict[str, dict[str, Any]] = {
                   "export const PRESET_COMMAND_MAP: Record<string, { arm: number; disarm: number; params?: Record<string, number> }> = {",
                   "Add `{camel_setting}: {param_code}` to params under `{ui_key}`. {param_paradigms}",
                   "run:cli_parity", "run_checks(['cli_parity'])", when="board"),
-            _step("labrynth", "cli/presets.py",
-                  "PRESET_COMMAND_MAP: dict[str, dict] = {",
+            _step("labrynth", "cli/preset_tables.py",
+                  "PRESET_COMMAND_MAP: dict[str, CommandSpec] = {",
                   "Mirror the same param key, code and PARAM_PARADIGMS entry as devicePresets.ts.",
                   "run:cli_parity", "run_checks(['cli_parity'])", when="board"),
             _step("labrynth", "web/src/components/program/presets/frSaPresets.ts",
@@ -359,14 +359,14 @@ GUIDES: dict[str, dict[str, Any]] = {
                   "Ask the user: should the built-in presets set the new value? No: skip this "
                   "step. Yes: add `{camel_setting}` with the default value under `{ui_key}` in "
                   "every preset in this file, frLitePresets.ts and pavlovianPresets.ts, and the "
-                  "same in cli/presets.py.",
+                  "same in cli/preset_catalog.py.",
                   "run:cli_parity", "run_checks(['cli_parity'])"),
-            _step("labrynth", "cli/app.py", "DEVICE_CONFIGS: list[dict] = [",
+            _step("labrynth", "cli/constants.py", "DEVICE_CONFIGS: list[DeviceConfig] = [",
                   "Under the entry with id '{cli_id}', add a params entry with the same key and "
                   "code as devicePresets.ts.",
                   "none", "by hand: `python -m cli`, open the {cli_id} device menu, the new "
                   "setting is listed.", when="board", needs="cli_id"),
-            _step("labrynth", "cli/app.py", "class ReacherCLI:",
+            _step("labrynth", "cli/app.py", "class ReacherCLI(",
                   "Add a menu action that sets the value through the same endpoint as the web "
                   "(model: _set_counted_pumps).",
                   "none", "by hand: `python -m cli`, the action sets the value and GET "
@@ -493,7 +493,7 @@ GUIDES: dict[str, dict[str, Any]] = {
                   "check_consistency(scopes=['pins'])"),
             _step("labrynth", "web/src/types/index.ts", "export interface HardwareUiState {",
                   "Add the device's UI state.", "tsc", "run_checks(['tsc'])"),
-            _step("labrynth", "web/src/store/useSessionStore.ts",
+            _step("labrynth", "web/src/store/sessionDefaults.ts",
                   "export const defaultHardwareUiState = (): HardwareUiState => ({",
                   "Add the device's default UI state.", "tsc", "run_checks(['tsc'])"),
             _step("labrynth", "web/src/components/configuration/ConfigurationPanel.tsx",

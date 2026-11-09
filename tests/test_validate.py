@@ -75,7 +75,7 @@ class TestAuth:
 
 class TestFallback:
     def test_returns_empty_on_rule_engine_error(self, client):
-        with patch("reacher.api.routers.validate.run_validation", side_effect=RuntimeError("bug")):
+        with patch("reacher.api.routers.validate.run_validation", side_effect=TypeError("bad value")):
             resp = client.post("/api/validate/config", json={}, headers=AUTH)
         assert resp.status_code == 200
         body = resp.json()

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _SHUTDOWN_GRACE_PERIOD = 30  # seconds to wait for reconnection (e.g. F5 refresh)
 
 
-async def _delayed_shutdown():
+async def _delayed_shutdown() -> None:
     """Wait the grace period, then shut down only if it is safe to do so.
 
     Module-level (not a closure) so the safety guards can be unit-tested directly,
@@ -46,7 +46,7 @@ async def _delayed_shutdown():
 
 
 @router.post("/shutdown")
-async def shutdown(response: Response):
+async def shutdown(response: Response) -> dict[str, str]:
     """Signal that the browser tab is closing.
 
     Spawns a delayed task that waits for the grace period, then checks if any

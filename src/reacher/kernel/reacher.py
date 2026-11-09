@@ -13,6 +13,7 @@ from serial.tools import list_ports
 
 from ..uploader.boards import SIMULATOR_PORT, is_simulator_port
 from .commands import build_command_payload, CommandCode, SCHEDULE_TO_PARADIGM
+from .errors import SerialPortClosedError
 # Leaf submodules rather than the `diagnostics` package, so importing the kernel
 # never re-enters a partially initialised `reacher/__init__`.
 from ..diagnostics.schema import TIER_WIRE as _TIER_WIRE
@@ -1349,11 +1350,11 @@ class REACHER:
         - `command (str)`: The command to send (e.g., "START-PROGRAM").
 
         **Raises:**
-        - `Exception`: If the serial port is not open.
+        - `SerialPortClosedError`: If the serial port is not open.
         """
         with self.thread_lock:
             if not self.ser.is_open:
-                raise Exception("Serial port is not open.")
+                raise SerialPortClosedError("Serial port is not open.")
             send = json.dumps(command).encode() + b'\n'
             self.logger.info(f"Sending command '{send}' to Arduino.")
             # The firmware reads into a 128-byte buffer and *silently* drains
@@ -1805,7 +1806,7 @@ class REACHER:
         # Fail before destroying anything: a start that can't reach the
         # firmware anyway must not wipe buffered behavior data first.
         if not self.ser.is_open:
-            raise Exception("Serial port is not open.")
+            raise SerialPortClosedError("Serial port is not open.")
         self._reset_session_buffers()
         if self.program_flag.is_set():
             self.program_flag.clear()

@@ -15,8 +15,13 @@ The ``corr_id`` links a browser interaction to everything it causes: the HTTP
 call, the kernel command, and the serial bytes that reach the Arduino.
 """
 
+import json
+import sys
 import time
-from typing import Any, Callable
+from typing import TypedDict
+
+from pydantic import JsonValue
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ... import diagnostics
 from ...diagnostics import context
@@ -38,13 +43,27 @@ _SKIP_PATHS = frozenset({"/api/logs/ingest"})
 _QUIET_PATHS = frozenset({"/health"})
 
 
+class _RequestFields(TypedDict, total=False):
+    """The keyed fields of one ``http.request`` record."""
+
+    method: str
+    path: str
+    status: int
+    duration_ms: float
+    query_len: int
+    error: str
+    body: JsonValue
+
+
 class RequestLoggingMiddleware:
     """ASGI middleware recording one record per HTTP request."""
 
-    def __init__(self, app: Callable):
+    def __init__(self, app: ASGIApp) -> None:
+        """Wrap *app*, the next ASGI application in the stack."""
         self.app = app
 
-    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Serve one ASGI request, logging HTTP requests and replaying their body downstream."""
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -62,7 +81,7 @@ class RequestLoggingMiddleware:
         body_chunks: list[bytes] = []
         captured = 0
 
-        async def receive_logging() -> dict:
+        async def receive_logging() -> Message:
             nonlocal captured
             message = await receive()
             if message["type"] == "http.request":
@@ -72,36 +91,38 @@ class RequestLoggingMiddleware:
                     captured += len(chunk)
             return message
 
-        status = {"code": 0}
+        status: dict[str, int] = {"code": 0}
 
-        async def send_logging(message: dict) -> None:
+        async def send_logging(message: Message) -> None:
             if message["type"] == "http.response.start":
                 status["code"] = message["status"]
             await send(message)
 
         started = time.perf_counter()
         with context.bind(corr_id=corr_id):
+            # No except clause: the failure is only observed here and always propagates, so any
+            # exception type must reach the log.  Cancellation is not a request failure.
             try:
                 await self.app(scope, receive_logging, send_logging)
-            except Exception as exc:
-                # str(exc) is message-shaped text, not a keyed field — it reaches
-                # diagnostics.log() directly (bypasses the stdlib bridge, so
-                # bridge.py's scrub_message() is not on this path) and redact()
-                # only matches by key, so a credentialed URL embedded in an
-                # exception (e.g. websockets.InvalidURI) would otherwise pass
-                # through unscrubbed.
-                self._record(
-                    method, path, scope, 500, started, body_chunks,
-                    error=scrub_message(f"{type(exc).__name__}: {exc}"),
-                )
-                raise
-            self._record(method, path, scope, status["code"], started, body_chunks)
+            finally:
+                failure = sys.exc_info()[1]
+                if isinstance(failure, Exception):
+                    # str(exc) is message-shaped text, not a keyed field — it reaches
+                    # diagnostics.log() directly (bypasses the stdlib bridge, so
+                    # bridge.py's scrub_message() is not on this path) and redact()
+                    # only matches by key, so a credentialed URL embedded in an
+                    # exception (e.g. websockets.InvalidURI) would otherwise pass
+                    # through unscrubbed.
+                    error = scrub_message(f"{type(failure).__name__}: {failure}")
+                    self._record(method, path, scope, 500, started, body_chunks, error=error)
+                elif failure is None:
+                    self._record(method, path, scope, status["code"], started, body_chunks)
 
     def _record(
         self,
         method: str,
         path: str,
-        scope: dict,
+        scope: Scope,
         status: int,
         started: float,
         body_chunks: list[bytes],
@@ -113,12 +134,7 @@ class RequestLoggingMiddleware:
         if path in _QUIET_PATHS and status < 400 and error is None:
             return
 
-        data: dict[str, Any] = {
-            "method": method,
-            "path": path,
-            "status": status,
-            "duration_ms": duration_ms,
-        }
+        data: _RequestFields = {"method": method, "path": path, "status": status, "duration_ms": duration_ms}
         query = scope.get("query_string") or b""
         if query:
             # May carry ?token=... — redact() cannot see inside a raw string, so
@@ -142,15 +158,17 @@ class RequestLoggingMiddleware:
         )
 
 
-def _decode_body(body: bytes) -> Any:
+def _decode_body(body: bytes) -> JsonValue:
     """Return a redacted, JSON-preferring representation of a request body."""
-    import json
-
     try:
         text = body.decode("utf-8")
     except UnicodeDecodeError:
         return f"[{len(body)} bytes, non-utf8]"
+    # RecursionError: json.loads gives up on deeply nested arrays rather than raising a ValueError.
     try:
-        return redact(json.loads(text))
-    except Exception:
-        return redact(text)
+        parsed = json.loads(text)
+    except (ValueError, RecursionError):
+        parsed = text
+    # redact() returns JSON-serialisable data by contract (its own annotation is Any).
+    redacted: JsonValue = redact(parsed)
+    return redacted
