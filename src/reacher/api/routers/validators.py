@@ -54,7 +54,8 @@ def _ps(req: ValidateConfigRequest, field: str, default: Any = None) -> Any:
 
 
 def _pav(req: ValidateConfigRequest, code: str, default: int = 0) -> int:
-    return (req.pavlovianParams or {}).get(code, default)
+    value: int = (req.pavlovianParams or {}).get(code, default)
+    return value
 
 
 def _lim(req: ValidateConfigRequest, field: str, default: Any = None) -> Any:
@@ -112,11 +113,10 @@ def _check_paradigm(req: ValidateConfigRequest) -> list[ValidationWarning]:
     p = _paradigm(req)
     warnings: list[ValidationWarning] = []
 
-    # The command endpoint types these as int, so 2.5 passes the range checks
-    # below and only fails at session start with an opaque 422. A non-numeric
-    # value would raise in those comparisons, which validate_config swallows
-    # into "valid" — so bail out of this group before the range checks run.
-    for field in _INTEGER_PARADIGM_FIELDS.get(p, ()):
+    # The command endpoint types these as int, so 2.5 passes the range checks below and only
+    # fails at session start with an opaque 422. A non-numeric value would raise in those
+    # comparisons, which validate_config turns into "valid" — so bail out before they run.
+    for field in _INTEGER_PARADIGM_FIELDS.get(p or "", ()):
         value = _ps(req, field)
         if value is not None and not _is_whole(value):
             warnings.append(_e(f"paradigmSettings.{field}", f"{field} must be a whole number, got {value!r}"))

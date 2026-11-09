@@ -1,23 +1,51 @@
 """Serial connection endpoints."""
 
 import logging
-from typing import Optional
+from typing import Optional, TypedDict
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import JsonValue
 from serial.tools import list_ports
 
 from ...uploader.boards import detect_board_from_port
 from ...kernel.commands import COMMAND_REGISTRY, CommandCode
 from ... import pin_overrides, pump_target
+from ...session_manager import SessionInfo
+from ..errors import KERNEL_ERRORS
 from . import websocket as _ws
 
 logger = logging.getLogger(__name__)
 
+# Post-connect probes talk to the board or the USB port list, then record the result on the
+# session, which raises KeyError once the session was destroyed mid-connect.
+_PROBE_ERRORS: tuple[type[Exception], ...] = (*KERNEL_ERRORS, KeyError)
+
+
+class _SkippedPin(TypedDict):
+    """A saved pin override that was not replayed, and why."""
+
+    component: str
+    reason: str | dict[str, JsonValue]
+
+
+class _ConnectResult(TypedDict):
+    """Body returned by a successful connect."""
+
+    status: str
+    port: str
+    detected_paradigm: str | None
+    detected_board: str | None
+    replayed_pins: dict[str, int]
+    skipped_pins: list[_SkippedPin]
+    replayed_pump_target: bool | None
+    pump_target: str
+
+
 router = APIRouter()
 
 
-@router.get("/ports")
-async def get_ports():
+@router.get("/ports", response_model=None)
+async def get_ports() -> dict[str, list[str] | dict[str, str | None]]:
     comports = list_ports.comports()
     ports = [p.device for p in comports if p.vid and p.pid]
     ports.append("SIMULATOR")
@@ -26,13 +54,19 @@ async def get_ports():
     return {"ports": ports, "portBoards": port_boards}
 
 
-@router.post("/{session_id}/connect")
-async def connect_serial(session_id: str, request: Request):
-    sm = request.app.state.session_manager
+def _session_or_404(request: Request, session_id: str) -> SessionInfo:
+    """Return the session for *session_id*, or raise a 404 HTTPException."""
     try:
-        info = sm.get_session(session_id)
+        info: SessionInfo = request.app.state.session_manager.get_session(session_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
+    return info
+
+
+@router.post("/{session_id}/connect", response_model=None)
+async def connect_serial(session_id: str, request: Request) -> _ConnectResult:
+    sm = request.app.state.session_manager
+    info = _session_or_404(request, session_id)
 
     # Reopening the port under a live run would orphan its simulator/reader
     # thread and flip the state to "connected" while program_running is still True.
@@ -59,7 +93,7 @@ async def connect_serial(session_id: str, request: Request):
                 "sudo usermod -a -G dialout $USER  (then log out and back in)"
             ),
         )
-    except Exception:
+    except KERNEL_ERRORS:
         # Generic message; details logged server-side
         logger.exception("Serial connect failed for session %s", session_id)
         raise HTTPException(status_code=500, detail="Failed to open serial connection")
@@ -80,7 +114,7 @@ async def connect_serial(session_id: str, request: Request):
                 logger.info("Auto-detected paradigm '%s' on session %s", detected_paradigm, session_id)
         else:
             logger.warning("IDENTIFY response timeout (bootloader may be slow) for session %s", session_id)
-    except Exception as e:
+    except _PROBE_ERRORS as e:
         logger.warning("Firmware detection failed on session %s: %s", session_id, e)
 
     sm.set_state(session_id, "connected")
@@ -92,7 +126,7 @@ async def connect_serial(session_id: str, request: Request):
         if detected_board:
             sm.set_board(session_id, detected_board)
             logger.info("Auto-detected board '%s' on session %s", detected_board, session_id)
-    except Exception as e:
+    except _PROBE_ERRORS as e:
         logger.warning("Board detection failed on session %s: %s", session_id, e)
 
     # --- Replay persisted pin overrides (per-port) ---
@@ -100,7 +134,7 @@ async def connect_serial(session_id: str, request: Request):
     # saved when the rig was Mega and an UNO is now plugged in). Drop those
     # with a warning rather than refusing to connect.
     replayed_pins: dict[str, int] = {}
-    skipped_pins: list[dict] = []
+    skipped_pins: list[_SkippedPin] = []
     try:
         saved = pin_overrides.get(info.port, detected_board)
         caps = instance.get_firmware_caps()
@@ -122,10 +156,10 @@ async def connect_serial(session_id: str, request: Request):
             try:
                 instance.send_command(code, pin)
                 replayed_pins[component] = pin
-            except Exception as e:
+            except KERNEL_ERRORS as e:
                 logger.warning("Failed to replay pin %s=%d on session %s: %s", component, pin, session_id, e)
                 skipped_pins.append({"component": component, "reason": "send_failed"})
-    except Exception:
+    except KERNEL_ERRORS:
         logger.exception("Pin override replay failed on session %s", session_id)
 
     if replayed_pins or skipped_pins:
@@ -134,7 +168,7 @@ async def connect_serial(session_id: str, request: Request):
         if parts:
             msg += f": {', '.join(parts)}"
         if skipped_pins:
-            skipped_names = [s.get('component', '?') for s in skipped_pins]
+            skipped_names = [s["component"] for s in skipped_pins]
             msg += f"; skipped {len(skipped_pins)}: {', '.join(skipped_names)}"
         _ws.enqueue_event(session_id, "log", {"level": "warn", "message": msg})
 
@@ -168,7 +202,7 @@ async def connect_serial(session_id: str, request: Request):
                     "pump2": saved_pump_target,
                 },
             )
-    except Exception:
+    except KERNEL_ERRORS:
         logger.exception("Pump target replay failed on session %s", session_id)
 
     return {
@@ -185,13 +219,10 @@ async def connect_serial(session_id: str, request: Request):
     }
 
 
-@router.post("/{session_id}/disconnect")
-async def disconnect_serial(session_id: str, request: Request):
+@router.post("/{session_id}/disconnect", response_model=None)
+async def disconnect_serial(session_id: str, request: Request) -> dict[str, str]:
     sm = request.app.state.session_manager
-    try:
-        info = sm.get_session(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Session not found")
+    info = _session_or_404(request, session_id)
 
     # A run's buffered data is only reachable through this session; closing the
     # port mid-run would leave it stranded with no way to stop or export it.
@@ -203,7 +234,7 @@ async def disconnect_serial(session_id: str, request: Request):
 
     try:
         info.instance.close_serial()
-    except Exception:
+    except KERNEL_ERRORS:
         # Generic message; details logged server-side
         logger.exception("Serial disconnect failed for session %s", session_id)
         raise HTTPException(status_code=500, detail="Failed to close serial connection")
@@ -214,27 +245,27 @@ async def disconnect_serial(session_id: str, request: Request):
     return {"status": "disconnected"}
 
 
-@router.get("/pin-overrides")
-async def get_pin_overrides():
+@router.get("/pin-overrides", response_model=None)
+async def get_pin_overrides() -> dict[str, dict[str, JsonValue]]:
     """Return all persisted pin overrides keyed by port."""
     return pin_overrides.get_all()
 
 
-@router.delete("/pin-overrides")
-async def clear_pin_overrides(port: str):
+@router.delete("/pin-overrides", response_model=None)
+async def clear_pin_overrides(port: str) -> dict[str, str]:
     """Clear all pin overrides for the given port path (pass as query param)."""
     pin_overrides.clear(port)
     return {"status": "cleared", "port": port}
 
 
-@router.get("/pump-target")
-async def get_pump_targets():
+@router.get("/pump-target", response_model=None)
+async def get_pump_targets() -> dict[str, bool]:
     """Return the persisted reward-chain pump-target selection, keyed by port."""
     return pump_target.get_all()
 
 
-@router.delete("/pump-target")
-async def clear_pump_target(port: str):
+@router.delete("/pump-target", response_model=None)
+async def clear_pump_target(port: str) -> dict[str, str]:
     """Clear the persisted pump-target selection for the given port path (query param)."""
     pump_target.clear(port)
     return {"status": "cleared", "port": port}

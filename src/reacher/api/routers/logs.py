@@ -13,7 +13,7 @@ import io
 import os
 import time
 import zipfile
-from typing import Any, List, Optional
+from typing import Any, List, Optional, TypedDict
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -56,6 +56,19 @@ class UIRecord(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
+class _Run(TypedDict):
+    run: str
+    bytes: int
+    modified: float
+    current: bool
+
+
+class _RunList(TypedDict):
+    root: str
+    current: str | None
+    runs: list[_Run]
+
+
 class IngestBatch(BaseModel):
     records: List[UIRecord]
 
@@ -76,7 +89,7 @@ _ALLOWED_LEVELS = {"debug", "info", "warn", "error", "fatal"}
 
 
 @router.post("/ingest")
-async def ingest(batch: IngestBatch):
+async def ingest(batch: IngestBatch) -> dict[str, int]:
     """Accept a batch of browser records and write them to the run log."""
     sink = diagnostics.get_sink()
     if sink is None:
@@ -138,8 +151,8 @@ def _safe_run_dir(run: str) -> str:
     return candidate
 
 
-@router.get("/runs")
-async def list_runs():
+@router.get("/runs", response_model=None)
+async def list_runs() -> _RunList:
     """List available run directories, newest first."""
     root = _run_root()
     sink = diagnostics.get_sink()
@@ -147,7 +160,7 @@ async def list_runs():
     if not os.path.isdir(root):
         return {"root": root, "current": current, "runs": []}
 
-    runs = []
+    runs: list[_Run] = []
     for name in os.listdir(root):
         path = os.path.join(root, name)
         if name == "latest" or not os.path.isdir(path):
@@ -172,7 +185,7 @@ async def list_runs():
 
 
 @router.get("/export")
-async def export_run(run: Optional[str] = None):
+async def export_run(run: Optional[str] = None) -> StreamingResponse:
     """Download a run directory as a ZIP, for attaching to a bug report."""
     sink = diagnostics.get_sink()
     if run is None:
