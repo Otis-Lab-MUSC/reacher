@@ -28,6 +28,24 @@ def test_a_frozen_linux_bundle_installs_beside_its_executable(monkeypatch, tmp_p
     assert handoff.find_install_dir() == (tmp_path / "Labrynth").resolve()
 
 
+def test_an_appimage_has_no_install_folder(monkeypatch, tmp_path):
+    mount = tmp_path / "mount" / "usr"
+    mount.mkdir(parents=True)
+    exe = mount / "Labrynth"
+    exe.write_text("x")
+    freeze(monkeypatch, exe, "linux")
+    monkeypatch.setenv("APPIMAGE", str(tmp_path / "labrynth.AppImage"))
+    assert handoff.find_install_dir() is None
+
+
+def test_an_empty_appimage_variable_does_not_hide_a_bundle(monkeypatch, tmp_path):
+    exe = tmp_path / "Labrynth"
+    exe.write_text("x")
+    freeze(monkeypatch, exe, "linux")
+    monkeypatch.setenv("APPIMAGE", "")
+    assert handoff.find_install_dir() == tmp_path.resolve()
+
+
 def test_a_frozen_macos_app_installs_at_the_app_folder(monkeypatch, tmp_path):
     exe = tmp_path / "Labrynth.app" / "Contents" / "MacOS" / "Labrynth"
     exe.parent.mkdir(parents=True)
