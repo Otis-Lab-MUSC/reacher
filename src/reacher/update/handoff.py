@@ -7,6 +7,7 @@ process to exit, swaps, and relaunches.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -16,13 +17,19 @@ from ..child_env import clean_child_env
 
 STAGING_PREFIX = ".labrynth-update_"
 MACOS_APP_SUFFIX = ".app"
+APPIMAGE_ENV = "APPIMAGE"
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 
 def find_install_dir() -> Path | None:
-    """Return the folder the frozen app runs from, or None outside a bundle."""
+    """Return the folder the frozen app runs from, or None when it cannot swap itself.
+
+    An AppImage runs from a read-only mount of one file, so there is no folder to swap.
+    """
     if not getattr(sys, "frozen", False):
+        return None
+    if os.environ.get(APPIMAGE_ENV):
         return None
     executable = Path(sys.executable).resolve()
     if sys.platform != "darwin":

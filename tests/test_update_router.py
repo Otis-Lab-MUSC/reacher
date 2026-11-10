@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from reacher.api.app import create_app
 from reacher.api.middleware.auth import API_KEY
 from reacher.api.routers import update as update_router
-from reacher.update import download
+from reacher.update import download, handoff
 from reacher.update.releases import Release, ReleaseAsset, ReleaseFetchError
 from reacher.update.state import UpdateState, UpdateStatus
 from reacher.update.versions import parse_version
@@ -99,6 +99,15 @@ def test_info_reports_an_available_update(rig: Rig):
     assert body["assetUrl"] == BASE + ASSET
     assert body["sha256Url"] == BASE + "SHA256SUMS"
     assert body["applyMode"] == "restart"
+
+
+def test_an_appimage_is_told_to_update_by_hand(rig: Rig, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(update_router, "find_install_dir", handoff.find_install_dir)
+    monkeypatch.setattr(handoff.sys, "frozen", True, raising=False)
+    monkeypatch.setenv("APPIMAGE", str(rig.install_dir.parent / "labrynth.AppImage"))
+    assert rig.client.get("/api/update/info", headers=AUTH).json()["applyMode"] == "manual"
+    assert rig.client.post("/api/update/download", headers=AUTH).status_code == 409
+    assert not list(rig.install_dir.parent.glob(".labrynth-update_*"))
 
 
 def test_info_reports_no_update_when_current(rig: Rig, monkeypatch: pytest.MonkeyPatch):
