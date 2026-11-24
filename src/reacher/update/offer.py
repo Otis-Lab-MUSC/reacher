@@ -33,6 +33,21 @@ def current_version_text() -> str:
     return value or __version__
 
 
+def channel_for(text: str | None, current_text: str) -> Channel:
+    """Return the named channel, else the one matching the running version.
+
+    A stable or unparseable version checks the stable channel, so a stable
+    install is never offered a prerelease unless the caller asks for one.
+    """
+    if text is not None:
+        return Channel.from_text(text)
+    try:
+        current = parse_version(current_text)
+    except VersionError:
+        return Channel.STABLE
+    return Channel.PRERELEASE if current.is_prerelease else Channel.STABLE
+
+
 def releases_url() -> str:
     """Return the release list URL; the environment may point it at a test server."""
     return os.environ.get(UPDATE_API_URL_ENV, "").strip() or RELEASES_URL

@@ -4,7 +4,7 @@ import pytest
 
 import reacher
 from reacher.update import offer as offer_module
-from reacher.update.offer import build_offer, current_version_text, releases_url
+from reacher.update.offer import build_offer, channel_for, current_version_text, releases_url
 from reacher.update.releases import RELEASES_URL, Channel, Release, ReleaseAsset
 from reacher.update.versions import parse_version
 
@@ -102,3 +102,22 @@ def test_current_platform_reports_lowercase_machine(monkeypatch, system, machine
     monkeypatch.setattr(offer_module.sys, "platform", system)
     monkeypatch.setattr(offer_module.platform, "machine", lambda: machine)
     assert offer_module.current_platform() == (system, machine.lower())
+
+
+@pytest.mark.parametrize("current", ["3.0.1", "v3.4.0"])
+def test_a_stable_build_with_no_channel_checks_the_stable_channel(current: str):
+    assert channel_for(None, current) is Channel.STABLE
+
+
+@pytest.mark.parametrize("current", ["3.0.1-rc.1", "3.0.1-beta.20", "3.1.0-alpha.2"])
+def test_a_prerelease_build_with_no_channel_checks_the_prerelease_channel(current: str):
+    assert channel_for(None, current) is Channel.PRERELEASE
+
+
+def test_a_version_that_will_not_parse_with_no_channel_checks_the_stable_channel():
+    assert channel_for(None, "3.4.0.dev0+local") is Channel.STABLE
+
+
+def test_a_named_channel_wins_over_the_running_version():
+    assert channel_for("prerelease", "3.0.1") is Channel.PRERELEASE
+    assert channel_for("stable", "3.0.1-rc.1") is Channel.STABLE

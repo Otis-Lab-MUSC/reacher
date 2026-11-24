@@ -18,7 +18,7 @@ from fastapi import APIRouter, BackgroundTasks, FastAPI, HTTPException, Query, R
 
 from ...update.download import DownloadPlan, stage_update
 from ...update.handoff import build_command, create_staging_root, find_install_dir, spawn_helper, staged_launcher
-from ...update.offer import Offer, build_offer, current_platform, current_version_text, releases_url
+from ...update.offer import Offer, build_offer, channel_for, current_platform, current_version_text, releases_url
 from ...update.releases import Channel, ReleaseFetchError, fetch_releases
 from ...update.state import UpdateState, UpdateStatus
 from .websocket import _trigger_shutdown as trigger_shutdown
@@ -104,7 +104,7 @@ async def update_info(
     request: Request, channel: ChannelName | None = Query(default=None)
 ) -> dict[str, str | bool | None]:
     """Report the running version, the newest release on the channel, and the asset to fetch."""
-    selected = Channel.from_text(channel)
+    selected = channel_for(channel, current_version_text())
     offer = await check_for_update(request, selected)
     return describe_offer(offer, selected, find_install_dir())
 
@@ -122,7 +122,9 @@ async def start_download(
     if state.busy:
         raise HTTPException(status_code=HTTP_CONFLICT, detail="An update is already in progress")
     install_dir = find_install_dir()
-    plan = require_offered_plan(await check_for_update(request, Channel.from_text(channel)), install_dir)
+    plan = require_offered_plan(
+        await check_for_update(request, channel_for(channel, current_version_text())), install_dir
+    )
     if state.busy:
         raise HTTPException(status_code=HTTP_CONFLICT, detail="An update is already in progress")
     assert install_dir is not None
