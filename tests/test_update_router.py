@@ -136,6 +136,20 @@ def test_info_honours_the_stable_channel(rig: Rig):
     assert body["updateAvailable"] is False
 
 
+def test_a_stable_install_with_no_channel_is_not_offered_a_prerelease(rig: Rig, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("LABRYNTH_APP_VERSION", "3.0.0")
+    body = rig.client.get("/api/update/info", headers=AUTH).json()
+    assert body["channel"] == "stable"
+    assert body["updateAvailable"] is False
+    assert body["assetName"] is None
+
+
+def test_a_stable_install_with_no_channel_refuses_to_download_a_prerelease(rig: Rig, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("LABRYNTH_APP_VERSION", "3.0.0")
+    assert rig.client.post("/api/update/download", headers=AUTH).status_code == 409
+    rig.spawn.assert_not_called()
+
+
 def test_info_rejects_an_unknown_channel(rig: Rig):
     assert rig.client.get("/api/update/info?channel=nightly", headers=AUTH).status_code == 422
 

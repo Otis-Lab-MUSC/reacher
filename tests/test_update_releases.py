@@ -89,8 +89,7 @@ def test_pick_latest_returns_none_when_nothing_matches():
     assert pick_latest(only_beta, Channel.STABLE) is None
 
 
-def test_channel_parse_defaults_to_prerelease():
-    assert Channel.from_text(None) is Channel.PRERELEASE
+def test_channel_parse():
     assert Channel.from_text("stable") is Channel.STABLE
     assert Channel.from_text("prerelease") is Channel.PRERELEASE
     with pytest.raises(ValueError):

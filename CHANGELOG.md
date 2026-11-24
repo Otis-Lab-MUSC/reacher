@@ -53,6 +53,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Shock output defaults are now duration `0` and block N `0` (unconfigured) in the firmware, UI store and simulator. Arming or test-firing is refused until duration (and N in block mode) is set. **Hex rebuilt for the Mega `fr` sketch** (`bash firmware/compile.sh`)
 
 ### Fixed
+- An update check that names no channel now follows the running version: a stable build checks the stable channel and is never offered a prerelease; an alpha, beta or rc build checks the prerelease channel
 - **Pavlovian sessions never stopped themselves on a board, and lost every trial outcome.**
   `PavlovianScheduler::LogPavlovianEvent` closed its line with `"}` after a numeric timestamp, so
   `TRACE_START`, `REWARD_DELIVERED`, `REWARD_OMITTED` and `ALL_TRIALS_COMPLETE` were not JSON and the host

@@ -27,10 +27,8 @@ class Channel(Enum):
     PRERELEASE = "prerelease"
 
     @classmethod
-    def from_text(cls, text: str | None) -> Channel:
-        """Return the channel named by text; None selects the default, prerelease."""
-        if text is None:
-            return cls.PRERELEASE
+    def from_text(cls, text: str) -> Channel:
+        """Return the channel named by text."""
         return cls(text)
 
 
